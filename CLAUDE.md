@@ -97,6 +97,33 @@ without a schema or a proposal in `contract/` first — see
 
 **Source of truth:** `atlasent-api/supabase/runtime-functions-disabled.json`.
 
+> **Corrected 2026-09-26 — this section is stale in three ways; read this before the
+> table below.** Checked against `atlasent-api` `main` (`ffb92cd`):
+>
+> 1. **Five entries left the disabled manifest on 2026-09-16 (atlasent-api#3402).**
+>    `v1-sso-assertion-hook`, `v1-sso-providers`, `v1-policy-rules`,
+>    `v1-policy-simulate-layered` and `v1-compliance-packs` now sit in
+>    `runtime-functions.json` classified `quarantined`, because a quarantine
+>    tombstone has to be *deployed* to be served. Their deployed handler is a
+>    **410 Gone** tombstone rather than a 404 (live state is probed by
+>    `atlasent-api`'s `quarantine-tombstone-drift` workflow; not re-checked
+>    here). The rule for this repo is unchanged: do not call them.
+> 2. **One entry is missing:** `v1-marketplace-install` (added 2026-09-10,
+>    org-admin-only pack install, held back pending a security review).
+> 3. **"No partial-rollout track" is no longer true.** Several notes below give
+>    that as the reason a function is held back. `atlasent-api` now has
+>    `supabase/runtime-functions-staging.json`, deployed only to staging for
+>    functions classified `staging_only`; production deploys never read it. The
+>    held-back functions are waiting on a founder decision, not a missing
+>    mechanism (atlasent-docs CROSS-058, PROPOSED).
+>
+> The durable rule, instead of another count: an endpoint is unusable from this
+> repo if it is in `runtime-functions-disabled.json` (not deployed), in
+> `runtime-functions-staging.json` (staging only), or in `runtime-functions.json`
+> with `production_eligibility: quarantined` (deployed 410). Check those three
+> manifests in `atlasent-api` directly. Verified 2026-09-26: this repo references
+> none of the endpoints named in this section.
+
 **Corrected 2026-09-08 — the previous "8 entries, as of 2026-08-30" count in this
 section had already drifted.** The live manifest has grown to **10 entries**: two
 more were added after that date — `v1-compliance-packs` (quarantined 2026-09-06,
