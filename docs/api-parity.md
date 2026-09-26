@@ -1,6 +1,6 @@
 # SDK ↔ API Parity Matrix
 
-**Status:** active · **Owner:** SDK + API · **Related gate:** [`atlasent/V1_GATES.md` § G4](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/V1_GATES.md#g4--sdk-hitl-surface-ahead-of-api-handler)
+**Status:** active · **Owner:** SDK + API · **Related gate:** the internal `V1_GATES.md` § G4
 
 Every SDK method that crosses the wire MUST have a corresponding API handler
 status tracked here. If the handler is `absent`, the method MUST NOT ship.
@@ -138,11 +138,11 @@ this matrix lands.
 ## V3 escalate decision
 
 `AtlaSentEscalateError` (V3 Pillar 2 sketch in
-[`atlasent/V3_ROLLOUT.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/V3_ROLLOUT.md))
+the internal `V3_ROLLOUT.md`)
 is NOT registered here. Adding it requires:
 
 1. A V2-D11+ decision entry in
-   [`atlasent/V2_DECISIONS.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/V2_DECISIONS.md)
+   the internal `V2_DECISIONS.md`
    locking the wire surface.
 2. API handler ships.
 3. SDK method added with `// @hitl-method escalate.v1` annotation.

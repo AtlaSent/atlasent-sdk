@@ -2,7 +2,7 @@
 
 > **Reframing normalization header (2026-05-18, second-pass).** This
 > document is preserved per the "do not rewrite history" doctrine
-> ([`atlasent/VERSIONING_DOCTRINE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/normalize-roadmap-versioning-NWPuP/VERSIONING_DOCTRINE.md)
+> (the internal `VERSIONING_DOCTRINE.md`
 > Doctrine 4). Under the 2026-05-18 normalization pass, the
 > platform-generation `v2 / v3` framing has been retired: there is no
 > "v2 product" and no "v3 product." There is only **AtlaSent v1** (the
@@ -20,7 +20,7 @@
 > and 5, the filename, decision IDs, package names, and per-package
 > SemVer (which evolves independently of platform phases) are all
 > preserved. New decisions use the **`PROD-D#`** namespace. See
-> [`atlasent/ROADMAP.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/normalize-roadmap-versioning-NWPuP/ROADMAP.md)
+> the internal `ROADMAP.md`
 > for the current phase matrix and `ROADMAP.md` in this repo for the
 > SDK slice.
 
@@ -31,11 +31,11 @@
 > and Ed25519-signed export envelope are stable; V2 work in this plan is
 > **additive** on V1 (no V1 wire/schema/audit-chain changes ship under V2).
 > V2 implementation is unblocked pending umbrella
-> [`V2_DECISIONS.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/V2_DECISIONS.md) sign-off.
-> Canonical V1 reference: [`atlasent-api/docs/runtime/golden-path-v1.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-api/blob/main/docs/runtime/golden-path-v1.md).
-> V1 GA closeout PRs: see umbrella [`ROADMAP.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/ROADMAP.md) "V1 GA — what closed" section.
+> the internal `V2_DECISIONS.md` sign-off.
+> Canonical V1 reference: the internal runtime golden-path V1 guide (`golden-path-v1.md`).
+> V1 GA closeout PRs: see the internal umbrella `ROADMAP.md` "V1 GA — what closed" section.
 
-SDK cut of the [umbrella v2 rollout](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/plan-v2-rollout-5IPGF/V2_ROLLOUT.md). This repo is the **publish-gating fan-out point** — `atlasent-action`, `langchain-llamaindex-integration`, `atlasent-mcp-server`, `atlasent-examples`, `gxp-starter`, and three downstream apps all pin against the 2.x tag that ships from here.
+SDK cut of the internal umbrella v2 rollout. This repo is the **publish-gating fan-out point** — `atlasent-action`, `langchain-llamaindex-integration`, `atlasent-mcp-server`, `atlasent-examples`, `gxp-starter`, and three downstream apps all pin against the 2.x tag that ships from here.
 
 ## Position
 
@@ -114,8 +114,8 @@ Aggregates-only contract: the helper never reads raw event text. The wire shape 
 
 ## Cross-repo links
 
-- Umbrella plan: [`atlasent/V2_ROLLOUT.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/plan-v2-rollout-5IPGF/V2_ROLLOUT.md)
-- API plan: [`atlasent-api/V2_ROLLOUT.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-api/blob/main/V2_ROLLOUT.md)
-- Control-plane plan: [`atlasent-control-plane/V2_ROLLOUT.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-control-plane/blob/main/V2_ROLLOUT.md)
+- Umbrella plan: the internal umbrella `V2_ROLLOUT.md`
+- API plan: the internal API-side `V2_ROLLOUT.md`
+- Control-plane plan: the internal control-plane `V2_ROLLOUT.md`
 - Behavior-insights plan: this branch, sibling repo
-- Behavior layer spec: [`V2_BEHAVIOR_CONDITIONING_LAYER.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-docs/blob/main/docs/V2_BEHAVIOR_CONDITIONING_LAYER.md)
+- Behavior layer spec: the internal `V2_BEHAVIOR_CONDITIONING_LAYER.md`

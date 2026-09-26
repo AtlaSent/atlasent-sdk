@@ -1,6 +1,6 @@
 # atlasent-sdk — Roadmap
 
-> **Doctrine reference.** Per [`atlasent/VERSIONING_DOCTRINE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/normalize-roadmap-versioning-NWPuP/VERSIONING_DOCTRINE.md)
+> **Doctrine reference.** Per the internal `VERSIONING_DOCTRINE.md`
 > (2026-05-18 normalization), the public AtlaSent contract is **v1**
 > and stays `v1`. There is no "v2 platform" and no "v3 platform"; what
 > previous drafts called `v2 / v3` is now sequenced as **Phase 1 /

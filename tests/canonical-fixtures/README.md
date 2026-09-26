@@ -1,7 +1,7 @@
 # Canonical Schema Conformance Fixtures
 
 **Status:** Phase 2 of the cross-repo parity gate. See
-[`schemas/v1_1/PHASE-2-PARITY-PLAN.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/schemas/v1_1/PHASE-2-PARITY-PLAN.md)
+the internal `PHASE-2-PARITY-PLAN.md`
 in the canonical repo.
 
 Each subdirectory corresponds to one of the five frozen canonical

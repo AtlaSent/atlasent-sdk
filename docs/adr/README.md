@@ -11,7 +11,8 @@ empty; SDK-scoped wire-shape decisions go through `contract/` instead.
 
 `ADR-economic-governance-and-liability-attribution.md` in this directory is a
 **non-authoritative duplicate**. The authoritative, system-of-record copy is
-[`atlasent-api/docs/adr/ADR-economic-governance-and-liability-attribution.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-api/blob/main/docs/adr/ADR-economic-governance-and-liability-attribution.md)
+the internal API-side
+`ADR-economic-governance-and-liability-attribution.md` (not public)
 (it carries the table-level detail + machine-checkable invariants this copy
 lacks, and the deployed system implements that version).
 

@@ -361,7 +361,7 @@ import type {
 
 ## 7. Getting help
 
-- GitHub Issues: https://github.com/AtlaSent-Systems-Inc/atlasent-sdk/issues
+- GitHub Issues: https://github.com/Atlasent/atlasent-sdk/issues
 - CHANGELOG: [`typescript/CHANGELOG.md`](../typescript/CHANGELOG.md)
 - BVS integration: [`typescript/packages/behavior/`](../typescript/packages/behavior/)
 - V2 Wave A spec: [`contract/ENFORCE_PACK.md`](../contract/ENFORCE_PACK.md)

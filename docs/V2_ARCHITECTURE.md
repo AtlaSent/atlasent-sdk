@@ -1,10 +1,10 @@
 # V2 Architecture — atlasent-sdk deliverables (historical filename)
 
 **Status**: design · **Canonical plan**:
-[`atlasent-docs/docs/V2_ARCHITECTURE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-docs/blob/main/docs/V2_ARCHITECTURE.md)
+the internal canonical `V2_ARCHITECTURE.md` (docs repo, not public)
 
 > **Reframing normalization header (2026-05-18).** Per
-> [`atlasent/VERSIONING_DOCTRINE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/normalize-roadmap-versioning-NWPuP/VERSIONING_DOCTRINE.md)
+> the internal `VERSIONING_DOCTRINE.md`
 > the platform-generation `v2 / v3` framing has been retired. There is
 > no "AtlaSent v2.0.0" platform release. The SDK work captured here
 > ships **additively on the stable AtlaSent v1 contract** and is
@@ -280,7 +280,7 @@ TypeScript CHANGELOG mirrors.
 ## Growth waves — SDK surface impact
 
 All seven waves are **in-scope for v2.0.0**. Full spec:
-[canonical plan → Growth waves](https://github.com/AtlaSent-Systems-Inc/atlasent-docs/blob/main/docs/V2_ARCHITECTURE.md#growth-waves-v200--orthogonal-to-layers-ae).
+the internal canonical plan, "Growth waves" section.
 First-ships: Anthropic SDK middleware (Wave F), SOC2 Type II (Wave G).
 
 This repo's slice of each wave:
@@ -308,6 +308,6 @@ Each wave F follow-on package publishes independently; pin
 
 ## Peer repos
 
-- Console: [`atlasent-console/docs/V2_ARCHITECTURE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-console/blob/main/docs/V2_ARCHITECTURE.md)
-- API: [`atlasent-api/docs/V2_ARCHITECTURE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-api/blob/main/docs/V2_ARCHITECTURE.md)
-- Docs (canonical): [`atlasent-docs/docs/V2_ARCHITECTURE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-docs/blob/main/docs/V2_ARCHITECTURE.md)
+- Console: the internal console-side `V2_ARCHITECTURE.md`
+- API: the internal API-side `V2_ARCHITECTURE.md`
+- Docs (canonical): the internal docs-repo `V2_ARCHITECTURE.md`

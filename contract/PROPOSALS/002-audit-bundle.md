@@ -11,9 +11,9 @@ Open questions **2** (public key distribution) and **3** (key
 rotation + historical bundles) are **resolved** by the canonical
 trust-root architecture:
 
-- [ADR-005](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/docs/adr/ADR-005-trust-root-semantics.md) decisions **D1** (single global JWKS in V1; `tenant` field reserved for V2), **D2** (4h refresh target, 5min floor), **D3** (fail-closed snapshot expiry by default; `allow_expired_snapshot` opt-out for air-gap).
-- [`atlasent/schemas/trust-root/v1/atlasent-verifier-keys.schema.json`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/schemas/trust-root/v1/atlasent-verifier-keys.schema.json) — the canonical JWKS shape with `kid`, `role`, `valid_from`, `valid_until`, `replaced_by`, `revoked`. Historical bundles remain verifiable because retired keys stay in the JWKS with `replaced_by` pointing at their successor.
-- [`atlasent/docs/design/TRUST_ROOT_ARCHITECTURE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/main/docs/design/TRUST_ROOT_ARCHITECTURE.md) §3.4 (JWKS layout), §5.1 (SDK hybrid trust-snapshot bootstrap), §9 (rotation/revocation runbooks).
+- the internal ADR-005 decisions **D1** (single global JWKS in V1; `tenant` field reserved for V2), **D2** (4h refresh target, 5min floor), **D3** (fail-closed snapshot expiry by default; `allow_expired_snapshot` opt-out for air-gap).
+- the internal trust-root schema `atlasent-verifier-keys.schema.json` — the canonical JWKS shape with `kid`, `role`, `valid_from`, `valid_until`, `replaced_by`, `revoked`. Historical bundles remain verifiable because retired keys stay in the JWKS with `replaced_by` pointing at their successor.
+- the internal `TRUST_ROOT_ARCHITECTURE.md` design §3.4 (JWKS layout), §5.1 (SDK hybrid trust-snapshot bootstrap), §9 (rotation/revocation runbooks).
 
 The SDK implementation work for the hybrid bootstrap + revocation
 enforcement is tracked in
