@@ -50,6 +50,9 @@ jobs:
             # CHANGELOG entries that document the alias window
             "typescript/CHANGELOG.md"
             "python/CHANGELOG.md"
+            # Customer-facing changelog (published on the docs site); its
+            # 2.4.0 entry tells users the legacy string still works
+            "python/CHANGELOG.public.md"
           )
 
           # ── Grep for bare deployment.production (not sub-actions) ─────────
