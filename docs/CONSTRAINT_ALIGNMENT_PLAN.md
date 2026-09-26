@@ -51,8 +51,8 @@ section and `atlasent-api/docs/TWO_RULE_SYSTEMS.md`.
 The **A↔C gap** — the canonical schema (A) and the API SDK runtime engine (C) use
 different operator vocabularies/representations, and C carries operators
 (`startswith`/`endswith`/`has_any`/`has_all`/`subset_of`) and nestable logical
-combinators with no canonical (A) equivalent — is tracked in
-**[atlasent-api#1042](https://github.com/AtlaSent-Systems-Inc/atlasent-api/issues/1042)**.
+combinators with no canonical (A) equivalent — is tracked in AtlaSent's
+internal API issue tracker.
 It is to be investigated and either documented as intentional layering or
 converged **post-V1**. No V1 action.
 

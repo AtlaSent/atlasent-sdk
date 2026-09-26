@@ -269,8 +269,7 @@ recommended options in increasing security order are:
 - **Option A — session-token mode (recommended for atlasent-hosted surfaces):**
   After SSO sign-in, the frontend obtains a short-lived (15-min) Bearer token
   from `GET /v1-session/token` bound to the user's scopes and tenant. The SDK
-  handles token refresh transparently. See
-  [atlasent-api#144](https://github.com/AtlaSent-Systems-Inc/atlasent-api/issues/144).
+  handles token refresh transparently.
 
 The `User-Agent` header is set to `@atlasent/sdk/<version> browser` in browser
 runtimes (browsers strip this header anyway — it's harmless) and

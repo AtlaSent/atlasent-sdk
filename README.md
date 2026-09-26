@@ -56,6 +56,8 @@ Action proposed
 |---|---|---|
 | Python | `atlasent` | `pip install atlasent` |
 | TypeScript | `@atlasent/sdk` | `npm install @atlasent/sdk` |
+| Go | [`go/`](go/) | Preview — not yet published (no Go module version has been tagged) |
+| Java | [`java/`](java/) | Preview — not yet published to Maven Central |
 
 SDK SemVer is independent of the stable AtlaSent `/v1-*` platform contract. A
 package major version does not create a separate AtlaSent product generation.
