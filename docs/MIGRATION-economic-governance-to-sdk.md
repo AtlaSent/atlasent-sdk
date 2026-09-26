@@ -32,7 +32,8 @@ The canonical Python port in `atlasent-sdk/python/atlasent/governance/`
 is introduced by this PR and supersedes the earlier copy.
 
 For the full divergence analysis, see
-[`atlasent-docs/plans/economic-governance-ts-python-parity-2026-05-08.md`](https://github.com/AtlaSent-Systems-Inc/atlasent-docs/blob/claude/governance-foundation-build-qx2gB/plans/economic-governance-ts-python-parity-2026-05-08.md).
+the internal parity plan
+`economic-governance-ts-python-parity-2026-05-08.md` (not public).
 
 ---
 

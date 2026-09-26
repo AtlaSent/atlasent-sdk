@@ -1,7 +1,7 @@
 # Pillar 8 — Temporal Bulk Permit Revocation: Server Implementation Spec (historical filename)
 
 > **Reframing normalization header (2026-05-18).** Per
-> [`atlasent/VERSIONING_DOCTRINE.md`](https://github.com/AtlaSent-Systems-Inc/atlasent/blob/claude/normalize-roadmap-versioning-NWPuP/VERSIONING_DOCTRINE.md),
+> the internal `VERSIONING_DOCTRINE.md`,
 > the platform-generation `v2 / v3` framing has been retired. This
 > spec describes additive Temporal-integration tooling on top of the
 > stable **AtlaSent v1** contract; sequence it as **Phase 1 — Pilot
