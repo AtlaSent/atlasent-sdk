@@ -57,7 +57,7 @@ The minimum payload is `{ source: "<your-system>", complete: true }`. Add any st
 
 ## Why two calls? (the mental model)
 
-AtlaSent is **authorize-before-execute**, not after-the-fact logging. The two-step pattern is intentional:
+Atlasent is **authorize-before-execute**, not after-the-fact logging. The two-step pattern is intentional:
 
 1. **`evaluate()`** asks the policy engine: "should this action run?" Returns a decision and, when allowed, a single-use **permit token** — a cryptographic proof that evaluation happened.
 2. **`verifyPermit()`** consumes the permit server-side *before* the action executes. This is what makes the audit chain tamper-evident: every execution is hash-linked to the evaluation that authorized it, and no permit can be replayed.
@@ -263,7 +263,7 @@ bundle exposes it in DevTools and makes it replayable if exfiltrated. The
 recommended options in increasing security order are:
 
 - **Option B — browser-scoped keys (short term):** Create a read-only,
-  scope-restricted, IP-allowlisted key class from the AtlaSent console.
+  scope-restricted, IP-allowlisted key class from the Atlasent console.
   Safe for internal dashboards where you control the network. Not suitable
   for public-facing apps.
 - **Option A — session-token mode (recommended for atlasent-hosted surfaces):**
