@@ -1,9 +1,9 @@
 {
   "schema": "atlasent-trust-root/v1",
-  "issued_at": "2026-05-28T00:00:00Z",
+  "issued_at": "2026-09-26T00:00:00Z",
   "valid_until": "2027-06-01T00:00:00Z",
   "trust_root_signer": {
-    "sigstore_identity": "https://github.com/AtlaSent-Systems-Inc/atlasent-keys/.github/workflows/publish-trust-root.yml@refs/heads/main",
+    "sigstore_identity": "https://github.com/Atlasent/atlasent-keys/.github/workflows/publish-trust-root.yml@refs/heads/main",
     "oidc_issuer": "https://token.actions.githubusercontent.com"
   },
   "resources": [
@@ -14,7 +14,7 @@
     },
     {
       "path": "/.well-known/atlasent-sigstore-identities.json",
-      "sha256": "e1e5b768bbd9ba350678b0b3a2e0ffede71c6ade2df63765e36d251db97d32ef",
+      "sha256": "f07eb034c035daf7a804a114e0a78003cf9369268a2f3cf7b0183b5bc884e9df",
       "sig": "/.well-known/atlasent-sigstore-identities.json.bundle"
     },
     {
