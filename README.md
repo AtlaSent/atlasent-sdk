@@ -1,14 +1,14 @@
-# AtlaSent SDKs
+# Atlasent SDKs
 
-SDK layer for AtlaSent — thin wrappers around atlasent-api. Python (`atlasent` on PyPI) and TypeScript (`@atlasent/sdk` on npm), plus framework guards.
+SDK layer for Atlasent — thin wrappers around atlasent-api. Python (`atlasent` on PyPI) and TypeScript (`@atlasent/sdk` on npm), plus framework guards.
 
 [![PyPI](https://img.shields.io/pypi/v/atlasent.svg)](https://pypi.org/project/atlasent/)
 [![npm](https://img.shields.io/npm/v/@atlasent/sdk.svg)](https://www.npmjs.com/package/@atlasent/sdk)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-**AtlaSent stops risky changes to production unless someone approved them, and gives you proof for your auditor.**
+**Atlasent is security and organizational authority infrastructure for consequential actions by people, software, and AI.**
 
-These SDKs add that check to your own code in Python or TypeScript:
+These SDKs add that check to your own code in Python or TypeScript, right before a consequential action runs:
 
 1. **Wrap the risky call** (a deploy, a migration, a payment, an agent's tool call) with `protect()`.
 2. **It waits for approval** if your policy says a person must sign off. If not approved, it doesn't run.
@@ -18,7 +18,7 @@ These SDKs add that check to your own code in Python or TypeScript:
 
 Client SDKs for **authorization of consequential computational actions**.
 
-AtlaSent performs **execution-time authorization**: before a governed side effect,
+Atlasent performs **execution-time authorization**: before a governed side effect,
 the server-authoritative runtime determines whether this exact Action is authorized
 under current organizational Authority, Policy, approvals, Assertions, Target /
 Resource state, environment, and Context. On `allow`, the runtime can issue a
@@ -59,8 +59,8 @@ Action proposed
 | Go | [`go/`](go/) | Preview — not yet published (no Go module version has been tagged) |
 | Java | [`java/`](java/) | Preview — not yet published to Maven Central |
 
-SDK SemVer is independent of the stable AtlaSent `/v1-*` platform contract. A
-package major version does not create a separate AtlaSent product generation.
+SDK SemVer is independent of the stable Atlasent `/v1-*` platform contract. A
+package major version does not create a separate Atlasent product generation.
 
 ## Get an API key
 
@@ -140,7 +140,7 @@ and Permit Verification have succeeded.**
 Do not create a new `action_type` taxonomy simply because an application or agent
 framework exposes arbitrary tool names.
 
-AtlaSent separates:
+Atlasent separates:
 
 - **Action Type** — Canon-backed categorical identity of the Action;
 - **Action Instance** — this specific occurrence;
@@ -159,7 +159,7 @@ example `agent.tool.invoke`) and place tool-specific information such as
 `database.delete`, target record, destination, arguments, environment, delegation
 context, and payload facts in the supported Target / Context fields.
 
-New Action identities should go through the AtlaSent Action Canon process rather
+New Action identities should go through the Atlasent Action Canon process rather
 than being invented independently in each SDK integration.
 
 ## AI agents and MCP
@@ -179,7 +179,7 @@ side effect.
 
 For CI/CD integration, use the public
 [`atlasent-action`](https://github.com/Atlasent/atlasent-action).
-It can derive GitHub execution facts and place the AtlaSent authorization /
+It can derive GitHub execution facts and place the Atlasent authorization /
 Permit-verification path before a governed deployment or other consequential CI
 step.
 
@@ -249,7 +249,7 @@ material are published in
 [`atlasent-keys`](https://github.com/Atlasent/atlasent-keys).
 
 These repositories are public so a customer or reviewer can inspect applicable
-verification material without private AtlaSent infrastructure.
+verification material without private Atlasent infrastructure.
 
 Prefer **tamper-evident** over **immutable** unless the underlying storage has a
 separately verified stronger property.

@@ -1,4 +1,4 @@
-# AtlaSent Python SDK
+# Atlasent Python SDK
 
 [![PyPI](https://img.shields.io/pypi/v/atlasent.svg)](https://pypi.org/project/atlasent/)
 [![Python versions](https://img.shields.io/pypi/pyversions/atlasent.svg)](https://pypi.org/project/atlasent/)
