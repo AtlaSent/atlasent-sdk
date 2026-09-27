@@ -310,4 +310,4 @@ merely log a Decision and continue.
 Licensed under the [Apache License, Version 2.0](./LICENSE). See
 [`NOTICE`](./NOTICE) for attribution.
 
-Copyright (c) Atlasent IP Holdings LLC
+Copyright (c) AtlaSent IP Holdings LLC
