@@ -23,7 +23,7 @@ from typing import Any
 
 VENDORED_TRUST_ROOT_SNAPSHOT_DATA: dict[str, Any] = {
     "valid_until": "2027-06-01T00:00:00Z",
-    "issued_at": "2026-05-28T00:00:00Z",
+    "issued_at": "2026-09-26T00:00:00Z",
     "keys": [
         {
             "kid": "v2-audit-2026",
