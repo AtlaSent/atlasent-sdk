@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "atlasent"
 dynamic = ["version"]
-description = "Atlasent Python SDK: check that the organization authorized a consequential action before it runs, with signed proof your auditor can verify."
+description = "AtlaSent Python SDK: check that the organization authorized a consequential action before it runs, with signed proof your auditor can verify."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.9"
