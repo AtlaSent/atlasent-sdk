@@ -1,7 +1,7 @@
 {
   "name": "@atlasent/sdk",
   "version": "2.21.2",
-  "description": "Atlasent TypeScript SDK: check that the organization authorized a consequential action before it runs, with signed proof your auditor can verify.",
+  "description": "AtlaSent TypeScript SDK: check that the organization authorized a consequential action before it runs, with signed proof your auditor can verify.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.cjs",
