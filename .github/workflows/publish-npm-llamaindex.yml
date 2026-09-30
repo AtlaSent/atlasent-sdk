@@ -163,7 +163,7 @@ jobs:
         run: |
           cosign verify-blob \
             --bundle="${TARBALL}.bundle" \
-            --certificate-identity-regexp='https://github.com/Atlasent/atlasent-sdk/.github/workflows/publish-npm-llamaindex.yml@refs/tags/llamaindex-v.*' \
+            --certificate-identity-regexp='https://github.com/(?i:atlasent)/atlasent-sdk/.github/workflows/publish-npm-llamaindex.yml@refs/tags/llamaindex-v.*' \
             --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
             "${TARBALL}"
 
