@@ -134,7 +134,7 @@ jobs:
         run: |
           cosign verify-blob \
             --bundle=go-module.zip.bundle \
-            --certificate-identity-regexp='https://github.com/Atlasent/atlasent-sdk/.github/workflows/publish-go.yml@refs/tags/go/v.*' \
+            --certificate-identity-regexp='https://github.com/(?i:atlasent)/atlasent-sdk/.github/workflows/publish-go.yml@refs/tags/go/v.*' \
             --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
             go-module.zip
 
