@@ -33,6 +33,7 @@ import urllib.request as urllib_request
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
+from ._function_region import function_region_headers
 from .clinical import (
     ClinicalBlindRequest,
     ClinicalBlindResponse,
@@ -61,6 +62,7 @@ def _request(
     url = f"{client.base_url.rstrip('/')}{path}{qs}"
     headers = {
         "Authorization": f"Bearer {client.api_key}",
+        **function_region_headers(url),
         "Accept": "application/json",
     }
     data: bytes | None = None

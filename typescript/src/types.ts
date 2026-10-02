@@ -1009,6 +1009,13 @@ export interface AtlaSentClientOptions {
   /** Per-request timeout in milliseconds. Defaults to 10_000. */
   timeoutMs?: number;
   /**
+   * Edge-function region for runtime calls (the region-pinning header). Omit to use
+   * ATLASENT_FUNCTION_REGION, then us-west-1 (the database's region) for the
+   * hosted runtime outside a browser, and no pinning otherwise. "auto" or
+   * null: no pinning. A malformed value throws at construction.
+   */
+  functionRegion?: string | null;
+  /**
    * Inject a fetch implementation (primarily for testing).
    * Defaults to `globalThis.fetch`.
    */

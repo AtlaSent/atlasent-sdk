@@ -67,6 +67,11 @@ PRODUCTION_DEPLOY_ACTION = "production.deploy"
 # public name equals the source attribute except for the handful of
 # aliased re-exports captured in ``_LAZY_ALIASES`` below.
 _LAZY_MODULES: dict[str, tuple[str, ...]] = {
+    "._function_region": (
+        "DEFAULT_FUNCTION_REGION",
+        "FUNCTION_REGION_ENV",
+        "FunctionRegionConfigError",
+    ),
     ".access_governance_log": ("AccessGovernanceLogClient",),
     ".approval_artifact": (
         "ApprovalArtifactV1",
@@ -995,6 +1000,10 @@ __all__ = [
     "configure",
     "protect",
     "with_permit",
+    # Edge-function region pinning (see atlasent._function_region).
+    "DEFAULT_FUNCTION_REGION",
+    "FUNCTION_REGION_ENV",
+    "FunctionRegionConfigError",
     # SMS OTP step-up authentication.
     "SmsOtpClient",
     # Usage metering.

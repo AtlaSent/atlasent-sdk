@@ -8,6 +8,28 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: edge-function region pinning (`functionRegion`)
+
+Every request to the AtlaSent runtime now carries an `x-region` header. The
+hosted runtime is pinned to `us-west-1`, the region of its database.
+Supabase otherwise runs the function nearest the caller. Measured on
+staging with the same request shape, evaluate went from a p50 of 4.70 s to
+1.42 s (handler time) once pinned. The database work was unchanged: 49
+round trips either way.
+
+Configure with the `functionRegion` client option or the
+`ATLASENT_FUNCTION_REGION` environment variable. `"auto"` or `null` turns
+pinning off. Three cases send no header unless configured, which keeps
+their requests byte-identical:
+
+- a self-hosted `baseUrl`, which may run in another region;
+- a browser, where the header would fail the runtime's CORS preflight;
+- `functionRegion: "auto"` or `null`.
+
+A malformed value throws at construction. `src/functionRegion.ts` is the
+only place that writes the header, and a test fails if any other source
+file does, or if a request path skips it.
+
 ### Framework guards — `@atlasent/langchain`, `@atlasent/llamaindex`, `@atlasent/cursor` 1.6.0 (unpublished)
 
 - **Fixed: the guards evaluated the bare tool name as the action, so every

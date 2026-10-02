@@ -24,6 +24,8 @@ export interface EnterpriseInquiryResponse {
  * @param baseUrl   AtlaSent API base URL (e.g. "https://api.atlasent.io")
  * @param input     Inquiry form data
  */
+
+import { functionRegionHeaders } from "./functionRegion.js";
 export async function submitEnterpriseInquiry(
   baseUrl: string,
   input: EnterpriseInquiryRequest,
@@ -31,7 +33,7 @@ export async function submitEnterpriseInquiry(
   const url = `${baseUrl.replace(/\/$/, "")}/v1/enterprise-inquiry`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...functionRegionHeaders(url) },
     body: JSON.stringify(input),
     signal: AbortSignal.timeout(10_000),
   });

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added: edge-function region pinning (`function_region`)
+
+`AtlaSentClient`, `AsyncAtlaSentClient` and the helper modules send an
+`x-region` header on every runtime request. The hosted runtime is pinned
+to `us-west-1`, the region of its database. Measured on staging with the
+same request shape, evaluate went from a p50 of 4.70 s to 1.42 s (handler
+time) once pinned. The database work was unchanged.
+
+Configure with `function_region=` or `ATLASENT_FUNCTION_REGION`. `"auto"`
+or `None` disables pinning. A self-hosted `base_url` is unpinned unless
+configured, and a malformed value raises `FunctionRegionConfigError`.
+`atlasent._function_region` owns the behaviour, and a test fails if any
+other module writes the header, or if a request path skips it.
+
 ### Framework guards — `atlasent-langchain`, `atlasent-llamaindex` 1.5.2 (unpublished)
 
 Version 1.5.2: the `langchain-py-v1.5.1` tag already exists on an older commit and its

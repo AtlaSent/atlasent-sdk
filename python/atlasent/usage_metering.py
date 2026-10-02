@@ -32,6 +32,7 @@ import urllib.request as urllib_request
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlencode
 
+from ._function_region import function_region_headers
 from .exceptions import AtlaSentError
 
 if TYPE_CHECKING:
@@ -50,6 +51,7 @@ def _get(
     url = f"{client.base_url.rstrip('/')}{path}{qs}"
     headers = {
         "Authorization": f"Bearer {client.api_key}",
+        **function_region_headers(url),
         "Accept": "application/json",
     }
     req = urllib_request.Request(url, headers=headers, method="GET")

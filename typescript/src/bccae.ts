@@ -11,6 +11,7 @@
  * Phase 3 — Execution Assurance. Not a Deploy Gate V1 customer API.
  */
 
+import { functionRegionHeaders } from "./functionRegion.js";
 import { AtlaSentError } from "./errors.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -274,6 +275,7 @@ export class BCCAEClient {
       Accept: "application/json",
       Authorization: `Bearer ${this.apiKey}`,
       "User-Agent": "atlasent-bccae-client/1.0",
+      ...functionRegionHeaders(url),
     };
     if (method === "POST") headers["Content-Type"] = "application/json";
 

@@ -19,6 +19,7 @@ from urllib.parse import quote, urlparse, urlunparse
 
 import httpx
 
+from ._function_region import function_region_headers
 from .exceptions import AtlaSentError
 
 DEFAULT_BASE_URL = "https://api.atlasent.io"
@@ -98,6 +99,7 @@ class BCCAEClient:
                 "Accept": "application/json",
                 "Authorization": f"Bearer {api_key}",
                 "User-Agent": "atlasent-bccae-python/1.0",
+                **function_region_headers(self._base_url),
             },
             timeout=timeout,
         )

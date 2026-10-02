@@ -19,6 +19,7 @@
  * change billing and audit semantics.
  */
 
+import { functionRegionHeaders } from "./functionRegion.js";
 import { AtlaSentError, type AtlaSentErrorInit } from "./errors.js";
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -211,11 +212,12 @@ function assertBodyWithinCap(raw: string): void {
   }
 }
 
-function commonHeaders(apiKey: string): Record<string, string> {
+function commonHeaders(apiKey: string, url: string): Record<string, string> {
   return {
     "Content-Type": "application/json",
     Accept: "application/json",
     Authorization: `Bearer ${apiKey}`,
+    ...functionRegionHeaders(url),
   };
 }
 
@@ -256,7 +258,7 @@ export async function evaluateMany(
   const fetchImpl = pickFetch(transport);
   const response = await fetchImpl(url, {
     method: "POST",
-    headers: commonHeaders(transport.apiKey),
+    headers: commonHeaders(transport.apiKey, url),
     body: raw,
   });
 
@@ -348,7 +350,7 @@ export async function authorizeStream(
   const response = await fetchImpl(url, {
     method: "POST",
     headers: {
-      ...commonHeaders(transport.apiKey),
+      ...commonHeaders(transport.apiKey, url),
       Accept: "text/event-stream",
     },
     body: raw,
@@ -513,7 +515,7 @@ export async function graphql<T = unknown>(
   const fetchImpl = pickFetch(transport);
   const response = await fetchImpl(url, {
     method: "POST",
-    headers: commonHeaders(transport.apiKey),
+    headers: commonHeaders(transport.apiKey, url),
     body: raw,
   });
   const requestId = response.headers.get("X-Request-ID") ?? undefined;
