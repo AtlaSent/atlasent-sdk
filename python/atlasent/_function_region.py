@@ -31,7 +31,6 @@ atlasent-action's ``@atlasent/enforce`` ``functionRegion``.
 from __future__ import annotations
 
 import os
-import re
 from collections.abc import Mapping
 from urllib.parse import urlparse
 
@@ -49,7 +48,28 @@ HOSTED_RUNTIME_HOSTS = frozenset(
     }
 )
 
-_REGION_ID = re.compile(r"[a-z]{2}-[a-z]+-[0-9]")
+#: Regions Supabase accepts for ``x-region``, from
+#: https://supabase.com/docs/guides/functions/regional-invocation (2026-10-02).
+#: An allowlist, not a pattern: a well-formed typo such as "us-wset-1" must be
+#: rejected here, because the platform may not reject it for us.
+SUPPORTED_FUNCTION_REGIONS = frozenset(
+    {
+        "ap-northeast-1",
+        "ap-northeast-2",
+        "ap-south-1",
+        "ap-southeast-1",
+        "ap-southeast-2",
+        "ca-central-1",
+        "us-east-1",
+        "us-west-1",
+        "us-west-2",
+        "eu-central-1",
+        "eu-west-1",
+        "eu-west-2",
+        "eu-west-3",
+        "sa-east-1",
+    }
+)
 
 
 class _Unset:
@@ -66,7 +86,7 @@ class FunctionRegionConfigError(ValueError):
 
     def __init__(self, value: str) -> None:
         super().__init__(
-            f'Invalid function region "{value}": expected a region id such as '
+            f'Invalid function region "{value}": expected a supported region such as '
             f'"{DEFAULT_FUNCTION_REGION}", or "auto" to let Supabase choose.'
         )
 
@@ -76,7 +96,7 @@ def parse_function_region(value: str) -> str | None:
     v = value.strip()
     if v == "auto":
         return None
-    if _REGION_ID.fullmatch(v):
+    if v in SUPPORTED_FUNCTION_REGIONS:
         return v
     raise FunctionRegionConfigError(value)
 

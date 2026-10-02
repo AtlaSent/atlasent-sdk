@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import re
@@ -11,11 +12,11 @@ from unittest.mock import patch
 import pytest
 
 import atlasent
-from atlasent import AsyncAtlaSentClient, AtlaSentClient
-from atlasent import usage_metering as um
+import atlasent.usage_metering as um
 from atlasent._function_region import (
     DEFAULT_FUNCTION_REGION,
     FUNCTION_REGION_ENV,
+    SUPPORTED_FUNCTION_REGIONS,
     FunctionRegionConfigError,
     function_region_headers,
     resolve_function_region,
@@ -25,6 +26,8 @@ HOSTED = "https://api.atlasent.io"
 HOSTED_PROD_REF = "https://kttccumlnmdtupgbyfue.supabase.co/functions/v1"
 SELF_HOSTED = "https://runtime.customer.example/functions/v1"
 KEY = "ask_live_test"
+AtlaSentClient = atlasent.AtlaSentClient
+AsyncAtlaSentClient = atlasent.AsyncAtlaSentClient
 
 
 @pytest.fixture(autouse=True)
@@ -60,10 +63,27 @@ class TestResolve:
             resolve_function_region(HOSTED, env={FUNCTION_REGION_ENV: "auto"}) is None
         )
 
-    @pytest.mark.parametrize("bad", ["US-WEST-1", "west", "us-west-1\r\nx-evil: 1"])
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "US-WEST-1",
+            "west",
+            "us-west-1\r\nx-evil: 1",
+            # Well-formed but not Supabase regions: a pattern check accepts these.
+            "us-wset-1",
+            "us-east-2",
+            "eu-north-1",
+        ],
+    )
     def test_malformed_raises(self, bad: str) -> None:
         with pytest.raises(FunctionRegionConfigError):
             resolve_function_region(HOSTED, bad, env={})
+
+    def test_every_supported_region_is_accepted(self) -> None:
+        assert len(SUPPORTED_FUNCTION_REGIONS) == 14
+        assert DEFAULT_FUNCTION_REGION in SUPPORTED_FUNCTION_REGIONS
+        for region in SUPPORTED_FUNCTION_REGIONS:
+            assert resolve_function_region(HOSTED, region, env={}) == region
 
     def test_headers(self) -> None:
         assert function_region_headers(HOSTED, env={}) == {"x-region": "us-west-1"}
@@ -113,12 +133,12 @@ class TestClients:
             c._client = httpx.Client(
                 headers=c._client.headers, transport=httpx.MockTransport(handler)
             )
-            try:
+            # Only the outgoing request matters here; whatever the client makes
+            # of the canned response (allow, deny, or an error) is irrelevant.
+            with contextlib.suppress(Exception):
                 c.evaluate(
                     "production.deploy", "agent-1", {"environment": "production"}
                 )
-            except Exception:
-                pass
         assert seen, "no request was sent"
         assert seen[0].headers["x-region"] == "us-west-1"
 
@@ -148,6 +168,7 @@ class TestClients:
     def test_public_exports(self) -> None:
         assert atlasent.DEFAULT_FUNCTION_REGION == "us-west-1"
         assert issubclass(atlasent.FunctionRegionConfigError, ValueError)
+        assert atlasent.SUPPORTED_FUNCTION_REGIONS == SUPPORTED_FUNCTION_REGIONS
 
 
 class TestCentralized:

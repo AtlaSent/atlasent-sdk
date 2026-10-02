@@ -44,12 +44,33 @@ export const HOSTED_RUNTIME_HOSTS: ReadonlySet<string> = new Set([
   "lwnqpmnxpeyhpxvastku.supabase.co",
 ]);
 
-const REGION_ID = /^[a-z]{2}-[a-z]+-[0-9]$/;
+/**
+ * Regions Supabase accepts for `x-region`, from
+ * https://supabase.com/docs/guides/functions/regional-invocation (2026-10-02).
+ * An allowlist, not a pattern: a well-formed typo such as "us-wset-1" must be
+ * rejected here, because the platform may not reject it for us.
+ */
+export const SUPPORTED_FUNCTION_REGIONS: ReadonlySet<string> = new Set([
+  "ap-northeast-1",
+  "ap-northeast-2",
+  "ap-south-1",
+  "ap-southeast-1",
+  "ap-southeast-2",
+  "ca-central-1",
+  "us-east-1",
+  "us-west-1",
+  "us-west-2",
+  "eu-central-1",
+  "eu-west-1",
+  "eu-west-2",
+  "eu-west-3",
+  "sa-east-1",
+]);
 
 export class FunctionRegionConfigError extends Error {
   constructor(value: string) {
     super(
-      `Invalid function region "${value}": expected a region id such as ` +
+      `Invalid function region "${value}": expected a supported region such as ` +
         `"${DEFAULT_FUNCTION_REGION}", or "auto" to let Supabase choose.`,
     );
     this.name = "FunctionRegionConfigError";
@@ -61,13 +82,18 @@ export interface FunctionRegionEnvironment {
   isBrowser: boolean;
 }
 
-/** The current runtime: process.env where it exists, and whether this is a browser. */
+/** The current runtime: process.env where it exists, and whether this is a browser page or worker. */
 export function currentFunctionRegionEnvironment(): FunctionRegionEnvironment {
   const g = globalThis as Record<string, unknown>;
   const proc = g["process"] as { env?: Record<string, string | undefined> } | undefined;
   return {
     env: proc?.env ?? {},
-    isBrowser: typeof g["window"] !== "undefined" && typeof g["document"] !== "undefined",
+    // A page has window + document. A dedicated, shared or service worker has
+    // neither, but its fetches are still subject to CORS; every worker global
+    // scope inherits from WorkerGlobalScope.
+    isBrowser:
+      (typeof g["window"] !== "undefined" && typeof g["document"] !== "undefined") ||
+      typeof g["WorkerGlobalScope"] !== "undefined",
   };
 }
 
@@ -75,7 +101,7 @@ export function currentFunctionRegionEnvironment(): FunctionRegionEnvironment {
 export function parseFunctionRegion(value: string): string | null {
   const v = value.trim();
   if (v === "auto") return null;
-  if (REGION_ID.test(v)) return v;
+  if (SUPPORTED_FUNCTION_REGIONS.has(v)) return v;
   throw new FunctionRegionConfigError(value);
 }
 

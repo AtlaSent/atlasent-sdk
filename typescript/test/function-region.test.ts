@@ -7,6 +7,8 @@ import {
   DEFAULT_FUNCTION_REGION,
   FUNCTION_REGION_ENV,
   FunctionRegionConfigError,
+  SUPPORTED_FUNCTION_REGIONS,
+  currentFunctionRegionEnvironment,
   functionRegionHeaders,
   resolveFunctionRegion,
 } from "../src/functionRegion.js";
@@ -79,6 +81,31 @@ describe("resolveFunctionRegion", () => {
   it("throws on a malformed value", () => {
     for (const bad of ["US-WEST-1", "west", "us-west-1\r\nx-evil: 1"]) {
       expect(() => resolveFunctionRegion(HOSTED, bad, SERVER)).toThrow(FunctionRegionConfigError);
+    }
+  });
+
+  it("rejects a well-formed region Supabase does not support", () => {
+    // A pattern check would accept these; a typo must not silently go unpinned.
+    for (const bad of ["us-wset-1", "us-east-2", "eu-north-1"]) {
+      expect(() => resolveFunctionRegion(HOSTED, bad, SERVER)).toThrow(FunctionRegionConfigError);
+    }
+  });
+
+  it("accepts every region Supabase documents for x-region", () => {
+    expect(SUPPORTED_FUNCTION_REGIONS.size).toBe(14);
+    expect(SUPPORTED_FUNCTION_REGIONS.has(DEFAULT_FUNCTION_REGION)).toBe(true);
+    for (const r of SUPPORTED_FUNCTION_REGIONS) expect(resolveFunctionRegion(HOSTED, r, SERVER)).toBe(r);
+  });
+
+  it("treats a Web or Service Worker as a browser (CORS applies, no window/document)", () => {
+    expect(currentFunctionRegionEnvironment().isBrowser).toBe(false);
+    vi.stubGlobal("WorkerGlobalScope", class WorkerGlobalScope {});
+    try {
+      const runtime = currentFunctionRegionEnvironment();
+      expect(runtime.isBrowser).toBe(true);
+      expect(functionRegionHeaders(HOSTED, undefined, runtime)).toEqual({});
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 

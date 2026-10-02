@@ -12,6 +12,14 @@
  *   core + webhook + streaming errors:             ~23.45 kB → limit 24 kB
  *     (bumped 23.5→24 kB in the same change, same cause, to keep headroom)
  *
+ *   Bumped again 2026-10-02: 23.5→24.5 kB (core) and 24→25 kB (webhooks).
+ *     Edge-function region pinning (functionRegion.ts) is resolved in the
+ *     client constructor, so it rides in every bundle that imports the
+ *     client. It carries the 14-region Supabase allowlist, the hosted-host
+ *     set and the browser/worker check. Measured 23.93 kB and 24.25 kB.
+ *     This is a deliberate cost: unpinned calls from off-region callers
+ *     were measured at 3.3x the latency of pinned ones.
+ *
  * `modifyEsbuildConfig` sets `platform: "node"` so built-in Node modules
  * (crypto, fs/promises) are treated as external and not counted toward size.
  * This matches how the SDK is consumed in server/agent environments.
@@ -23,7 +31,7 @@ export default [
     name: "core (protect + requirePermit)",
     path: "dist/index.js",
     import: "{ protect, requirePermit }",
-    limit: "23.5 kB",
+    limit: "24.5 kB",
     modifyEsbuildConfig(config) {
       config.platform = "node";
       return config;
@@ -34,7 +42,7 @@ export default [
     path: "dist/index.js",
     import:
       "{ protect, requirePermit, verifyWebhook, assertWebhook, StreamTimeoutError, StreamParseError }",
-    limit: "24 kB",
+    limit: "25 kB",
     modifyEsbuildConfig(config) {
       config.platform = "node";
       return config;
