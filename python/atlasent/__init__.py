@@ -67,6 +67,12 @@ PRODUCTION_DEPLOY_ACTION = "production.deploy"
 # public name equals the source attribute except for the handful of
 # aliased re-exports captured in ``_LAZY_ALIASES`` below.
 _LAZY_MODULES: dict[str, tuple[str, ...]] = {
+    "._function_region": (
+        "DEFAULT_FUNCTION_REGION",
+        "FUNCTION_REGION_ENV",
+        "SUPPORTED_FUNCTION_REGIONS",
+        "FunctionRegionConfigError",
+    ),
     ".access_governance_log": ("AccessGovernanceLogClient",),
     ".approval_artifact": (
         "ApprovalArtifactV1",
@@ -570,6 +576,12 @@ def __dir__() -> list[str]:
 # Static-analysis surface: type checkers and IDEs read these eager imports
 # under TYPE_CHECKING (never executed at runtime, so no httpx/pydantic load).
 if TYPE_CHECKING:
+    from ._function_region import (
+        DEFAULT_FUNCTION_REGION,
+        FUNCTION_REGION_ENV,
+        SUPPORTED_FUNCTION_REGIONS,
+        FunctionRegionConfigError,
+    )
     from .access_governance_log import AccessGovernanceLogClient
     from .approval_artifact import (
         ApprovalArtifactV1,
@@ -995,6 +1007,11 @@ __all__ = [
     "configure",
     "protect",
     "with_permit",
+    # Edge-function region pinning (see atlasent._function_region).
+    "DEFAULT_FUNCTION_REGION",
+    "FUNCTION_REGION_ENV",
+    "SUPPORTED_FUNCTION_REGIONS",
+    "FunctionRegionConfigError",
     # SMS OTP step-up authentication.
     "SmsOtpClient",
     # Usage metering.

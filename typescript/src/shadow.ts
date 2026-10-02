@@ -1,3 +1,4 @@
+import { functionRegionHeaders } from "./functionRegion.js";
 import { protect } from "./protect.js";
 import { AtlaSentDeniedError } from "./errors.js";
 import type { ProtectRequest, Permit } from "./protect.js";
@@ -152,6 +153,7 @@ export async function reportShadowEvent(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
+      ...functionRegionHeaders(baseUrl),
     },
     body: JSON.stringify(payload),
   });

@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 import httpx
 
+from ._function_region import UNSET, _Unset, function_region_headers
 from ._version import __version__
 from .approval_artifact import ApprovalReference
 from .audit import AuditEventsResult, AuditExportResult
@@ -148,6 +149,7 @@ class AsyncAtlaSentClient:
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_backoff: float = DEFAULT_RETRY_BACKOFF,
         cache: TTLCache | None = None,
+        function_region: str | None | _Unset = UNSET,
     ) -> None:
         resolved_api_key = api_key or _get_api_key()
         resolved_base_url = base_url or _get_base_url()
@@ -158,12 +160,16 @@ class AsyncAtlaSentClient:
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
         self._cache = cache
+        # Edge-function region (see ._function_region); resolved once, sent on
+        # every request through this client's default headers.
+        self._region_headers = function_region_headers(self._base_url, function_region)
         self._client = httpx.AsyncClient(
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "Authorization": f"Bearer {resolved_api_key}",
                 "User-Agent": f"atlasent-python/{__version__}",
+                **self._region_headers,
             },
             timeout=self._timeout,
         )

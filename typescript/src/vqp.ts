@@ -12,6 +12,7 @@
  * Phase 3 — Deterministic re-derivation audit.
  */
 
+import { functionRegionHeaders } from "./functionRegion.js";
 import { AtlaSentError } from "./errors.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -164,6 +165,7 @@ export class VQPClient {
       Accept: "application/json",
       Authorization: `Bearer ${this.serviceRoleKey}`,
       "User-Agent": "atlasent-vqp-client/1.0",
+      ...functionRegionHeaders(url),
     };
     if (method === "POST") headers["Content-Type"] = "application/json";
 

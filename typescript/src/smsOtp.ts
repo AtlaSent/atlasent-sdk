@@ -26,6 +26,7 @@
  * ```
  */
 
+import { functionRegionHeaders } from "./functionRegion.js";
 import { AtlaSentError } from "./errors.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -142,6 +143,7 @@ export function makeSmsOtpClient(
       method: "POST",
       headers: {
         Authorization: `Bearer ${sessionJwt}`,
+        ...functionRegionHeaders(baseUrl),
         "Content-Type": "application/json",
         Accept: "application/json",
       },

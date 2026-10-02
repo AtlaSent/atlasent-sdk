@@ -10,6 +10,7 @@
  * all throw {@link AtlaSentError}.
  */
 
+import { functionRegionHeaders } from "./functionRegion.js";
 import type {
   AuditEventsPage,
   AuditEventsQuery,
@@ -629,6 +630,8 @@ export class AtlaSentClient {
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly userAgent: string;
+  /** Edge-function region headers, resolved once from baseUrl (see ./functionRegion). */
+  private readonly regionHeaders: Record<string, string>;
   private readonly retryPolicy: Required<RetryPolicy>;
 
   /** SCIM 2.0 provisioning sub-client. Access as `client.scim`. */
@@ -684,6 +687,7 @@ export class AtlaSentClient {
       /\/+$/,
       "",
     );
+    this.regionHeaders = functionRegionHeaders(this.baseUrl, options.functionRegion);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.userAgent = _buildUserAgent();
@@ -994,6 +998,7 @@ export class AtlaSentClient {
       Accept: "text/event-stream",
       Authorization: `Bearer ${this.apiKey}`,
       "User-Agent": this.userAgent,
+      ...this.regionHeaders,
       // ADR-025: declare the wire-protocol version we were built
       // against. Runtime serves this version's response shape; older
       // versions outside the compatibility window get 426.
@@ -2050,6 +2055,7 @@ export class AtlaSentClient {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
         "User-Agent": this.userAgent,
+        ...this.regionHeaders,
         // ADR-025: wire-protocol version declared on every request.
         "X-AtlaSent-Protocol-Version": "1",
         "X-Request-ID": requestId,
@@ -2248,6 +2254,7 @@ export class AtlaSentClient {
       Accept: "application/json",
       Authorization: `Bearer ${this.apiKey}`,
       "User-Agent": this.userAgent,
+      ...this.regionHeaders,
       "X-Request-ID": requestId,
       // ADR-025: wire-protocol version declared on every request.
       "X-AtlaSent-Protocol-Version": "1",
@@ -3379,6 +3386,7 @@ export class AtlaSentClient {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
       "User-Agent": this.userAgent,
+      ...this.regionHeaders,
       "X-Request-ID": requestId,
       "X-AtlaSent-Protocol-Version": "1",
     };
@@ -3412,6 +3420,7 @@ export class AtlaSentClient {
       Accept: "application/json",
       Authorization: `Bearer ${this.apiKey}`,
       "User-Agent": this.userAgent,
+      ...this.regionHeaders,
       "X-Request-ID": requestId,
       "X-AtlaSent-Protocol-Version": "1",
     };

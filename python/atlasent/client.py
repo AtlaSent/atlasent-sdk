@@ -19,6 +19,7 @@ import httpx
 from . import evidence_exports as _evx
 from . import scim as _scim
 from . import siem as _siem
+from ._function_region import UNSET, _Unset, function_region_headers
 from ._version import __version__
 from .access_governance_log import AccessGovernanceLogClient
 from .approval_artifact import ApprovalReference
@@ -223,6 +224,11 @@ class AtlaSentClient:
         retry_backoff: Base backoff in seconds (doubles each retry).
         cache: Optional :class:`~atlasent.cache.TTLCache` for caching
             evaluate results and avoiding redundant API calls.
+        function_region: Edge-function region for runtime calls, sent as
+            the region-pinning header. Omit to use ATLASENT_FUNCTION_REGION,
+            then us-west-1 (the database's region) for the hosted runtime and
+            no pinning otherwise. ``"auto"`` or ``None``: no pinning. A
+            malformed value raises ``FunctionRegionConfigError``.
 
     Usage::
 
@@ -249,6 +255,7 @@ class AtlaSentClient:
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_backoff: float = DEFAULT_RETRY_BACKOFF,
         cache: TTLCache | None = None,
+        function_region: str | None | _Unset = UNSET,
     ) -> None:
         self._api_key = _validate_api_key(api_key)
         self._anon_key = anon_key
@@ -257,12 +264,16 @@ class AtlaSentClient:
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
         self._cache = cache
+        # Edge-function region (see ._function_region); resolved once, sent on
+        # every request through this client's default headers.
+        self._region_headers = function_region_headers(self._base_url, function_region)
         self._client = httpx.Client(
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "Authorization": f"Bearer {api_key}",
                 "User-Agent": f"atlasent-python/{__version__}",
+                **self._region_headers,
                 # ADR-025: declare the wire-protocol version we were
                 # built against. Runtime serves this version's response
                 # shape; older versions outside the compatibility window

@@ -13,6 +13,7 @@
  * `configureApprovalRuntime()` — set API key / base URL once
  */
 
+import { functionRegionHeaders } from "./functionRegion.js";
 import { AtlaSentDeniedError, AtlaSentError } from "./errors.js";
 import type {
   HitlCreateRequest,
@@ -93,6 +94,7 @@ async function apiPost<T>(
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${cfg.apiKey}`,
+        ...functionRegionHeaders(url),
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
@@ -132,6 +134,7 @@ async function apiGet<T>(path: string, cfg: ResolvedConfig): Promise<T> {
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${cfg.apiKey}`,
+        ...functionRegionHeaders(url),
       },
       signal: AbortSignal.timeout(cfg.requestTimeoutMs),
     });

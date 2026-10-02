@@ -28,6 +28,7 @@ import json
 import urllib.request as urllib_request
 from typing import TYPE_CHECKING, Any, Literal
 
+from ._function_region import function_region_headers
 from .exceptions import AtlaSentError
 
 if TYPE_CHECKING:
@@ -50,6 +51,7 @@ def _post(
     url = f"{client.base_url.rstrip('/')}{path}"
     headers = {
         "Authorization": f"Bearer {session_jwt}",
+        **function_region_headers(url),
         "Content-Type": "application/json",
         "Accept": "application/json",
     }

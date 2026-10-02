@@ -1,3 +1,5 @@
+import { functionRegionHeaders } from "./functionRegion.js";
+
 export type EnforcementMode = "observe" | "warn" | "enforce";
 
 export interface HealthReport {
@@ -71,6 +73,7 @@ async function apiGet<T>(
       method: "GET",
       headers: {
         Authorization: `Bearer ${config.apiKey}`,
+        ...functionRegionHeaders(config.baseUrl),
         Accept: "application/json",
       },
       signal: controller.signal,
@@ -97,6 +100,7 @@ async function apiPost<T>(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.apiKey}`,
+        ...functionRegionHeaders(config.baseUrl),
       },
       body: JSON.stringify(body),
       signal: controller.signal,
