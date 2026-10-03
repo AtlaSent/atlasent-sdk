@@ -427,6 +427,24 @@ describe("createBehaviorEmitter", () => {
     expect(err!.responseBody).toBe("unavailable");
   });
 
+  it("throws BvsEmitError with an empty body when reading the error body fails", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 502,
+      text: () => Promise.reject(new Error("body stream already read")),
+    } as unknown as Response);
+
+    const emitter = createBehaviorEmitter({
+      endpoint: "https://bvs.example.com",
+      hmacSecret: "secret",
+    });
+
+    const err = await emitter.emit("hiCoach", makeEpisodeEvent()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BvsEmitError);
+    expect((err as BvsEmitError).status).toBe(502);
+    expect((err as BvsEmitError).responseBody).toBe("");
+  });
+
   it("rejects before fetching when event contains raw text", async () => {
     const emitter = createBehaviorEmitter({
       endpoint: "https://bvs.example.com",
