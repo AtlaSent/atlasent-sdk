@@ -28,5 +28,8 @@
     "v2-preview",
     "proof",
     "verifiable"
-  ]
+  ],
+  "overrides": {
+    "esbuild": "^0.28.1"
+  }
 }
