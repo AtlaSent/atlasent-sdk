@@ -1,6 +1,6 @@
 # AtlaSent Java SDK
 
-Java 11+ SDK for the [AtlaSent](https://atlasent.io) execution-time authorization API.
+Java 17+ SDK for the [AtlaSent](https://atlasent.io) execution-time authorization API.
 
 ## Maven coordinates
 
@@ -70,5 +70,5 @@ AtlaSentClientOptions options = AtlaSentClientOptions.builder()
 
 ## Requirements
 
-- Java 11 or later
+- Java 17 or later
 - Jackson Databind 2.17+
