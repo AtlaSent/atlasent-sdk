@@ -32,10 +32,10 @@ dependencies = [
 
 [project.optional-dependencies]
 verify = [
-    "cryptography>=41.0.0",
+    "cryptography>=50.0.1",
 ]
 dev = [
-    "cryptography>=41.0.0",
+    "cryptography>=50.0.1",
     "cffi>=1.16.0",
     "pytest>=7.0",
     "pytest-mock>=3.10",
