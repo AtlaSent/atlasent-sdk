@@ -75,7 +75,7 @@
     "Safari >= 16"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/build-dts.mjs",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run typecheck && npm test && npm run build",
     "size": "size-limit",
@@ -84,8 +84,8 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "typecheck:examples": "tsc --noEmit --project tsconfig.examples.json",
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
+    "typecheck:examples": "node ./node_modules/typescript/bin/tsc --noEmit --project tsconfig.examples.json",
     "vendor:trust-root": "node scripts/vendor-trust-root.mjs"
   },
   "keywords": [
@@ -115,13 +115,16 @@
     "@types/express": "^5.0.6",
     "@types/jsdom": "^28.0.1",
     "@types/node": "^26.6.2",
+    "@typescript/typescript6": "^6.0.2",
     "@vitest/coverage-v8": "^5.0.0",
     "hono": "^4.12.15",
     "jsdom": "^29.1.0",
+    "rollup": "^4.64.0",
+    "rollup-plugin-dts": "^6.5.1",
     "size-limit": "^14.0.0",
     "tsup": "^8.0.2",
     "tsx": "^4.23.15",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   },
   "peerDependencies": {

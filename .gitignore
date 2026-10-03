@@ -39,3 +39,6 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
+
+# TypeScript declaration build scratch (typescript/scripts/build-dts.mjs)
+.dts-tmp/

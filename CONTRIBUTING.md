@@ -26,10 +26,16 @@ Security vulnerabilities should **not** be filed as public issues — see
 ```bash
 cd typescript
 npm ci
-npm run typecheck          # tsc --noEmit
+npm run typecheck          # TypeScript 7 tsc --noEmit
 npm test                   # vitest run
-npm run build              # tsup
+npm run build              # tsup (JS) + scripts/build-dts.mjs (declarations)
 ```
+
+The root package builds with TypeScript 7. Run the compiler through the npm
+scripts, not `npx tsc`: the declaration bundler needs the TypeScript 6 API
+(`@typescript/typescript6`), whose dependency links its own `tsc` into
+`node_modules/.bin`, so a bare `tsc` there is TypeScript 6. The scripts call
+`node_modules/typescript/bin/tsc` directly.
 
 Each sub-package under `typescript/packages/<name>/` has its own
 `package.json` with equivalent `typecheck` / `test` / `build` scripts —

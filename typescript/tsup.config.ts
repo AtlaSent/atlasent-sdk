@@ -10,7 +10,8 @@ export default defineConfig({
   ],
   format: ["esm", "cjs"],
   target: "node20",
-  dts: true,
+  // Declarations are built by scripts/build-dts.mjs (TypeScript 7; see #482).
+  dts: false,
   sourcemap: true,
   clean: true,
   splitting: false,

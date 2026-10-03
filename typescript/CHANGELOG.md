@@ -8,6 +8,22 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Build: TypeScript 7 (#482)
+
+The package now typechecks and emits its declarations with TypeScript 7.0.
+tsup's `dts: true` drives a copy of `rollup-plugin-dts` that tsup vendors, and
+that copy calls the TypeScript compiler API, which the TypeScript 7 package no
+longer ships, so the declaration build crashed. JS is still bundled by tsup;
+declarations now come from TypeScript 7's `tsc` and are bundled by
+`rollup-plugin-dts` 6.5 (`scripts/build-dts.mjs`), in the same file layout as
+before. The `.js`/`.cjs` bundles and source maps are byte-identical to the
+TypeScript 6 build. The `.d.ts`/`.d.cts` files declare the same exports and
+types; they differ only in form (split `export` / `export type` statements,
+the source's quote style on literal types, member order in some inferred
+object types, and the shared chunk's content hash). `baseUrl` and
+`ignoreDeprecations` are removed from `tsconfig.json`. No runtime or Node
+support change.
+
 ### Added: `meaning`, `entra_provenance`, `approval_kind`, `subject_agent_identity_id` on `approval_artifact.v1` (additive)
 
 The runtime (atlasent-api `_shared/approval_artifact.ts`) emits and signs these
