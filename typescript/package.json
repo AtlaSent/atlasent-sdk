@@ -138,6 +138,8 @@
   },
   "dependencies": {
     "zod": "^4.4.3"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
   }
 }
-

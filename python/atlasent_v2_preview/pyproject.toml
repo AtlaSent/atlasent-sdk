@@ -29,7 +29,7 @@ classifiers = [
 # consolidation story. ``cryptography`` is a hard dep because
 # ``replay_proof_bundle`` verifies Ed25519 signatures offline.
 dependencies = [
-    "cryptography>=41.0.0",
+    "cryptography>=50.0.1",
     "pydantic>=2.0.0",
 ]
 

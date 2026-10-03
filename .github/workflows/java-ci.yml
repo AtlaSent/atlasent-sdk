@@ -1,0 +1,54 @@
+name: Java CI
+
+# The Java SDK (java/) had no CI at all: nothing compiled it or ran its
+# tests on a PR, so a dependency bump (e.g. the jackson bump in #555) or a
+# source change could merge untested. Narrow `paths:` filter, same shape as
+# python-ci.yml / typescript-ci.yml, so this only runs when java/ changes.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "java/**"
+      - ".github/workflows/java-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "java/**"
+      - ".github/workflows/java-ci.yml"
+
+permissions:
+  contents: read
+
+# Cancel superseded PR runs only; push runs on main are never cancelled.
+concurrency:
+  group: java-ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: java
+
+jobs:
+  test:
+    name: "Java SDK / JDK ${{ matrix.java-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 11 = the pom's compiler source/target floor; 21 = current LTS.
+        java-version: ["11", "21"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK ${{ matrix.java-version }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java-version }}
+          cache: maven
+          cache-dependency-path: java/pom.xml
+
+      - name: Run tests
+        run: mvn -B test
