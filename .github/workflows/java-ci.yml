@@ -36,8 +36,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 11 = the pom's compiler source/target floor; 21 = current LTS.
-        java-version: ["11", "21"]
+        # 17 = the pom's maven.compiler.release floor (JUnit 6 requires 17);
+        # 21 = current LTS.
+        java-version: ["17", "21"]
 
     steps:
       - uses: actions/checkout@v7

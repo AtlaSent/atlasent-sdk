@@ -12,8 +12,8 @@
   <url>https://github.com/AtlaSent-Systems-Inc/atlasent-sdk</url>
 
   <properties>
-    <maven.compiler.source>11</maven.compiler.source>
-    <maven.compiler.target>11</maven.compiler.target>
+    <!-- Java 17 floor: JUnit 6 (test scope) requires Java 17 to run. -->
+    <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <jackson.version>2.22.3</jackson.version>
     <junit.version>5.10.2</junit.version>
