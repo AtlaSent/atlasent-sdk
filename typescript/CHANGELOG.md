@@ -8,6 +8,16 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: `approver_grant_assertion` on `approval_artifact.v1` (additive)
+
+Mirrors atlasent-api#3870 (#3863, tracked in #3876). An approval artifact may
+now carry an optional `approver_grant_assertion` (`approver_grant_assertion.v1`),
+the console-signed alternative to `identity_assertion` for the
+`atlasent_approver_grant` approver basis. New `ApproverGrantAssertionV1` (plus `ApproverGrantSubject`, `ApproverGrantBinding`, `ApproverGrantIssuer`, `ApproverGrantAuthContext`, `ApproverGrantStepUp`) types, exported from the package entrypoint. An artifact carrying
+both assertions is rejected, as the runtime rejects it. Artifacts without the
+field are unchanged. The SDK carries the assertion; it never signs or verifies
+it. Contract: `contract/schemas/approver-grant-assertion.schema.json`.
+
 ### Added: edge-function region pinning (`functionRegion`)
 
 Every request to the AtlaSent runtime now carries an `x-region` header. The

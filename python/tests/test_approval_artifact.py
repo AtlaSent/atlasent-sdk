@@ -622,3 +622,139 @@ def test_quorum_with_invalid_artifact_inside_rejected() -> None:
     pkg["approvals"][0]["unknown_field"] = "oops"
     with pytest.raises(ValidationError):
         ApprovalQuorumV1.model_validate(pkg)
+
+
+# ── approver_grant_assertion.v1 (atlasent-api#3876) ──────────────────
+
+from atlasent import ApproverGrantAssertionV1  # noqa: E402
+
+_CONTRACT_SCHEMAS = (
+    Path(__file__).resolve().parent.parent.parent / "contract" / "schemas"
+)
+
+_GRANT = {
+    "version": "approver_grant_assertion.v1",
+    "basis": "atlasent_approver_grant",
+    "subject": {
+        "principal_id": "11111111-1111-4111-8111-111111111111",
+        "principal_kind": "human",
+    },
+    "grant_id": "22222222-2222-4222-8222-222222222222",
+    "binding": {
+        "approval_id": "apr_123",
+        "action_hash": "f" * 64,
+        "action_type": "production.deploy",
+        "tenant_id": "tnt_1",
+        "environment": "production",
+    },
+    "issuer": {"issuer_id": "atlasent-console", "kid": "kid-1"},
+    "auth_context": {
+        "acr": "aal2",
+        "amr": ["pwd", "totp"],
+        "step_up": "aal2",
+        "step_up_at": "2026-10-03T00:00:00Z",
+    },
+    "issued_at": "2026-10-03T00:00:00Z",
+    "expires_at": "2026-10-03T00:05:00Z",
+    "nonce": "0123456789abcdef",
+    "signature": "deadbeef",
+}
+
+_ARTIFACT = {
+    "version": "approval_artifact.v1",
+    "approval_id": "apr_123",
+    "tenant_id": "tnt_1",
+    "action_type": "production.deploy",
+    "resource_id": "release:abc123",
+    "action_hash": "f" * 64,
+    "reviewer": {
+        "principal_id": "11111111-1111-4111-8111-111111111111",
+        "principal_kind": "human",
+    },
+    "issuer": {
+        "type": "approval_service",
+        "issuer_id": "atlasent-console",
+        "kid": "kid-1",
+    },
+    "issued_at": "2026-10-03T00:00:00Z",
+    "expires_at": "2026-10-03T00:05:00Z",
+    "nonce": "n_abcdef01",
+    "signature": "deadbeef",
+}
+
+
+def test_approver_grant_assertion_model_matches_schema() -> None:
+    schema = json.loads(
+        (_CONTRACT_SCHEMAS / "approver-grant-assertion.schema.json").read_text()
+    )
+    assert set(ApproverGrantAssertionV1.model_fields) == set(schema["properties"])
+    assert set(schema["required"]) == set(schema["properties"])
+    art = json.loads((_CONTRACT_SCHEMAS / "approval-artifact.schema.json").read_text())
+    assert set(ApprovalArtifactV1.model_fields) == set(art["properties"])
+    assert "approver_grant_assertion" not in art["required"]
+
+
+def test_artifact_with_approver_grant_round_trips() -> None:
+    a = ApprovalArtifactV1.model_validate(
+        {**_ARTIFACT, "approver_grant_assertion": _GRANT}
+    )
+    assert a.approver_grant_assertion is not None
+    assert a.approver_grant_assertion.grant_id == _GRANT["grant_id"]
+    assert a.model_dump(exclude_none=True)["approver_grant_assertion"] == _GRANT
+
+
+def test_artifact_without_approver_grant_unchanged() -> None:
+    a = ApprovalArtifactV1.model_validate(_ARTIFACT)
+    assert a.approver_grant_assertion is None
+    assert "approver_grant_assertion" not in a.model_dump(exclude_none=True)
+
+
+def test_artifact_with_both_assertions_rejected() -> None:
+    identity = {
+        "version": "identity_assertion.v1",
+        "subject": {"principal_id": "u1", "principal_kind": "human"},
+        "role": "approver",
+        "binding": {
+            "approval_id": "apr_123",
+            "action_hash": "f" * 64,
+            "tenant_id": "tnt_1",
+            "environment": "",
+        },
+        "issuer": {"type": "oidc", "issuer_id": "idp", "kid": "k1"},
+        "issued_at": "2026-10-03T00:00:00Z",
+        "expires_at": "2026-10-03T00:05:00Z",
+        "signature": "sig",
+    }
+    with pytest.raises(ValidationError):
+        ApprovalArtifactV1.model_validate(
+            {
+                **_ARTIFACT,
+                "identity_assertion": identity,
+                "approver_grant_assertion": _GRANT,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        (("basis",), "atlasent_org_role"),
+        (("grant_id",), "nope"),
+        (("subject", "principal_kind"), "agent"),
+        (("subject", "principal_id"), "Not-A-Uuid"),
+        (("auth_context", "acr"), "aal3"),
+        (("auth_context", "amr"), []),
+        (("auth_context", "step_up"), "sms"),
+        (("nonce",), "short"),
+    ],
+)
+def test_malformed_approver_grant_rejected(
+    path: tuple[str, ...], value: object
+) -> None:
+    g = json.loads(json.dumps(_GRANT))
+    target = g
+    for k in path[:-1]:
+        target = target[k]
+    target[path[-1]] = value
+    with pytest.raises(ValidationError):
+        ApproverGrantAssertionV1.model_validate(g)

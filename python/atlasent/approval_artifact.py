@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 PrincipalKind = Literal["human", "agent", "service_account"]
 """What kind of principal performed the approval. The verifier
@@ -117,6 +117,79 @@ class IdentityAssertionV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+_UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+
+class ApproverGrantSubject(BaseModel):
+    """The console principal: ``(issuer.issuer_id, subject.principal_id)``."""
+
+    principal_id: str = Field(pattern=_UUID_PATTERN)
+    """Console user id (lower-case UUID)."""
+    principal_kind: Literal["human"]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ApproverGrantBinding(BaseModel):
+    """Binds the assertion to exactly one approval."""
+
+    approval_id: str = Field(min_length=1)
+    action_hash: str = Field(min_length=1)
+    action_type: str = Field(min_length=1)
+    tenant_id: str = Field(min_length=1)
+    environment: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ApproverGrantIssuer(BaseModel):
+    """The console's approver issuer (runtime ``APPROVER_GRANT_TRUSTED_ISSUERS``)."""
+
+    issuer_id: str = Field(min_length=1)
+    kid: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ApproverGrantAuthContext(BaseModel):
+    """Console session assurance and step-up recorded as evidence."""
+
+    acr: Literal["aal1", "aal2"]
+    amr: list[str] = Field(min_length=1, max_length=16)
+    step_up: Literal["aal2", "password_reauth"]
+    step_up_at: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ApproverGrantAssertionV1(BaseModel):
+    """Console-signed assertion that a console user holding approver
+    grant ``grant_id`` approved one specific approval after a
+    server-side step-up. Evidence for the ``atlasent_approver_grant``
+    basis (atlasent-api#3863); in an approval artifact it takes the
+    place of ``identity_assertion``, never alongside it.
+
+    Wire-stable as ``approver_grant_assertion.v1``. Schema lives in
+    ``contract/schemas/approver-grant-assertion.schema.json``. The SDK
+    only carries it; signing and verification are server-side. Added
+    2026-10-03 (atlasent-api#3876), additive.
+    """
+
+    version: Literal["approver_grant_assertion.v1"] = "approver_grant_assertion.v1"
+    basis: Literal["atlasent_approver_grant"] = "atlasent_approver_grant"
+    subject: ApproverGrantSubject
+    grant_id: str = Field(pattern=_UUID_PATTERN)
+    binding: ApproverGrantBinding
+    issuer: ApproverGrantIssuer
+    auth_context: ApproverGrantAuthContext
+    issued_at: str = Field(min_length=1)
+    expires_at: str = Field(min_length=1)
+    nonce: str = Field(min_length=16, max_length=256)
+    signature: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class IdentityIssuerKey(BaseModel):
     """One entry in ``IDENTITY_TRUSTED_ISSUERS[issuer_id][kid]``.
 
@@ -193,8 +266,24 @@ class ApprovalArtifactV1(BaseModel):
     nonce: str = Field(min_length=8)
     signature: str = Field(min_length=1)
     identity_assertion: IdentityAssertionV1 | None = None
+    approver_grant_assertion: ApproverGrantAssertionV1 | None = None
+    """Optional, additive (atlasent-api#3876): the approver-grant basis
+    alternative to ``identity_assertion``. Carrying both is rejected,
+    as the runtime verifier and the JSON Schema reject it."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _assertions_are_alternatives(self) -> ApprovalArtifactV1:
+        if (
+            self.identity_assertion is not None
+            and self.approver_grant_assertion is not None
+        ):
+            raise ValueError(
+                "approval artifact carries both an identity assertion and an "
+                "approver grant assertion"
+            )
+        return self
 
 
 class ApprovalReference(BaseModel):
@@ -408,6 +497,11 @@ __all__ = [
     "ApprovalReference",
     "ApprovalReviewer",
     "ApprovalTrustedIssuersConfig",
+    "ApproverGrantAssertionV1",
+    "ApproverGrantAuthContext",
+    "ApproverGrantBinding",
+    "ApproverGrantIssuer",
+    "ApproverGrantSubject",
     "IdentityAssertionBinding",
     "IdentityAssertionV1",
     "IdentityIssuer",
