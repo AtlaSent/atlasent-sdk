@@ -758,3 +758,203 @@ def test_malformed_approver_grant_rejected(
     target[path[-1]] = value
     with pytest.raises(ValidationError):
         ApproverGrantAssertionV1.model_validate(g)
+
+
+# ── meaning / entra_provenance / approval_kind / subject_agent_identity_id ─
+#
+# The runtime (atlasent-api _shared/approval_artifact.ts) emits and signs
+# these four optional fields; before 2026-10-03 the schema and these models
+# forbade them, so a real runtime artifact failed SDK validation.
+
+import copy  # noqa: E402
+
+from atlasent import EntraProvenanceV1  # noqa: E402
+
+_ACTION_HASH = "3f" * 32
+_AGENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+# Shaped after what the runtime's v1-idp-broker returns from an Entra ID
+# approval mint (_shared/evidence-minter.ts mintApprovalArtifact).
+_RUNTIME_ENTRA_ARTIFACT = {
+    "version": "approval_artifact.v1",
+    "approval_id": "apr-0b6c3f0e-5a1d-4c55-9c2e-7a9d2f41e8b3",
+    "tenant_id": "923a3b8d-cdaa-4fc7-885f-8d8b11232ca4",
+    "action_type": "production.deploy",
+    "resource_id": "api-service",
+    "action_hash": _ACTION_HASH,
+    "reviewer": {
+        "principal_id": "entra:5d1e2f3a-0b4c-4d6e-8f7a-9b0c1d2e3f40",
+        "principal_kind": "human",
+        "roles": ["release-approver"],
+    },
+    "issuer": {
+        "type": "approval_service",
+        "issuer_id": "atlasent-idp-broker",
+        "kid": "broker-2026-09",
+    },
+    "issued_at": "2026-10-03T00:00:00.000Z",
+    "expires_at": "2026-10-03T00:10:00.000Z",
+    "nonce": "6f1d2c3b-4a59-4e8d-9c7b-1a2b3c4d5e6f",
+    "meaning": "approved",
+    "identity_assertion": {
+        "version": "identity_assertion.v1",
+        "subject": {
+            "principal_id": "entra:5d1e2f3a-0b4c-4d6e-8f7a-9b0c1d2e3f40",
+            "principal_kind": "human",
+        },
+        "role": "release-approver",
+        "binding": {
+            "approval_id": "apr-0b6c3f0e-5a1d-4c55-9c2e-7a9d2f41e8b3",
+            "action_hash": _ACTION_HASH,
+            "tenant_id": "923a3b8d-cdaa-4fc7-885f-8d8b11232ca4",
+            "environment": "production",
+        },
+        "issuer": {
+            "type": "oidc",
+            "issuer_id": "atlasent-idp-broker",
+            "kid": "broker-2026-09",
+        },
+        "issued_at": "2026-10-03T00:00:00.000Z",
+        "expires_at": "2026-10-03T00:10:00.000Z",
+        "signature": "MEUCIQDexampleIdentitySignature",
+    },
+    "entra_provenance": {
+        "tenant_id": "72f988bf-86f1-41af-91ab-2d7cd011db47",
+        "org_binding_id": "0e9f8a7b-6c5d-4e3f-a2b1-c0d9e8f7a6b5",
+        "mapping_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "mapping_version": 3,
+        "relation": "approve",
+    },
+    "signature": "MEUCIQDexampleArtifactSignature",
+}
+
+# Shaped after the ADR CROSS-056 artifact the runtime verifier accepts.
+_RUNTIME_KIND_ARTIFACT = {
+    "version": "approval_artifact.v1",
+    "approval_id": "apr-kind-1",
+    "tenant_id": "org-1",
+    "action_type": "agent.tool.invoke",
+    "resource_id": "tool:deploy",
+    "action_hash": _ACTION_HASH,
+    "reviewer": {
+        "principal_id": "owner-1",
+        "principal_kind": "human",
+        "roles": ["agent_owner"],
+    },
+    "issuer": {
+        "type": "approval_service",
+        "issuer_id": "atlasent-console",
+        "kid": "kid-o",
+    },
+    "issued_at": "2026-10-03T00:00:00Z",
+    "expires_at": "2026-10-03T00:05:00Z",
+    "nonce": "nonce-kind-123456",
+    "approval_kind": "single_human_over_machine",
+    "subject_agent_identity_id": _AGENT_ID,
+    "signature": "sig",
+}
+
+
+def _drop(key: str):
+    return lambda a: a.pop(key)
+
+
+_MALFORMED_RUNTIME_FIELDS = [
+    (_RUNTIME_ENTRA_ARTIFACT, lambda a: a.update(meaning="signed")),
+    (_RUNTIME_KIND_ARTIFACT, lambda a: a.update(approval_kind="committee")),
+    (_RUNTIME_KIND_ARTIFACT, _drop("subject_agent_identity_id")),
+    (_RUNTIME_KIND_ARTIFACT, lambda a: a.update(subject_agent_identity_id="x")),
+    (_RUNTIME_KIND_ARTIFACT, _drop("approval_kind")),
+    (
+        _RUNTIME_ENTRA_ARTIFACT,
+        lambda a: a["entra_provenance"].update(relation="request"),
+    ),
+    (_RUNTIME_ENTRA_ARTIFACT, lambda a: a["entra_provenance"].pop("mapping_id")),
+    (_RUNTIME_ENTRA_ARTIFACT, lambda a: a["entra_provenance"].update(tenant_id="")),
+    (
+        _RUNTIME_ENTRA_ARTIFACT,
+        lambda a: a["entra_provenance"].update(mapping_version="3"),
+    ),
+    (_RUNTIME_ENTRA_ARTIFACT, lambda a: a["entra_provenance"].update(extra="x")),
+    (_RUNTIME_ENTRA_ARTIFACT, lambda a: a.update(meaning_v2="approved")),
+]
+
+
+@pytest.mark.parametrize("artifact", [_RUNTIME_ENTRA_ARTIFACT, _RUNTIME_KIND_ARTIFACT])
+def test_runtime_shaped_artifact_round_trips(artifact: dict) -> None:
+    a = ApprovalArtifactV1.model_validate(artifact)
+    assert a.model_dump(exclude_none=True) == artifact
+
+
+def test_runtime_entra_fields_parsed() -> None:
+    a = ApprovalArtifactV1.model_validate(_RUNTIME_ENTRA_ARTIFACT)
+    assert a.meaning == "approved"
+    assert isinstance(a.entra_provenance, EntraProvenanceV1)
+    assert a.entra_provenance.relation == "approve"
+    assert a.entra_provenance.mapping_version == 3
+    assert a.approval_kind is None and a.subject_agent_identity_id is None
+
+
+@pytest.mark.parametrize("meaning", ["approved", "reviewed", "authored"])
+def test_each_meaning_accepted(meaning: str) -> None:
+    a = ApprovalArtifactV1.model_validate({**_ARTIFACT, "meaning": meaning})
+    assert a.meaning == meaning
+
+
+def test_legacy_artifact_has_no_new_fields() -> None:
+    dumped = ApprovalArtifactV1.model_validate(_ARTIFACT).model_dump(exclude_none=True)
+    for k in ("meaning", "entra_provenance", "approval_kind"):
+        assert k not in dumped
+    assert "subject_agent_identity_id" not in dumped
+
+
+@pytest.mark.parametrize("base,mutate", _MALFORMED_RUNTIME_FIELDS)
+def test_malformed_runtime_fields_rejected_by_model(base: dict, mutate) -> None:
+    a = copy.deepcopy(base)
+    mutate(a)
+    with pytest.raises(ValidationError):
+        ApprovalArtifactV1.model_validate(a)
+
+
+def _schema_errors(payload: dict) -> list[str]:
+    jsonschema = pytest.importorskip("jsonschema")
+    referencing = pytest.importorskip("referencing")
+    registry = referencing.Registry()
+    for p in _CONTRACT_SCHEMAS.glob("*.schema.json"):
+        schema = json.loads(p.read_text())
+        res = referencing.Resource.from_contents(schema)
+        registry = registry.with_resource(uri=schema.get("$id", p.name), resource=res)
+    art = json.loads((_CONTRACT_SCHEMAS / "approval-artifact.schema.json").read_text())
+    validator = jsonschema.Draft202012Validator(art, registry=registry)
+    return [e.message for e in validator.iter_errors(payload)]
+
+
+@pytest.mark.parametrize(
+    "artifact", [_ARTIFACT, _RUNTIME_ENTRA_ARTIFACT, _RUNTIME_KIND_ARTIFACT]
+)
+def test_runtime_shaped_artifact_validates_against_schema(artifact: dict) -> None:
+    assert _schema_errors(artifact) == []
+
+
+@pytest.mark.parametrize("base,mutate", _MALFORMED_RUNTIME_FIELDS)
+def test_malformed_runtime_fields_rejected_by_schema(base: dict, mutate) -> None:
+    a = copy.deepcopy(base)
+    mutate(a)
+    assert _schema_errors(a) != []
+
+
+def test_entra_provenance_model_matches_schema() -> None:
+    schema = json.loads(
+        (_CONTRACT_SCHEMAS / "entra-provenance.schema.json").read_text()
+    )
+    assert set(EntraProvenanceV1.model_fields) == set(schema["properties"])
+    assert set(schema["required"]) == set(schema["properties"])
+    art = json.loads((_CONTRACT_SCHEMAS / "approval-artifact.schema.json").read_text())
+    for k in ("meaning", "entra_provenance", "approval_kind"):
+        assert k in art["properties"] and k not in art["required"]
+    assert art["properties"]["meaning"]["enum"] == ["approved", "reviewed", "authored"]
+    assert art["properties"]["approval_kind"]["enum"] == ["single_human_over_machine"]
+    assert art["dependentRequired"] == {
+        "approval_kind": ["subject_agent_identity_id"],
+        "subject_agent_identity_id": ["approval_kind"],
+    }

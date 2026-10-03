@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added: `meaning`, `entra_provenance`, `approval_kind`, `subject_agent_identity_id` on `approval_artifact.v1` (additive)
+
+The runtime (atlasent-api `_shared/approval_artifact.ts`) emits and signs these
+four optional fields, but the contract schema set `additionalProperties: false`
+without declaring them, so SDK validation rejected real runtime artifacts. Now
+declared: `meaning` (`approved` | `reviewed` | `authored`, 21 CFR Part 11
+§11.50), `entra_provenance` (new `contract/schemas/entra-provenance.schema.json`;
+`relation` must be `approve` on an approval artifact), and the ADR CROSS-056 pair
+`approval_kind` (`single_human_over_machine`) + `subject_agent_identity_id`
+(uuid), which must appear together. New `EntraProvenanceV1` pydantic model (extra=forbid) and `SignatureMeaning` / `ApprovalKind` literals, exported from `atlasent`. `ApprovalArtifactV1` gains the four optional fields, with validators rejecting a kind without a subject (or the reverse) and an `entra_provenance.relation` other than `approve`. Artifacts without the fields
+are unchanged.
+
 ### Added: `approver_grant_assertion` on `approval_artifact.v1` (additive)
 
 Mirrors atlasent-api#3870 (#3863, tracked in #3876). An approval artifact may
