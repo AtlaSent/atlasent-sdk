@@ -328,6 +328,14 @@ export type {
   IdentityTrustedIssuersConfig,
 } from "./identityAssertion.js";
 export type {
+  ApproverGrantAssertionV1,
+  ApproverGrantAuthContext,
+  ApproverGrantBinding,
+  ApproverGrantIssuer,
+  ApproverGrantStepUp,
+  ApproverGrantSubject,
+} from "./approverGrantAssertion.js";
+export type {
   ApprovalQuorumV1,
   QuorumIndependence,
   QuorumPolicy,

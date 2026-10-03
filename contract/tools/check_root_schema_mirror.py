@@ -48,6 +48,7 @@ SDK_SCHEMAS_DIR = REPO_ROOT / "contract" / "schemas"
 MIRRORED = (
     "approval-artifact.schema.json",
     "identity-assertion.schema.json",
+    "approver-grant-assertion.schema.json",
     "approval-quorum.schema.json",
     "trusted-issuers-config.schema.json",
     "identity-trusted-issuers-config.schema.json",

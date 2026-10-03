@@ -36,6 +36,7 @@ export interface ApprovalIssuer {
 // field type-checks at SDK boundaries without consumers having to
 // know about a second module.
 import type { IdentityAssertionV1 } from "./identityAssertion.js";
+import type { ApproverGrantAssertionV1 } from "./approverGrantAssertion.js";
 
 /**
  * The full signed approval artifact. Producers (approval services)
@@ -64,6 +65,13 @@ export interface ApprovalArtifactV1 {
   nonce: string;
   signature: string;
   identity_assertion?: IdentityAssertionV1;
+  /**
+   * Optional, additive (atlasent-api#3876): the console-signed
+   * approver_grant_assertion.v1 for the `atlasent_approver_grant`
+   * basis. An alternative to `identity_assertion`; an artifact
+   * carrying both is rejected by the runtime and by the schema.
+   */
+  approver_grant_assertion?: ApproverGrantAssertionV1;
 }
 
 /**

@@ -92,6 +92,14 @@
     "identity_assertion": {
       "$ref": "identity-assertion.schema.json",
       "description": "Optional independently-signed assertion from a trusted identity provider that the reviewer is a real human with the required role. Required when /v1-evaluate calls the verifier with `requireIdentityAssertion: true` (i.e. the action requires human approval) — without this, `reviewer.principal_kind: \"human\"` is a self-claim from the approval issuer alone."
+    },
+    "approver_grant_assertion": {
+      "$ref": "approver-grant-assertion.schema.json",
+      "description": "Optional, additive (atlasent-api#3863 / #3876, 2026-10-03). The console-signed approver_grant_assertion.v1 that authorized this approval under the atlasent_approver_grant basis. An alternative to identity_assertion, never alongside it. Covered by the artifact signature. The runtime admits it only from an approval issuer whose trusted-issuer entry declares identity_basis \"approver_grant\", and only inside an approval reevaluation of this exact approval; artifacts without this field validate and verify exactly as before."
     }
+  },
+  "not": {
+    "description": "identity_assertion and approver_grant_assertion are alternatives: an artifact carrying both is rejected by the runtime verifier.",
+    "required": ["identity_assertion", "approver_grant_assertion"]
   }
 }
