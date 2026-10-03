@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.atlasent.io/v1.1/entra-provenance.schema.json",
+  "title": "EntraProvenanceV1 (v1.1)",
+  "description": "Entra x AtlaSent acceptance-slice provenance: the tenant-binding and authority-mapping facts v1-idp-broker resolved when it minted an envelope through Entra ID. Carried inside the SIGNED payload of approval_artifact.v1 (relation \"approve\") and actor_identity.v1 (relation \"request\"), so it is authenticated exactly like every other envelope field. Absent on every non-Entra envelope. Mirrors atlasent-api supabase/functions/_shared/entra-provenance.ts (EntraProvenanceV1, isEntraProvenanceV1). Added 2026-10-03, additive only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tenant_id", "org_binding_id", "mapping_id", "mapping_version", "relation"],
+  "properties": {
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Verified Entra tenant id (the `tid` claim) the envelope was authenticated against."
+    },
+    "org_binding_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "id of the entra_tenant_org_bindings row whose currency was checked at mint time."
+    },
+    "mapping_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "id of the entra_authority_mappings row that granted eligibility for `relation` on the envelope's action_type, checked at mint time."
+    },
+    "mapping_version": {
+      "type": "number",
+      "description": "version of that entra_authority_mappings row at mint time. The runtime guard accepts any finite number; the database column is INTEGER CHECK (version > 0)."
+    },
+    "relation": {
+      "type": "string",
+      "enum": ["request", "approve"],
+      "description": "Which eligibility this provenance proves: \"request\" on actor_identity.v1, \"approve\" on approval_artifact.v1."
+    }
+  }
+}

@@ -55,13 +55,57 @@
     "identity_assertion": {
       "$ref": "identity-assertion.schema.json"
     },
+    "meaning": {
+      "type": "string",
+      "enum": ["approved", "reviewed", "authored"],
+      "description": "Optional, additive (added 2026-10-03). 21 CFR Part 11 \u00a711.50(a)(2) signature meaning: what the signature signifies. Covered by the artifact signature. When absent the runtime records the historical implied meaning \"approved\". Mirrors atlasent-api _shared/approval_artifact.ts SignatureMeaning; a value outside this closed set is rejected by the runtime verifier."
+    },
+    "entra_provenance": {
+      "allOf": [
+        { "$ref": "entra-provenance.schema.json" },
+        { "properties": { "relation": { "const": "approve" } } }
+      ],
+      "description": "Optional, additive (added 2026-10-03). Entra tenant-binding and authority-mapping facts v1-idp-broker resolved when minting this approver envelope; present only when the provider was Entra ID and the action type was governed at mint time. relation is always \"approve\" on an approval artifact. Covered by the artifact signature."
+    },
+    "approval_kind": {
+      "type": "string",
+      "enum": ["single_human_over_machine"],
+      "description": "Optional, additive (ADR CROSS-056, added 2026-10-03). Absent means an ordinary human approval. \"single_human_over_machine\" is the agent owner approving one action by one key-bound agent named by subject_agent_identity_id; it satisfies requires_human_approval only, never a quorum, independent-approval or role-covered requirement. Accepted only from an issuer whose trusted-issuer entry declares this kind (enforced by the runtime, not this schema). Covered by the artifact signature."
+    },
+    "subject_agent_identity_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "Optional, additive (ADR CROSS-056, added 2026-10-03). agent_identities.id (uuid, case-insensitive) the approval is FOR. Required when approval_kind is present and rejected when it is absent. Covered by the artifact signature."
+    },
     "approver_grant_assertion": {
       "$ref": "approver-grant-assertion.schema.json",
       "description": "Optional, additive (atlasent-api#3863 / #3876, 2026-10-03). The console-signed approver_grant_assertion.v1 that authorized this approval under the atlasent_approver_grant basis. An alternative to identity_assertion, never alongside it. Covered by the artifact signature. The runtime admits it only from an approval issuer whose trusted-issuer entry declares identity_basis \"approver_grant\", and only inside an approval reevaluation of this exact approval; artifacts without this field validate and verify exactly as before."
+    },
+    "org_authority_assertion": {
+      "$ref": "org-authority-assertion.schema.json",
+      "description": "Optional, additive (atlasent-api#3798 B2a, 2026-10-03). The console-signed org_authority_assertion.v1 that authorized this approval under the atlasent_verified_org_authority basis: an owner or admin of the approval's org, after a server-side step-up. An alternative to identity_assertion and approver_grant_assertion, never alongside either. Covered by the artifact signature. The runtime admits it only from an approval issuer whose trusted-issuer entry declares identity_basis \"org_authority\", only inside an approval reevaluation of this exact approval, and only for an org_role the approval's snapshot admits; reviewer.principal_id must equal the assertion's subject.principal_id. Artifacts without this field validate and verify exactly as before."
     }
+  },
+  "dependentRequired": {
+    "approval_kind": ["subject_agent_identity_id"],
+    "subject_agent_identity_id": ["approval_kind"]
   },
   "not": {
     "description": "identity_assertion and approver_grant_assertion are alternatives: an artifact carrying both is rejected by the runtime verifier.",
     "required": ["identity_assertion", "approver_grant_assertion"]
-  }
+  },
+  "allOf": [
+    {
+      "not": {
+        "description": "identity_assertion and org_authority_assertion are alternatives (added 2026-10-03, atlasent-api#3798 B2a).",
+        "required": ["identity_assertion", "org_authority_assertion"]
+      }
+    },
+    {
+      "not": {
+        "description": "approver_grant_assertion and org_authority_assertion are alternatives (added 2026-10-03, atlasent-api#3798 B2a).",
+        "required": ["approver_grant_assertion", "org_authority_assertion"]
+      }
+    }
+  ]
 }
