@@ -1,18 +1,19 @@
 {
   "$comment": "Pins the canonical schema commit in Atlasent/atlasent that this SDK's hand-written shapes have been verified against. The schemas themselves are vendored read-only under vendor/atlasent-canonical/v1-rc/. Bumping this pin requires re-confirming that local types (python/atlasent/models.py, typescript/src/client.ts, typescript/src/types.ts) still conform to the canonical schemas at the new commit. See atlasent/schemas/v1_1/CANONICAL-FREEZE.md for the freeze doctrine.",
   "canonical_repo": "Atlasent/atlasent",
-  "canonical_commit": "ec1f2d6bfbeac38a3c7b13540fb0b1291b671df1",
+  "canonical_commit": "8b66dd2022f0c1d030d3ab15be6e5dfc7be09a57",
   "canonical_freeze_id": "schema/v1-rc",
   "vendor_path": "vendor/atlasent-canonical/v1-rc/",
-  "pinned_at": "2026-05-26T04:50:00Z",
-  "pinned_by_pr": "#273 (freeze) + #275 (soak start) + #279 (extend to 7 files) in atlasent",
+  "pinned_at": "2026-10-03T01:39:25Z",
+  "pinned_by_pr": "#273 (freeze) + #275 (soak start) + #279 (extend to 7 files) in atlasent; bumped to #796 (approver_grant_assertion, 8th file) on 2026-10-03",
   "expected_hashes": {
     "_common.schema.json":            "9d2bcfcd9b0083995530dc04d0560df6299c823bd636c6ff7799ea4a1d4656c8",
     "evaluate-request.schema.json":   "cade29feaee02a97d4b4f880a1b5e1d8244b812bd6391d9be98e8f03bba0c97f",
     "decision-snapshot.schema.json":  "67cb02a879d6c42d81fccc581f10c2afbf4a88fa5db30e2ec217029f1871b12b",
     "permit.schema.json":             "03f75bea7762ae281daa26132dfaaffefda762a6b0a718e9e838db87eb71397e",
     "audit-chain-entry.schema.json":  "4df74a5d901f54d66b6c92e7dc0d53391f6a4cce9c266b346346e754a686c2c4",
-    "approval-artifact.schema.json":  "64ce9a53132f94a050158613160ae4d1f8102a78e0d98500d5dedf7cf3d3b9f6",
+    "approval-artifact.schema.json":  "629f456b160a09dd5eaf60295477155ada55839a4156a8ac8fdcff61e82a7072",
+    "approver-grant-assertion.schema.json": "fcd950d8eeab869514c79f613b55d5957c563eab3c9a4700a7e75afec340632f",
     "identity-assertion.schema.json": "16e68461fbfdd5e75fc71cd71e3daa6d50f65a93252e947bd41e36cb64faa126"
   },
   "scope": "This is a Phase 1 parity gate: it detects that canonical schemas changed and forces a deliberate bump-and-vendor commit. It does NOT yet verify that the existing contract/tools/drift.py validation extends to these canonical shapes — drift.py currently validates against contract/schemas/ (the SDK's own copy of wire schemas), not the runtime-invariant canonical schemas in atlasent. Wiring drift.py to also check vendor/atlasent-canonical/ is the planned Phase 2 follow-up.",

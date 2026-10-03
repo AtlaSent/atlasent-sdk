@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.atlasent.io/v1.1/approver-grant-assertion.schema.json",
+  "title": "ApproverGrantAssertionV1 (v1.1)",
+  "description": "Console-signed assertion that a console user holding a specific approver grant approved one specific approval, after a server-side step-up. Evidence for the `atlasent_approver_grant` approver basis (atlasent-api#3863). It takes the place of `identity_assertion` in an approval_artifact.v1 (never both). The principal is (issuer.issuer_id, subject.principal_id); the runtime authorizes it only through an approver grant issued to exactly that pair, re-checked under a row lock when the approval commits and again when a permit is claimed. Lifetime is at most five minutes and the step-up at most five minutes old when minted; both are enforced by the runtime verifier, not by this schema. Ed25519 signature over the canonical JSON of every field except `signature`, under a key from the runtime's APPROVER_GRANT_TRUSTED_ISSUERS. Mirrored from atlasent-api/supabase/functions/_shared/approver_grant_assertion.ts (ApproverGrantAssertionV1 / isApproverGrantAssertion) and atlasent-sdk/contract/schemas/approver-grant-assertion.schema.json; they MUST stay in lockstep. Wire-stable as `approver_grant_assertion.v1`. Added 2026-10-03 (atlasent-api#3876), additive only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "basis",
+    "subject",
+    "grant_id",
+    "binding",
+    "issuer",
+    "auth_context",
+    "issued_at",
+    "expires_at",
+    "nonce",
+    "signature"
+  ],
+  "properties": {
+    "version": { "type": "string", "const": "approver_grant_assertion.v1" },
+    "basis":   { "type": "string", "const": "atlasent_approver_grant" },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal_id", "principal_kind"],
+      "properties": {
+        "principal_id":   { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "Console user id (lower-case UUID)." },
+        "principal_kind": { "type": "string", "const": "human" }
+      }
+    },
+    "grant_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "The approver grant the console read for this person (lower-case UUID)." },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval_id", "action_hash", "action_type", "tenant_id", "environment"],
+      "properties": {
+        "approval_id": { "type": "string", "minLength": 1 },
+        "action_hash": { "type": "string", "minLength": 1 },
+        "action_type": { "type": "string", "minLength": 1 },
+        "tenant_id":   { "type": "string", "minLength": 1 },
+        "environment": { "type": "string" }
+      }
+    },
+    "issuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer_id", "kid"],
+      "properties": {
+        "issuer_id": { "type": "string", "minLength": 1 },
+        "kid":       { "type": "string", "minLength": 1 }
+      }
+    },
+    "auth_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["acr", "amr", "step_up", "step_up_at"],
+      "properties": {
+        "acr":        { "type": "string", "enum": ["aal1", "aal2"], "description": "Authenticator assurance level of the console session when minted." },
+        "amr":        { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1 }, "description": "Methods the session authenticated with (RFC 8176 style), recorded as evidence." },
+        "step_up":    { "type": "string", "enum": ["aal2", "password_reauth"] },
+        "step_up_at": { "type": "string", "minLength": 1 }
+      }
+    },
+    "issued_at":  { "type": "string", "minLength": 1 },
+    "expires_at": { "type": "string", "minLength": 1 },
+    "nonce":      { "type": "string", "minLength": 16, "maxLength": 256 },
+    "signature":  { "type": "string", "minLength": 1 }
+  }
+}
