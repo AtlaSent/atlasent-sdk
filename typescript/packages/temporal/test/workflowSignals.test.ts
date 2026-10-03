@@ -49,7 +49,11 @@ vi.mock("@temporalio/workflow", () => ({
 }));
 
 vi.mock("@atlasent/sdk-v2-alpha", () => ({
-  V2Client: vi.fn(() => ({ bulkRevoke: v2BulkRevokeMock })),
+  // Vitest 4 constructs `new V2Client(...)` through the mock, so the
+  // implementation must be constructible (a `function`, not an arrow).
+  V2Client: vi.fn(function () {
+    return { bulkRevoke: v2BulkRevokeMock };
+  }),
 }));
 
 import {
