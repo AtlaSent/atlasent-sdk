@@ -232,6 +232,79 @@ class EntraProvenanceV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class OrgAuthoritySubject(BaseModel):
+    """The approver: a runtime principal and the console user it maps to."""
+
+    principal_id: str = Field(min_length=1)
+    """Runtime principal the console user maps to."""
+    principal_kind: Literal["human"]
+    console_user_id: str = Field(min_length=1)
+    """Console user id."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OrgAuthorityBinding(BaseModel):
+    """Binds the assertion to exactly one approval."""
+
+    approval_id: str = Field(min_length=1)
+    action_hash: str = Field(min_length=1)
+    tenant_id: str = Field(min_length=1)
+    environment: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OrgAuthorityIssuer(BaseModel):
+    """The console's org-authority issuer
+    (runtime ``ORG_AUTHORITY_TRUSTED_ISSUERS``)."""
+
+    issuer_id: str = Field(min_length=1)
+    kid: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OrgAuthorityAuthContext(BaseModel):
+    """The server-side step-up the console checked before minting."""
+
+    step_up: Literal["aal2", "password_reauth"]
+    step_up_at: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OrgAuthorityAssertionV1(BaseModel):
+    """Console-signed assertion that an owner or admin of the approval's
+    org approved one specific approval after a server-side step-up.
+    Evidence for the ``atlasent_verified_org_authority`` basis
+    (atlasent-api#3798, B2a); in an approval artifact it takes the place
+    of ``identity_assertion`` and ``approver_grant_assertion``, never
+    alongside either.
+
+    Wire-stable as ``org_authority_assertion.v1``. Schema lives in
+    ``contract/schemas/org-authority-assertion.schema.json``. The SDK
+    only carries it; signing and verification are server-side. Added
+    2026-10-03, additive.
+    """
+
+    version: Literal["org_authority_assertion.v1"] = "org_authority_assertion.v1"
+    basis: Literal["atlasent_verified_org_authority"] = (
+        "atlasent_verified_org_authority"
+    )
+    subject: OrgAuthoritySubject
+    org_role: Literal["owner", "admin"]
+    binding: OrgAuthorityBinding
+    issuer: OrgAuthorityIssuer
+    auth_context: OrgAuthorityAuthContext
+    issued_at: str = Field(min_length=1)
+    expires_at: str = Field(min_length=1)
+    nonce: str = Field(min_length=16, max_length=256)
+    signature: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class IdentityIssuerKey(BaseModel):
     """One entry in ``IDENTITY_TRUSTED_ISSUERS[issuer_id][kid]``.
 
@@ -312,6 +385,11 @@ class ApprovalArtifactV1(BaseModel):
     """Optional, additive (atlasent-api#3876): the approver-grant basis
     alternative to ``identity_assertion``. Carrying both is rejected,
     as the runtime verifier and the JSON Schema reject it."""
+    org_authority_assertion: OrgAuthorityAssertionV1 | None = None
+    """Optional, additive (atlasent-api#3798 B2a): the verified
+    org-authority basis. An alternative to both ``identity_assertion`` and
+    ``approver_grant_assertion``; carrying it alongside either is
+    rejected, as the runtime verifier and the JSON Schema reject it."""
     meaning: SignatureMeaning | None = None
     """Optional, additive (2026-10-03): §11.50(a)(2) signature meaning.
     Signed. Absent means ``approved``."""
@@ -339,6 +417,14 @@ class ApprovalArtifactV1(BaseModel):
             raise ValueError(
                 "approval artifact carries both an identity assertion and an "
                 "approver grant assertion"
+            )
+        if self.org_authority_assertion is not None and (
+            self.identity_assertion is not None
+            or self.approver_grant_assertion is not None
+        ):
+            raise ValueError(
+                "approval artifact carries an org authority assertion alongside "
+                "another identity basis"
             )
         return self
 
@@ -589,6 +675,11 @@ __all__ = [
     "IdentityIssuerKey",
     "IdentitySubject",
     "IdentityTrustedIssuersConfig",
+    "OrgAuthorityAssertionV1",
+    "OrgAuthorityAuthContext",
+    "OrgAuthorityBinding",
+    "OrgAuthorityIssuer",
+    "OrgAuthoritySubject",
     "PermitApprovalBinding",
     "PrincipalKind",
     "QuorumIndependence",

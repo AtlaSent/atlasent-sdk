@@ -8,6 +8,17 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: `org_authority_assertion` on `approval_artifact.v1` (additive)
+
+Mirrors atlasent-api#3798 (B2a). An approval artifact may now carry an optional
+`org_authority_assertion` (`org_authority_assertion.v1`), the console-signed
+evidence for the `atlasent_verified_org_authority` approver basis: an owner or
+admin of the approval's org, after a server-side step-up. New `OrgAuthorityAssertionV1` (plus `OrgAuthoritySubject`, `OrgAuthorityRole`, `OrgAuthorityBinding`, `OrgAuthorityIssuer`, `OrgAuthorityAuthContext`, `OrgAuthorityStepUp`) types, exported from the package entrypoint. An artifact
+carrying it alongside `identity_assertion` or `approver_grant_assertion` is
+rejected, as the runtime rejects it. Artifacts without the field are unchanged.
+The SDK carries the assertion; it never signs or verifies it. Contract:
+`contract/schemas/org-authority-assertion.schema.json`.
+
 ### Build: TypeScript 7 (#482)
 
 The package now typechecks and emits its declarations with TypeScript 7.0.
