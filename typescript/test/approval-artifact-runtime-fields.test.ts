@@ -114,7 +114,7 @@ describe("approval_artifact.v1 runtime fields: contract parity", () => {
   it("runtime-shaped artifacts only use schema-declared keys", () => {
     const declared = new Set(Object.keys(schema.properties));
     for (const a of [entraArtifact, kindArtifact]) {
-      for (const [k, v] of Object.entries(a)) {
+      for (const k of Object.keys(a)) {
         expect(declared.has(k), k).toBe(true);
       }
     }
