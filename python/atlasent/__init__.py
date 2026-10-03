@@ -77,6 +77,7 @@ _LAZY_MODULES: dict[str, tuple[str, ...]] = {
     ".approval_artifact": (
         "ApprovalArtifactV1",
         "ApprovalIssuer",
+        "ApprovalKind",
         "ApprovalQuorumV1",
         "ApprovalReference",
         "ApprovalReviewer",
@@ -86,6 +87,7 @@ _LAZY_MODULES: dict[str, tuple[str, ...]] = {
         "ApproverGrantBinding",
         "ApproverGrantIssuer",
         "ApproverGrantSubject",
+        "EntraProvenanceV1",
         "IdentityAssertionBinding",
         "IdentityAssertionV1",
         "IdentityIssuer",
@@ -98,6 +100,7 @@ _LAZY_MODULES: dict[str, tuple[str, ...]] = {
         "QuorumPolicy",
         "QuorumProof",
         "QuorumRoleRequirement",
+        "SignatureMeaning",
         "TrustedIssuerKey",
     ),
     ".async_client": ("AsyncAtlaSentClient",),
@@ -591,6 +594,7 @@ if TYPE_CHECKING:
     from .approval_artifact import (
         ApprovalArtifactV1,
         ApprovalIssuer,
+        ApprovalKind,
         ApprovalQuorumV1,
         ApprovalReference,
         ApprovalReviewer,
@@ -600,6 +604,7 @@ if TYPE_CHECKING:
         ApproverGrantBinding,
         ApproverGrantIssuer,
         ApproverGrantSubject,
+        EntraProvenanceV1,
         IdentityAssertionBinding,
         IdentityAssertionV1,
         IdentityIssuer,
@@ -612,6 +617,7 @@ if TYPE_CHECKING:
         QuorumPolicy,
         QuorumProof,
         QuorumRoleRequirement,
+        SignatureMeaning,
         TrustedIssuerKey,
     )
     from .async_client import AsyncAtlaSentClient
@@ -1202,6 +1208,7 @@ __all__ = [
     # Approval artifact contract surface (parity with the TS SDK).
     "ApprovalArtifactV1",
     "ApprovalIssuer",
+    "ApprovalKind",
     "ApprovalQuorumV1",
     "ApprovalReference",
     "ApprovalReviewer",
@@ -1211,6 +1218,7 @@ __all__ = [
     "ApproverGrantBinding",
     "ApproverGrantIssuer",
     "ApproverGrantSubject",
+    "EntraProvenanceV1",
     "IdentityAssertionBinding",
     "IdentityAssertionV1",
     "IdentityIssuer",
@@ -1223,6 +1231,7 @@ __all__ = [
     "QuorumPolicy",
     "QuorumProof",
     "QuorumRoleRequirement",
+    "SignatureMeaning",
     "TrustedIssuerKey",
     # Governance webhooks (parity with the TS SDK).
     "GovernanceWebhookEvent",

@@ -32,6 +32,32 @@ export interface ApprovalIssuer {
   kid: string;
 }
 
+/**
+ * 21 CFR Part 11 §11.50(a)(2) signature meaning. Absent means the
+ * runtime records the historical implied meaning `"approved"`.
+ */
+export type SignatureMeaning = "approved" | "reviewed" | "authored";
+
+/** ADR CROSS-056 approval kind. Absent means an ordinary human approval. */
+export type ApprovalKind = "single_human_over_machine";
+
+/**
+ * Entra tenant-binding and authority-mapping facts the runtime's
+ * `v1-idp-broker` resolved when it minted an envelope through Entra ID.
+ * Carried inside the signed envelope; `relation` is `"approve"` on
+ * `approval_artifact.v1` and `"request"` on `actor_identity.v1`.
+ * Schema: `contract/schemas/entra-provenance.schema.json`.
+ */
+export interface EntraProvenanceV1 {
+  /** Verified Entra tenant id (the `tid` claim). */
+  tenant_id: string;
+  org_binding_id: string;
+  mapping_id: string;
+  /** Authority-mapping version at mint time. */
+  mapping_version: number;
+  relation: "request" | "approve";
+}
+
 // Re-exported here so the artifact's optional identity_assertion
 // field type-checks at SDK boundaries without consumers having to
 // know about a second module.
@@ -72,6 +98,27 @@ export interface ApprovalArtifactV1 {
    * carrying both is rejected by the runtime and by the schema.
    */
   approver_grant_assertion?: ApproverGrantAssertionV1;
+  /**
+   * Optional, additive (2026-10-03): §11.50(a)(2) signature meaning.
+   * Signed. Absent means `"approved"`.
+   */
+  meaning?: SignatureMeaning;
+  /**
+   * Optional, additive (2026-10-03): present only on artifacts minted
+   * through Entra ID for a governed action type. `relation` is always
+   * `"approve"` here. Signed.
+   */
+  entra_provenance?: EntraProvenanceV1 & { relation: "approve" };
+  /**
+   * Optional, additive (ADR CROSS-056, 2026-10-03). Signed. Present
+   * together with `subject_agent_identity_id` or not at all.
+   */
+  approval_kind?: ApprovalKind;
+  /**
+   * `agent_identities.id` (uuid) the approval is FOR. Required when
+   * `approval_kind` is present; rejected without it. Signed.
+   */
+  subject_agent_identity_id?: string;
 }
 
 /**

@@ -18,7 +18,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    model_validator,
+)
 
 PrincipalKind = Literal["human", "agent", "service_account"]
 """What kind of principal performed the approval. The verifier
@@ -190,6 +197,41 @@ class ApproverGrantAssertionV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+SignatureMeaning = Literal["approved", "reviewed", "authored"]
+"""21 CFR Part 11 §11.50(a)(2) signature meaning carried by an approval
+artifact. Absent means the runtime records the historical implied
+meaning ``approved``."""
+
+ApprovalKind = Literal["single_human_over_machine"]
+"""ADR CROSS-056 approval kind. Absent means an ordinary human approval."""
+
+_UUID_PATTERN_CI = (
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+class EntraProvenanceV1(BaseModel):
+    """Entra tenant-binding and authority-mapping facts the runtime's
+    ``v1-idp-broker`` resolved when it minted an envelope through Entra
+    ID. Carried inside the signed envelope. ``relation`` is ``approve``
+    on ``approval_artifact.v1`` and ``request`` on ``actor_identity.v1``.
+
+    Schema: ``contract/schemas/entra-provenance.schema.json``. The SDK
+    only carries it. Added 2026-10-03, additive.
+    """
+
+    tenant_id: str = Field(min_length=1)
+    """Verified Entra tenant id (the ``tid`` claim)."""
+    org_binding_id: str = Field(min_length=1)
+    mapping_id: str = Field(min_length=1)
+    mapping_version: StrictInt | StrictFloat
+    """Version of the authority mapping at mint time (an integer in
+    the runtime database; the runtime guard accepts any finite number)."""
+    relation: Literal["request", "approve"]
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class IdentityIssuerKey(BaseModel):
     """One entry in ``IDENTITY_TRUSTED_ISSUERS[issuer_id][kid]``.
 
@@ -270,6 +312,21 @@ class ApprovalArtifactV1(BaseModel):
     """Optional, additive (atlasent-api#3876): the approver-grant basis
     alternative to ``identity_assertion``. Carrying both is rejected,
     as the runtime verifier and the JSON Schema reject it."""
+    meaning: SignatureMeaning | None = None
+    """Optional, additive (2026-10-03): §11.50(a)(2) signature meaning.
+    Signed. Absent means ``approved``."""
+    entra_provenance: EntraProvenanceV1 | None = None
+    """Optional, additive (2026-10-03): present only on artifacts minted
+    through Entra ID for a governed action type. ``relation`` must be
+    ``approve`` here. Signed."""
+    approval_kind: ApprovalKind | None = None
+    """Optional, additive (ADR CROSS-056, 2026-10-03). Signed. Present
+    together with ``subject_agent_identity_id`` or not at all."""
+    subject_agent_identity_id: str | None = Field(
+        default=None, pattern=_UUID_PATTERN_CI
+    )
+    """agent_identities.id (uuid) the approval is FOR. Required when
+    ``approval_kind`` is present; rejected without it. Signed."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -282,6 +339,28 @@ class ApprovalArtifactV1(BaseModel):
             raise ValueError(
                 "approval artifact carries both an identity assertion and an "
                 "approver grant assertion"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _kind_and_subject_together(self) -> ApprovalArtifactV1:
+        # Mirrors the runtime verifier: a kind requires a uuid subject,
+        # and a subject is only valid with a kind.
+        if (self.approval_kind is None) != (self.subject_agent_identity_id is None):
+            raise ValueError(
+                "approval_kind and subject_agent_identity_id must be present "
+                "together"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _entra_relation_is_approve(self) -> ApprovalArtifactV1:
+        if (
+            self.entra_provenance is not None
+            and self.entra_provenance.relation != "approve"
+        ):
+            raise ValueError(
+                "entra_provenance.relation must be 'approve' on an approval artifact"
             )
         return self
 
@@ -493,6 +572,7 @@ class QuorumProof(BaseModel):
 __all__ = [
     "ApprovalArtifactV1",
     "ApprovalIssuer",
+    "ApprovalKind",
     "ApprovalQuorumV1",
     "ApprovalReference",
     "ApprovalReviewer",
@@ -502,6 +582,7 @@ __all__ = [
     "ApproverGrantBinding",
     "ApproverGrantIssuer",
     "ApproverGrantSubject",
+    "EntraProvenanceV1",
     "IdentityAssertionBinding",
     "IdentityAssertionV1",
     "IdentityIssuer",
@@ -514,5 +595,6 @@ __all__ = [
     "QuorumPolicy",
     "QuorumProof",
     "QuorumRoleRequirement",
+    "SignatureMeaning",
     "TrustedIssuerKey",
 ]

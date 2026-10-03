@@ -317,7 +317,10 @@ export type {
   ApprovalIssuer,
   ApprovalReference,
   ApprovalReviewer,
+  ApprovalKind,
+  EntraProvenanceV1,
   PrincipalKind,
+  SignatureMeaning,
 } from "./approvalArtifact.js";
 export type {
   IdentityAssertionBinding,
