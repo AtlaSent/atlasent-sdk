@@ -59,8 +59,10 @@ The minimum payload is `{ source: "<your-system>", complete: true }`. Add any st
 
 AtlaSent is **authorize-before-execute**, not after-the-fact logging. The two-step pattern is intentional:
 
-1. **`evaluate()`** asks the policy engine: "should this action run?" Returns a decision and, when allowed, a single-use **permit token** — a cryptographic proof that evaluation happened.
-2. **`verifyPermit()`** consumes the permit server-side *before* the action executes. This is what makes the audit chain tamper-evident: every execution is hash-linked to the evaluation that authorized it, and no permit can be replayed.
+1. **`evaluate()`** asks the policy engine: "should this action run?" Returns a Decision and, when allowed, a single-use **Permit**: a bounded authorization artifact for this one execution attempt. A Permit is not Proof. It says the attempt may proceed. It does not record that the action ran.
+2. **`verifyPermit()`** checks the Permit and consumes it server-side *before* the action executes, so a Permit cannot be replayed. Keep the native side effect unreachable until this check succeeds.
+
+Permit Verification and evidence integrity are separate mechanisms. Verification is a point-in-time check before the effect. Evidence / Proof is the durable record linking the Decision to what executed, and AtlaSent's audit chain is what makes that record tamper-evident. Calling `verifyPermit()` does not by itself make anything tamper-evident. See the root [README](https://github.com/Atlasent/atlasent-sdk#authority-policy-approval-and-permit) for the full vocabulary.
 
 **You rarely call them separately.** `deployGate()` wraps both steps for deploy workflows. The Python SDK's `protect()` wraps them for arbitrary actions. Use the raw two-step form only when something external — a human approval, a change-window check — needs to happen *between* evaluate and execute (evaluate → wait → verify → run).
 
