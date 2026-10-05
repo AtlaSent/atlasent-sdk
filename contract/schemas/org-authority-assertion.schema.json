@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlasent.io/contract/v1/org-authority-assertion.schema.json",
+  "title": "OrgAuthorityAssertionV1",
+  "description": "Console-signed assertion that a console user who is an owner or admin of the approval's org approved one specific approval, after a server-side step-up. Evidence for the `atlasent_verified_org_authority` approver basis (atlasent-api#3798, B2a). It takes the place of `identity_assertion` and `approver_grant_assertion` in an approval_artifact.v1 (never alongside either). subject.principal_id is the RUNTIME principal the console user maps to; subject.console_user_id is the console user. The runtime admits the assertion only for an org_role the approval's snapshot admits, re-checks membership and role when the approval commits, and consumes the nonce once. Lifetime is at most five minutes and the step-up at most five minutes old when issued; both are enforced by the runtime verifier, not by this schema. Ed25519 signature (base64url, no padding) over the canonical JSON of every field except `signature`, under a key from the runtime's ORG_AUTHORITY_TRUSTED_ISSUERS. Mirrored from atlasent-api/supabase/functions/_shared/org_authority_assertion.ts (OrgAuthorityAssertionV1 / isOrgAuthorityAssertion) and atlasent/schemas/v1_1/org-authority-assertion.schema.json; they MUST stay in lockstep. Wire-stable as `org_authority_assertion.v1`. Added 2026-10-03, additive only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "basis",
+    "subject",
+    "org_role",
+    "binding",
+    "issuer",
+    "auth_context",
+    "issued_at",
+    "expires_at",
+    "nonce",
+    "signature"
+  ],
+  "properties": {
+    "version": { "type": "string", "const": "org_authority_assertion.v1" },
+    "basis":   { "type": "string", "const": "atlasent_verified_org_authority" },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal_id", "principal_kind", "console_user_id"],
+      "properties": {
+        "principal_id":    { "type": "string", "minLength": 1, "description": "Runtime principal the console user maps to." },
+        "principal_kind":  { "type": "string", "const": "human" },
+        "console_user_id": { "type": "string", "minLength": 1, "description": "Console user id." }
+      }
+    },
+    "org_role": { "type": "string", "enum": ["owner", "admin"] },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval_id", "action_hash", "tenant_id", "environment"],
+      "properties": {
+        "approval_id": { "type": "string", "minLength": 1 },
+        "action_hash": { "type": "string", "minLength": 1 },
+        "tenant_id":   { "type": "string", "minLength": 1 },
+        "environment": { "type": "string" }
+      }
+    },
+    "issuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer_id", "kid"],
+      "properties": {
+        "issuer_id": { "type": "string", "minLength": 1 },
+        "kid":       { "type": "string", "minLength": 1 }
+      }
+    },
+    "auth_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step_up", "step_up_at"],
+      "properties": {
+        "step_up":    { "type": "string", "enum": ["aal2", "password_reauth"] },
+        "step_up_at": { "type": "string", "minLength": 1 }
+      }
+    },
+    "issued_at":  { "type": "string", "minLength": 1 },
+    "expires_at": { "type": "string", "minLength": 1 },
+    "nonce":      { "type": "string", "minLength": 16, "maxLength": 256 },
+    "signature":  { "type": "string", "minLength": 1 }
+  }
+}

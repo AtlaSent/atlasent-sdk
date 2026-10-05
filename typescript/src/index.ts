@@ -339,6 +339,15 @@ export type {
   ApproverGrantSubject,
 } from "./approverGrantAssertion.js";
 export type {
+  OrgAuthorityAssertionV1,
+  OrgAuthorityAuthContext,
+  OrgAuthorityBinding,
+  OrgAuthorityIssuer,
+  OrgAuthorityRole,
+  OrgAuthorityStepUp,
+  OrgAuthoritySubject,
+} from "./orgAuthorityAssertion.js";
+export type {
   ApprovalQuorumV1,
   QuorumIndependence,
   QuorumPolicy,

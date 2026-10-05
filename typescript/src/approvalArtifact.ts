@@ -63,6 +63,7 @@ export interface EntraProvenanceV1 {
 // know about a second module.
 import type { IdentityAssertionV1 } from "./identityAssertion.js";
 import type { ApproverGrantAssertionV1 } from "./approverGrantAssertion.js";
+import type { OrgAuthorityAssertionV1 } from "./orgAuthorityAssertion.js";
 
 /**
  * The full signed approval artifact. Producers (approval services)
@@ -98,6 +99,14 @@ export interface ApprovalArtifactV1 {
    * carrying both is rejected by the runtime and by the schema.
    */
   approver_grant_assertion?: ApproverGrantAssertionV1;
+  /**
+   * Optional, additive (atlasent-api#3798 B2a): the console-signed
+   * org_authority_assertion.v1 for the `atlasent_verified_org_authority`
+   * basis. An alternative to `identity_assertion` and
+   * `approver_grant_assertion`; an artifact carrying it alongside either
+   * is rejected by the runtime and by the schema.
+   */
+  org_authority_assertion?: OrgAuthorityAssertionV1;
   /**
    * Optional, additive (2026-10-03): §11.50(a)(2) signature meaning.
    * Signed. Absent means `"approved"`.

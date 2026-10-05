@@ -958,3 +958,130 @@ def test_entra_provenance_model_matches_schema() -> None:
         "approval_kind": ["subject_agent_identity_id"],
         "subject_agent_identity_id": ["approval_kind"],
     }
+
+
+# ── org_authority_assertion.v1 (atlasent-api#3798 B2a) ───────────────
+
+from atlasent import OrgAuthorityAssertionV1  # noqa: E402
+
+_ORG = {
+    "version": "org_authority_assertion.v1",
+    "basis": "atlasent_verified_org_authority",
+    "subject": {
+        "principal_id": "88888888-8888-4888-8888-888888888888",
+        "principal_kind": "human",
+        "console_user_id": "22222222-2222-4222-8222-222222222222",
+    },
+    "org_role": "owner",
+    "binding": {
+        "approval_id": "apr_123",
+        "action_hash": "f" * 64,
+        "tenant_id": "tnt_1",
+        "environment": "production",
+    },
+    "issuer": {"issuer_id": "atlasent-console.org-authority", "kid": "kid-1"},
+    "auth_context": {
+        "step_up": "password_reauth",
+        "step_up_at": "2026-10-03T00:00:00Z",
+    },
+    "issued_at": "2026-10-03T00:00:00Z",
+    "expires_at": "2026-10-03T00:05:00Z",
+    "nonce": "0123456789abcdef",
+    "signature": "c2ln",
+}
+
+_IDENTITY_FOR_ORG = {
+    "version": "identity_assertion.v1",
+    "subject": {"principal_id": "u1", "principal_kind": "human"},
+    "role": "approver",
+    "binding": {
+        "approval_id": "apr_123",
+        "action_hash": "f" * 64,
+        "tenant_id": "tnt_1",
+        "environment": "",
+    },
+    "issuer": {"type": "oidc", "issuer_id": "idp", "kid": "k1"},
+    "issued_at": "2026-10-03T00:00:00Z",
+    "expires_at": "2026-10-03T00:05:00Z",
+    "signature": "sig",
+}
+
+
+def _jsonschema_errors(payload: dict) -> list[str]:
+    jsonschema = pytest.importorskip("jsonschema")
+    referencing = pytest.importorskip("referencing")
+    registry = referencing.Registry()
+    for p in _CONTRACT_SCHEMAS.glob("*.schema.json"):
+        schema = json.loads(p.read_text())
+        res = referencing.Resource.from_contents(schema)
+        registry = registry.with_resource(uri=schema.get("$id", p.name), resource=res)
+        registry = registry.with_resource(uri=p.name, resource=res)
+    art = json.loads((_CONTRACT_SCHEMAS / "approval-artifact.schema.json").read_text())
+    v = jsonschema.Draft202012Validator(art, registry=registry)
+    return [e.message for e in v.iter_errors(payload)]
+
+
+def test_org_authority_assertion_model_matches_schema() -> None:
+    schema = json.loads(
+        (_CONTRACT_SCHEMAS / "org-authority-assertion.schema.json").read_text()
+    )
+    assert set(OrgAuthorityAssertionV1.model_fields) == set(schema["properties"])
+    assert set(schema["required"]) == set(schema["properties"])
+    for key in ("subject", "binding", "issuer", "auth_context"):
+        sub = OrgAuthorityAssertionV1.model_fields[key].annotation
+        assert set(sub.model_fields) == set(schema["properties"][key]["properties"])
+    art = json.loads((_CONTRACT_SCHEMAS / "approval-artifact.schema.json").read_text())
+    assert set(ApprovalArtifactV1.model_fields) == set(art["properties"])
+    assert "org_authority_assertion" not in art["required"]
+
+
+def test_artifact_with_org_authority_round_trips_and_validates() -> None:
+    payload = {**_ARTIFACT, "org_authority_assertion": _ORG}
+    a = ApprovalArtifactV1.model_validate(payload)
+    assert a.org_authority_assertion is not None
+    assert a.org_authority_assertion.org_role == "owner"
+    assert a.model_dump(exclude_none=True)["org_authority_assertion"] == _ORG
+    assert _jsonschema_errors(payload) == []
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        {"identity_assertion": _IDENTITY_FOR_ORG},
+        {"approver_grant_assertion": _GRANT},
+    ],
+)
+def test_org_authority_alongside_another_basis_rejected(other: dict) -> None:
+    payload = {**_ARTIFACT, "org_authority_assertion": _ORG, **other}
+    with pytest.raises(ValidationError):
+        ApprovalArtifactV1.model_validate(payload)
+    assert _jsonschema_errors(payload) != []
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        (("org_role",), "member"),
+        (("basis",), "atlasent_approver_grant"),
+        (("version",), "org_authority_assertion.v2"),
+        (("subject", "principal_kind"), "agent"),
+        (("auth_context", "step_up"), "sms"),
+        (("nonce",), "short"),
+    ],
+)
+def test_malformed_org_authority_assertion_rejected(path: tuple, value: str) -> None:
+    org = copy.deepcopy(_ORG)
+    target = org
+    for k in path[:-1]:
+        target = target[k]
+    target[path[-1]] = value
+    with pytest.raises(ValidationError):
+        OrgAuthorityAssertionV1.model_validate(org)
+    assert _jsonschema_errors({**_ARTIFACT, "org_authority_assertion": org}) != []
+
+
+def test_org_authority_extra_field_rejected() -> None:
+    org = copy.deepcopy(_ORG)
+    org["subject"]["grant_id"] = "x"
+    with pytest.raises(ValidationError):
+        OrgAuthorityAssertionV1.model_validate(org)

@@ -118,6 +118,10 @@
     "approver_grant_assertion": {
       "$ref": "approver-grant-assertion.schema.json",
       "description": "Optional, additive (atlasent-api#3863 / #3876, 2026-10-03). The console-signed approver_grant_assertion.v1 that authorized this approval under the atlasent_approver_grant basis. An alternative to identity_assertion, never alongside it. Covered by the artifact signature. The runtime admits it only from an approval issuer whose trusted-issuer entry declares identity_basis \"approver_grant\", and only inside an approval reevaluation of this exact approval; artifacts without this field validate and verify exactly as before."
+    },
+    "org_authority_assertion": {
+      "$ref": "org-authority-assertion.schema.json",
+      "description": "Optional, additive (atlasent-api#3798 B2a, 2026-10-03). The console-signed org_authority_assertion.v1 that authorized this approval under the atlasent_verified_org_authority basis: an owner or admin of the approval's org, after a server-side step-up. An alternative to identity_assertion and approver_grant_assertion, never alongside either. Covered by the artifact signature. The runtime admits it only from an approval issuer whose trusted-issuer entry declares identity_basis \"org_authority\", only inside an approval reevaluation of this exact approval, and only for an org_role the approval's snapshot admits; reviewer.principal_id must equal the assertion's subject.principal_id. Artifacts without this field validate and verify exactly as before."
     }
   },
   "dependentRequired": {
@@ -127,5 +131,20 @@
   "not": {
     "description": "identity_assertion and approver_grant_assertion are alternatives: an artifact carrying both is rejected by the runtime verifier.",
     "required": ["identity_assertion", "approver_grant_assertion"]
-  }
+  },
+  "allOf": [
+    {
+      "not": {
+        "description": "identity_assertion and org_authority_assertion are alternatives (added 2026-10-03, atlasent-api#3798 B2a).",
+        "required": ["identity_assertion", "org_authority_assertion"]
+      }
+    },
+    {
+      "not": {
+        "description": "approver_grant_assertion and org_authority_assertion are alternatives (added 2026-10-03, atlasent-api#3798 B2a).",
+        "required": ["approver_grant_assertion", "org_authority_assertion"]
+      }
+    }
+  ]
 }
+

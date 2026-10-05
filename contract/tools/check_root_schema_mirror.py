@@ -50,6 +50,7 @@ MIRRORED = (
     "identity-assertion.schema.json",
     "approver-grant-assertion.schema.json",
     "entra-provenance.schema.json",
+    "org-authority-assertion.schema.json",
     "approval-quorum.schema.json",
     "trusted-issuers-config.schema.json",
     "identity-trusted-issuers-config.schema.json",

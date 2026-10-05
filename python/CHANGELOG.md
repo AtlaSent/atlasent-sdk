@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added: `org_authority_assertion` on `approval_artifact.v1` (additive)
+
+Mirrors atlasent-api#3798 (B2a). An approval artifact may now carry an optional
+`org_authority_assertion` (`org_authority_assertion.v1`), the console-signed
+evidence for the `atlasent_verified_org_authority` approver basis: an owner or
+admin of the approval's org, after a server-side step-up. New `OrgAuthorityAssertionV1` (plus `OrgAuthoritySubject`, `OrgAuthorityBinding`, `OrgAuthorityIssuer`, `OrgAuthorityAuthContext`) pydantic models, exported from `atlasent`. An artifact
+carrying it alongside `identity_assertion` or `approver_grant_assertion` is
+rejected, as the runtime rejects it. Artifacts without the field are unchanged.
+The SDK carries the assertion; it never signs or verifies it. Contract:
+`contract/schemas/org-authority-assertion.schema.json`.
+
 ### Added: `meaning`, `entra_provenance`, `approval_kind`, `subject_agent_identity_id` on `approval_artifact.v1` (additive)
 
 The runtime (atlasent-api `_shared/approval_artifact.ts`) emits and signs these
