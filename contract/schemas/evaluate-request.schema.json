@@ -73,6 +73,10 @@
       "maxLength": 256,
       "description": "2026-08-13: optional caller-generated identifier for one intended organizational effect (recommended: ULID or UUIDv4 — never a content hash). Generated once by the trusted orchestrator before the first evaluate() call for that effect and presented unchanged on every re-evaluation/retry of the SAME intent (a crash-retry re-evaluates for real and gets a new decision_id, but must reuse the same operation_intent_id). Bound into the issued permit's signed claims; /v1-verify-permit cross-checks a presented value against the bound one and denies PERMIT_BINDING_MISMATCH on disagreement. Used by the consequential-operation substrate as part of operation identity (organization + provider/destination + protected action + operation_intent_id) so two independent requests with identical payloads never collide, while a genuine retry of the same intent does. Distinct from `request_id` (a single-call replay/idempotency key) and from decision_id (audit lineage only, never operation identity) — see packages/types/src/operation-intent.ts in atlasent for the full design."
     },
+    "actor_identity": {
+      "type": "object",
+      "description": "2026-10-10 (atlasent-api#3915): optional top-level actor_identity.v1 assertion for the calling actor, forwarded unchanged by SDKs (never minted or inspected client-side). Required by /v1-evaluate for the mandatory change-control action types (production.deploy, infrastructure.change, production.rollback, secret.configuration.change): without one the runtime denies ACTOR_UNVERIFIED before any policy runs. Never nested under `context`."
+    },
     "environment": {
       "type": "string",
       "description": "Deployment environment where the action executes (e.g. 'production', 'staging'). Bound into the permit and used for enforcement-posture lookups."

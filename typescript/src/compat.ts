@@ -36,6 +36,8 @@ export interface LegacyEvaluateRequest {
    * `protect()`.
    */
   execution_payload_hash?: string;
+  /** Present on the legacy shape for the same reason as the digest above. */
+  actor_identity?: Record<string, unknown>;
 }
 
 /** v2.0 evaluate request shape (canonical wire format). */
@@ -83,6 +85,8 @@ export interface V2EvaluateRequest {
    * `execution_payload_hash` is DROPPED, not rejected".
    */
   execution_payload_hash?: string;
+  /** The actor's `actor_identity.v1` assertion, sent top-level and unchanged. */
+  actor_identity?: Record<string, unknown>;
   /**
    * State snapshot of the system at evaluation time. Required when the action
    * class has `requires_state_snapshot = true`. Omitting causes a
@@ -191,6 +195,8 @@ export function normalizeEvaluateRequest(
   // it, with no error, which is the same silent-drop defect the comment block
   // in client.evaluate already records for three other fields.
   if (src.execution_payload_hash !== undefined) normalized.execution_payload_hash = src.execution_payload_hash;
+  // Same rebuild hazard as the digest: protect() takes this branch.
+  if (src.actor_identity !== undefined) normalized.actor_identity = src.actor_identity;
   if (src.state_snapshot !== undefined) normalized.state_snapshot = src.state_snapshot;
   if (src.evaluation_profile !== undefined) normalized.evaluation_profile = src.evaluation_profile;
   if (src.override !== undefined) normalized.override = src.override;

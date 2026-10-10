@@ -29,6 +29,10 @@
       "minLength": 1,
       "maxLength": 256,
       "description": "2026-08-13: optional cross-check — re-present the operation_intent_id supplied at evaluate time (see evaluate-request.schema.json). When the permit carries a bound operation_intent_id and the presented value disagrees (or is omitted where the binding requires it), the verifier denies PERMIT_BINDING_MISMATCH — the same frozen verify_error_code already used for a target_id disagreement, not a new code."
+    },
+    "actor_identity": {
+      "type": "object",
+      "description": "2026-10-10 (atlasent-api#3915): optional actor_identity.v1 assertion for the PERMIT's actor, forwarded unchanged. Required when the action class's server-owned execution_principal_binding is `verified_actor` (ACTOR_IDENTITY_REQUIRED when omitted, ACTOR_IDENTITY_INVALID when it does not verify against the permit's actor, action type, tenant and environment). Ignored in every other mode, so presenting one is always safe. The caller cannot choose or downgrade the mode."
     }
   }
 }

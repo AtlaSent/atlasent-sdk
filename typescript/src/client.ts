@@ -611,6 +611,8 @@ export function buildEvaluateBody(
   // runtime's bare-hex gate is the authority on the accepted form, and
   // `ProtectRequest.executionPayloadHash` normalizes before it reaches here.
   if (normalized.execution_payload_hash !== undefined) body.execution_payload_hash = normalized.execution_payload_hash;
+  // TOP-LEVEL, same as the digest: the runtime reads `body.actor_identity`.
+  if (normalized.actor_identity !== undefined) body.actor_identity = normalized.actor_identity;
   if (normalized.state_snapshot !== undefined) body.state_snapshot = normalized.state_snapshot;
   // These three are genuinely read server-side (resolveProfile(),
   // the emergency-override gate, and the quorum check respectively) —
@@ -1265,6 +1267,9 @@ export class AtlaSentClient {
     }
     if (input.execution_hash !== undefined) {
       body.execution_hash = input.execution_hash;
+    }
+    if (input.actorIdentity !== undefined) {
+      body.actor_identity = input.actorIdentity;
     }
     const { body: wire, rateLimit } = await this.post<VerifyPermitWire>(
       "/v1-verify-permit",

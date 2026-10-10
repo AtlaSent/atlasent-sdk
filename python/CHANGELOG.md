@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added: `actor_identity` on evaluate, verify and `protect()` (additive)
+
+atlasent-api#3915. The runtime requires an `actor_identity.v1` at evaluate for
+the mandatory change-control action types (`production.deploy`,
+`infrastructure.change`, `production.rollback`,
+`secret.configuration.change`; deny `ACTOR_UNVERIFIED` without one), and at
+verify when the action class is classified `verified_actor`. The SDK had no
+way to send one. `evaluate()`, `verify()` and `protect()` (sync and async) now
+take `actor_identity=` and send it top-level; `protect()` presents it at both
+boundaries and includes it in the fallback `execution_hash`, because the
+server hashes the whole evaluate body. The SDK forwards it unchanged and never
+mints or inspects it. Omitting it sends byte-identical requests.
+
 ### Added: `org_authority_assertion` on `approval_artifact.v1` (additive)
 
 Mirrors atlasent-api#3798 (B2a). An approval artifact may now carry an optional

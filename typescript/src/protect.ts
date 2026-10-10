@@ -72,6 +72,43 @@ export interface ProtectRequest {
    * choice.
    */
   executionPayloadHash?: string;
+  /**
+   * The actor's `actor_identity.v1` assertion. Presented unchanged at BOTH
+   * boundaries: as `actor_identity` on evaluate (required there for the
+   * mandatory change-control action types such as `production.deploy`) and
+   * at verify (required when the action class is classified
+   * `verified_actor`, atlasent-api#3915). The SDK never mints or inspects
+   * it, and omitting it sends byte-identical requests to before.
+   */
+  actorIdentity?: Record<string, unknown>;
+}
+
+/**
+ * The evaluate request protect() sends: the caller's request plus the
+ * camelCase-to-wire fields at the TOP LEVEL (`execution_payload_hash`,
+ * `actor_identity`), never inside `context`. With neither supplied it returns
+ * the caller's object itself, so the request is byte-identical to before.
+ * Spreads rather than mutates: `request` is the caller's object.
+ */
+function withWireBindings(
+  request: ProtectRequest,
+  executionPayloadHash: string | undefined,
+): ProtectRequest & {
+  execution_payload_hash?: string;
+  actor_identity?: Record<string, unknown>;
+} {
+  if (executionPayloadHash === undefined && request.actorIdentity === undefined) {
+    return request;
+  }
+  return {
+    ...request,
+    ...(executionPayloadHash !== undefined
+      ? { execution_payload_hash: executionPayloadHash }
+      : {}),
+    ...(request.actorIdentity !== undefined
+      ? { actor_identity: request.actorIdentity }
+      : {}),
+  };
 }
 
 /**
@@ -329,10 +366,7 @@ export async function protect(request: ProtectRequest): Promise<Permit> {
   // buildEvaluateBody(evaluateRequest) — the same pure function on the same
   // input client.evaluate() gets, so it hashes the bytes that were posted
   // rather than a reconstruction that can drift from them.
-  const evaluateRequest =
-    executionPayloadHash !== undefined
-      ? { ...request, execution_payload_hash: executionPayloadHash }
-      : request;
+  const evaluateRequest = withWireBindings(request, executionPayloadHash);
   const evaluation = await client.evaluate(evaluateRequest);
 
   // decision is now canonical lowercase: "allow" | "deny" | "hold" | "escalate"
@@ -383,12 +417,16 @@ export async function protect(request: ProtectRequest): Promise<Permit> {
     context?: Record<string, unknown>;
     environment: string;
     execution_hash?: string;
+    actorIdentity?: Record<string, unknown>;
   } = {
     permitId: evaluation.permitId,
     agent: request.agent,
     action: request.action,
     environment,
     ...(execution_hash ? { execution_hash } : {}),
+    ...(request.actorIdentity !== undefined
+      ? { actorIdentity: request.actorIdentity }
+      : {}),
   };
   if (request.context !== undefined) verifyRequest.context = request.context;
   const verification = await client.verifyPermit(verifyRequest);
@@ -503,10 +541,7 @@ export async function protectWithEvidence(
   const client = getClient();
 
   // 1. Evaluate (same logic as protect()).
-  const evaluateRequest =
-    executionPayloadHash !== undefined
-      ? { ...request, execution_payload_hash: executionPayloadHash }
-      : request;
+  const evaluateRequest = withWireBindings(request, executionPayloadHash);
   const evaluation = await client.evaluate(evaluateRequest);
 
   if (evaluation.decision !== "allow") {
@@ -538,12 +573,16 @@ export async function protectWithEvidence(
     context?: Record<string, unknown>;
     environment: string;
     execution_hash?: string;
+    actorIdentity?: Record<string, unknown>;
   } = {
     permitId: evaluation.permitId,
     agent: request.agent,
     action: request.action,
     environment,
     ...(execution_hash ? { execution_hash } : {}),
+    ...(request.actorIdentity !== undefined
+      ? { actorIdentity: request.actorIdentity }
+      : {}),
   };
   if (request.context !== undefined) verifyRequest.context = request.context;
   const verification = await client.verifyPermit(verifyRequest);

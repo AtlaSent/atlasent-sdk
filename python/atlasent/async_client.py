@@ -193,6 +193,7 @@ class AsyncAtlaSentClient:
         execution_binding: dict[str, Any] | None = None,
         state_snapshot: dict[str, Any] | None = None,
         execution_payload_hash: str | None = None,
+        actor_identity: dict[str, Any] | None = None,
     ) -> EvaluateResult:
         """Evaluate whether an action is authorized.
 
@@ -230,6 +231,7 @@ class AsyncAtlaSentClient:
             execution_binding=execution_binding,
             state_snapshot=state_snapshot,
             execution_payload_hash=execution_payload_hash,
+            actor_identity=actor_identity,
         )
         logger.debug("evaluate action=%r actor=%r (async)", action_type, actor_id)
         data, rate_limit, request_id = await self._post(
@@ -387,6 +389,7 @@ class AsyncAtlaSentClient:
         require_approval: bool | None = None,
         environment: str | None = None,
         execution_hash: str | None = None,
+        actor_identity: dict[str, Any] | None = None,
     ) -> VerifyResult:
         """Verify a previously issued permit token.
 
@@ -414,6 +417,7 @@ class AsyncAtlaSentClient:
             require_approval=require_approval,
             environment=environment,
             execution_hash=execution_hash if execution_hash else None,
+            actor_identity=actor_identity,
         )
         logger.debug("verify token=%s (async)", _redact_token(permit_token))
         data, rate_limit, request_id = await self._post(
@@ -444,6 +448,7 @@ class AsyncAtlaSentClient:
         context: dict[str, Any] | None = None,
         state_snapshot: dict[str, Any] | None = None,
         execution_payload_hash: str | None = None,
+        actor_identity: dict[str, Any] | None = None,
     ) -> Permit:
         """Authorize an action end-to-end (async). The category primitive.
 
@@ -498,6 +503,7 @@ class AsyncAtlaSentClient:
                 ctx,
                 state_snapshot=state_snapshot,
                 execution_payload_hash=_caller_hash,
+                actor_identity=actor_identity,
             )
         except AtlaSentDenied as exc:
             audit_hash = ""
@@ -551,6 +557,7 @@ class AsyncAtlaSentClient:
                 actor_id=agent,
                 context=ctx,
                 state_snapshot=state_snapshot,
+                actor_identity=actor_identity,
             ).model_dump(by_alias=True, exclude_none=True)
             _execution_hash = _compute_execution_hash(_eval_payload)
 
@@ -567,6 +574,7 @@ class AsyncAtlaSentClient:
                     ctx,
                     environment=_ctx_env,
                     execution_hash=_execution_hash,
+                    actor_identity=actor_identity,
                 )
         except AtlaSentError as verify_err:
             if (

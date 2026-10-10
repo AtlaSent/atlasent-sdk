@@ -210,6 +210,11 @@ class EvaluateRequest(BaseModel):
     # permit, 200, no error. ``normalize_caller_payload_hash`` refuses both
     # shapes at the client boundary instead.
     execution_payload_hash: str | None = Field(default=None)
+    # The actor's ``actor_identity.v1`` assertion, TOP LEVEL and unchanged.
+    # The SDK never mints or inspects it. The runtime requires one at evaluate
+    # for the mandatory change-control action types (``production.deploy``
+    # and others; deny ACTOR_UNVERIFIED without it).
+    actor_identity: dict[str, Any] | None = Field(default=None)
     # Optional signed approval. When the action requires human
     # approval (rule-driven OR action-type prefix per
     # ``requiresHumanApproval``), the server verifies this artifact
@@ -671,6 +676,11 @@ class VerifyRequest(BaseModel):
     # of the original evaluate payload. Required by the server for production
     # permits as of 2026-05-14.
     execution_hash: str | None = Field(default=None)
+    # atlasent-api#3915: the permit actor's ``actor_identity.v1``, forwarded
+    # unchanged. Required by /v1-verify-permit when the action class is
+    # classified ``verified_actor`` (a server-owned mode) and verified against
+    # the PERMIT's actor; ignored in every other mode, so always safe to send.
+    actor_identity: dict[str, Any] | None = Field(default=None)
     # Legacy fields, excluded from wire serialization.
     context: dict[str, Any] = Field(default_factory=dict, exclude=True)
     api_key: str = Field(default="", exclude=True)
