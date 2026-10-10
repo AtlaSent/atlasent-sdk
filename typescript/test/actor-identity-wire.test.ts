@@ -56,6 +56,13 @@ function recordingFetch(captured: Captured[], responses: unknown[]) {
   }) as unknown as typeof fetch;
 }
 
+/** The i-th posted body; fails loudly instead of reading `undefined`. */
+function bodyAt(captured: Captured[], i: number): Captured {
+  const c = captured[i];
+  if (c === undefined) throw new Error(`expected a request at index ${i}`);
+  return c;
+}
+
 /** Mirrors v1-evaluate's own hash of the posted body (see protect-execution-binding). */
 function serverBoundHashOf(evaluateBody: Record<string, unknown>): string {
   const { traceparent: _t, shadow: _s, explain: _e, ...core } = evaluateBody;
@@ -92,7 +99,8 @@ describe("protect(): actor_identity at both boundaries", () => {
       });
       await run({ ...REQUEST, actorIdentity: IDENTITY });
 
-      const [evaluate, verify] = captured;
+      const evaluate = bodyAt(captured, 0);
+      const verify = bodyAt(captured, 1);
       expect(evaluate.url).toMatch(/\/v1-evaluate$/);
       expect(verify.url).toMatch(/\/v1-verify-permit$/);
       expect(evaluate.body.actor_identity).toEqual(IDENTITY);
@@ -113,8 +121,8 @@ describe("protect(): actor_identity at both boundaries", () => {
         fetch: recordingFetch(captured, [EVALUATE_ALLOW_WIRE, VERIFY_OK_WIRE]),
       });
       await run(REQUEST);
-      expect(captured[0].body).not.toHaveProperty("actor_identity");
-      expect(captured[1].body).not.toHaveProperty("actor_identity");
+      expect(bodyAt(captured, 0).body).not.toHaveProperty("actor_identity");
+      expect(bodyAt(captured, 1).body).not.toHaveProperty("actor_identity");
     });
   }
 });
@@ -138,8 +146,8 @@ describe("AtlaSentClient: actor_identity on evaluate and verifyPermit", () => {
       context: {},
       actor_identity: IDENTITY,
     } as Parameters<typeof client.evaluate>[0]);
-    expect(captured[0].body.actor_identity).toEqual(IDENTITY);
-    expect(captured[1].body.actor_identity).toEqual(IDENTITY);
+    expect(bodyAt(captured, 0).body.actor_identity).toEqual(IDENTITY);
+    expect(bodyAt(captured, 1).body.actor_identity).toEqual(IDENTITY);
   });
 
   it("verifyPermit sends actorIdentity as actor_identity, and nothing when absent", async () => {
@@ -150,7 +158,7 @@ describe("AtlaSentClient: actor_identity on evaluate and verifyPermit", () => {
     });
     await client.verifyPermit({ permitId: "pt.v4.x", actorIdentity: IDENTITY });
     await client.verifyPermit({ permitId: "pt.v4.x" });
-    expect(captured[0].body.actor_identity).toEqual(IDENTITY);
-    expect(captured[1].body).not.toHaveProperty("actor_identity");
+    expect(bodyAt(captured, 0).body.actor_identity).toEqual(IDENTITY);
+    expect(bodyAt(captured, 1).body).not.toHaveProperty("actor_identity");
   });
 });
