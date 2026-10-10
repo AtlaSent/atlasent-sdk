@@ -416,6 +416,15 @@ export interface EvaluateRequest {
    * caller building this shape directly is responsible for the bare-hex form.
    */
   execution_payload_hash?: string;
+  /**
+   * The actor's `actor_identity.v1` assertion, sent at the TOP LEVEL of the
+   * wire body and forwarded unchanged. The SDK does not mint or inspect it:
+   * obtain it from your identity broker (e.g. `/v1-agent-actor-identity` for
+   * an agent-bound key, or `v1-idp-broker`). The runtime requires one at
+   * evaluate for the mandatory change-control action types (`production.deploy`
+   * and others; deny `ACTOR_UNVERIFIED` without it) and verifies it there.
+   */
+  actor_identity?: Record<string, unknown>;
   /** The desired end-state the actor wants the resource to reach. */
   desired_state?: { description: string; attributes?: Record<string, unknown>; fingerprint?: string };
   /**
@@ -779,6 +788,16 @@ export interface VerifyPermitRequest {
    * P1-5 fix: withPermit/protect now always computes and sends this field.
    */
   execution_hash?: string;
+  /**
+   * The permit actor's `actor_identity.v1` assertion, sent as
+   * `actor_identity` and forwarded unchanged (atlasent-api#3915). When the
+   * action class is classified `verified_actor` — a server-owned mode the
+   * caller cannot choose — `v1-verify-permit` requires it and verifies it
+   * against the PERMIT's actor, action type, tenant and environment
+   * (`ACTOR_IDENTITY_REQUIRED` / `ACTOR_IDENTITY_INVALID`). In every other
+   * mode the runtime ignores it, so presenting one is always safe.
+   */
+  actorIdentity?: Record<string, unknown>;
 }
 
 /**
