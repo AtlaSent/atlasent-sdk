@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 
+from ._api_key_hint import MISSING_API_KEY_HINT
 from .exceptions import ConfigurationError
 
 logger = logging.getLogger("atlasent")
@@ -53,7 +54,7 @@ def get_api_key() -> str:
     if not key:
         raise ConfigurationError(
             "No API key provided. Either call atlasent.configure(api_key=...) "
-            "or set the ATLASENT_API_KEY environment variable."
+            "or set the ATLASENT_API_KEY environment variable. " + MISSING_API_KEY_HINT
         )
     return key
 

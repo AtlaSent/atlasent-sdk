@@ -28,6 +28,7 @@
  */
 
 import { AtlaSentClient, buildEvaluateBody } from "./client.js";
+import { MISSING_API_KEY_HINT } from "./apiKeyHint.js";
 import type { DeployGateRequest, DeployGateResponse } from "./types.js";
 import {
   AtlaSentDeniedError,
@@ -222,7 +223,7 @@ function getClient(): AtlaSentClient {
   const apiKey = overrides.apiKey ?? envApiKey;
   if (!apiKey) {
     throw new AtlaSentError(
-      "AtlaSent is not configured. Set ATLASENT_API_KEY in the environment, or call atlasent.configure({ apiKey }).",
+      `AtlaSent is not configured. Set ATLASENT_API_KEY in the environment, or call atlasent.configure({ apiKey }). ${MISSING_API_KEY_HINT}`,
       { code: "invalid_api_key" },
     );
   }

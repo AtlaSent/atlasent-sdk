@@ -19,6 +19,7 @@ import httpx
 from . import evidence_exports as _evx
 from . import scim as _scim
 from . import siem as _siem
+from ._api_key_hint import MISSING_API_KEY_HINT
 from ._function_region import UNSET, _Unset, function_region_headers
 from ._version import __version__
 from .access_governance_log import AccessGovernanceLogClient
@@ -166,7 +167,7 @@ def _validate_api_key(api_key: str) -> str:
     that copies the right side of the key doesn't surface in stderr.
     """
     if not isinstance(api_key, str) or not api_key:
-        raise ValueError("AtlaSent api_key is required")
+        raise ValueError(f"AtlaSent api_key is required. {MISSING_API_KEY_HINT}")
     if not _API_KEY_PATTERN.match(api_key):
         head = api_key[:8] if api_key else ""
         raise ValueError(
