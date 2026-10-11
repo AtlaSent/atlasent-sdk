@@ -14,13 +14,10 @@ import warnings
 
 import pytest
 
-from atlasent import (
-    AsyncAtlaSentClient,
-    AtlaSentClient,
-    evaluate as package_evaluate,
-    protect as package_protect,
-    verify as package_verify,
-)
+from atlasent import AsyncAtlaSentClient, AtlaSentClient
+from atlasent import evaluate as package_evaluate
+from atlasent import protect as package_protect
+from atlasent import verify as package_verify
 
 from .test_protect_payload_binding import (
     EVALUATE_PERMIT,
@@ -126,7 +123,9 @@ class TestPackageFunctions:
     def test_canonical_entrypoints_forward_actor_identity(self, mocker) -> None:
         authorize_module = importlib.import_module("atlasent.authorize")
         client = mocker.Mock()
-        mocker.patch.object(authorize_module, "_get_default_client", return_value=client)
+        mocker.patch.object(
+            authorize_module, "_get_default_client", return_value=client
+        )
 
         package_evaluate(
             "production.deploy",
