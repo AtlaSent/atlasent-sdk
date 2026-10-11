@@ -19,6 +19,7 @@ from urllib.parse import quote, urlparse, urlunparse
 
 import httpx
 
+from ._api_key_hint import MISSING_API_KEY_HINT
 from ._function_region import function_region_headers
 from .exceptions import AtlaSentError
 
@@ -90,7 +91,9 @@ class BCCAEClient:
         timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         if not api_key or not isinstance(api_key, str):
-            raise ValueError("BCCAEClient: api_key is required")
+            raise ValueError(
+                f"BCCAEClient: api_key is required. {MISSING_API_KEY_HINT}"
+            )
         self._api_key = api_key
         self._base_url = _enforce_tls(base_url).rstrip("/")
         self._client = httpx.Client(

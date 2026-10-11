@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed: missing-key errors say where to get a key
+
+The error raised when no API key is configured now ends with
+`Get a free API key at https://console.atlasent.io/auth/sign-up?utm_source=sdk&utm_medium=py-error`.
+Covers `AtlaSentClient(api_key="")`, `AsyncAtlaSentClient()` with no key or `ATLASENT_API_KEY`, `atlasent.config.get_api_key()` and `BCCAEClient(api_key="")`. The exception types, codes and the rest of each message are
+unchanged. A malformed key is not given the link: it already has one.
+
 ### Added: `actor_identity` on evaluate, verify and `protect()` (additive)
 
 atlasent-api#3915. The runtime requires an `actor_identity.v1` at evaluate for

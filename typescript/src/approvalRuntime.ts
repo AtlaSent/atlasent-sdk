@@ -14,6 +14,7 @@
  */
 
 import { functionRegionHeaders } from "./functionRegion.js";
+import { MISSING_API_KEY_HINT } from "./apiKeyHint.js";
 import { AtlaSentDeniedError, AtlaSentError } from "./errors.js";
 import type {
   HitlCreateRequest,
@@ -58,7 +59,7 @@ function resolveConfig(overrides?: { apiKey?: string; baseUrl?: string }): {
 
   if (!apiKey) {
     throw new AtlaSentError(
-      "ApprovalRuntime: no API key configured. Set ATLASENT_API_KEY or call configureApprovalRuntime({ apiKey }).",
+      `ApprovalRuntime: no API key configured. Set ATLASENT_API_KEY or call configureApprovalRuntime({ apiKey }). ${MISSING_API_KEY_HINT}`,
       { code: "invalid_api_key" },
     );
   }

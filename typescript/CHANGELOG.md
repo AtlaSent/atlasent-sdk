@@ -8,6 +8,13 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Changed: missing-key errors say where to get a key
+
+The error raised when no API key is configured now ends with
+`Get a free API key at https://console.atlasent.io/auth/sign-up?utm_source=sdk&utm_medium=ts-error`.
+Covers `new AtlaSentClient({ apiKey: "" })`, `protect()` with no `configure()` and no `ATLASENT_API_KEY`, the approval runtime and `BCCAEClient`. The exception types, codes and the rest of each message are
+unchanged. A malformed key is not given the link: it already has one.
+
 ### Added: `actor_identity` on evaluate, verify and `protect()` (additive)
 
 atlasent-api#3915. The runtime requires an `actor_identity.v1` at evaluate for

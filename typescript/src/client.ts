@@ -11,6 +11,7 @@
  */
 
 import { functionRegionHeaders } from "./functionRegion.js";
+import { MISSING_API_KEY_HINT } from "./apiKeyHint.js";
 import type {
   AuditEventsPage,
   AuditEventsQuery,
@@ -317,7 +318,7 @@ const API_KEY_PATTERN = /^ask_(?:live|test)_[A-Za-z0-9_-]+$/;
 
 function _validateApiKey(apiKey: string): string {
   if (typeof apiKey !== "string" || apiKey.length === 0) {
-    throw new AtlaSentError("apiKey is required", { code: "invalid_api_key" });
+    throw new AtlaSentError(`apiKey is required. ${MISSING_API_KEY_HINT}`, { code: "invalid_api_key" });
   }
   if (!API_KEY_PATTERN.test(apiKey)) {
     const head = apiKey.slice(0, 8);
@@ -659,7 +660,7 @@ export class AtlaSentClient {
 
   constructor(options: AtlaSentClientOptions) {
     if (!options.apiKey || typeof options.apiKey !== "string") {
-      throw new AtlaSentError("apiKey is required", {
+      throw new AtlaSentError(`apiKey is required. ${MISSING_API_KEY_HINT}`, {
         code: "invalid_api_key",
       });
     }

@@ -12,6 +12,7 @@
  */
 
 import { functionRegionHeaders } from "./functionRegion.js";
+import { MISSING_API_KEY_HINT } from "./apiKeyHint.js";
 import { AtlaSentError } from "./errors.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -204,7 +205,7 @@ export class BCCAEClient {
 
   constructor(options: BccaeClientOptions) {
     if (!options.apiKey || typeof options.apiKey !== "string") {
-      throw new AtlaSentError("BCCAEClient: apiKey is required", {
+      throw new AtlaSentError(`BCCAEClient: apiKey is required. ${MISSING_API_KEY_HINT}`, {
         code: "invalid_api_key",
       });
     }
