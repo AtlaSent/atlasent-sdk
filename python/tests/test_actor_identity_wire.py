@@ -9,11 +9,15 @@ assert the posted BODIES, as ``test_protect_payload_binding.py`` does.
 
 from __future__ import annotations
 
+import importlib
 import warnings
 
 import pytest
 
 from atlasent import AsyncAtlaSentClient, AtlaSentClient
+from atlasent import evaluate as package_evaluate
+from atlasent import protect as package_protect
+from atlasent import verify as package_verify
 
 from .test_protect_payload_binding import (
     EVALUATE_PERMIT,
@@ -113,3 +117,53 @@ class TestClientMethods:
         assert evaluate_body["actor_identity"] == IDENTITY
         assert verify_body["actor_identity"] == IDENTITY
         assert "actor_identity" not in bare_verify
+
+
+class TestPackageFunctions:
+    def test_canonical_entrypoints_forward_actor_identity(self, mocker) -> None:
+        authorize_module = importlib.import_module("atlasent.authorize")
+        client = mocker.Mock()
+        mocker.patch.object(
+            authorize_module, "_get_default_client", return_value=client
+        )
+
+        package_evaluate(
+            "production.deploy",
+            "agent:a1",
+            CONTEXT,
+            actor_identity=IDENTITY,
+        )
+        package_verify(
+            "pt.v4.x",
+            "production.deploy",
+            "agent:a1",
+            CONTEXT,
+            actor_identity=IDENTITY,
+        )
+        package_protect(
+            agent="agent:a1",
+            action="production.deploy",
+            context=CONTEXT,
+            actor_identity=IDENTITY,
+        )
+
+        client.evaluate.assert_called_once_with(
+            "production.deploy",
+            "agent:a1",
+            CONTEXT,
+            actor_identity=IDENTITY,
+        )
+        client.verify.assert_called_once_with(
+            "pt.v4.x",
+            "production.deploy",
+            "agent:a1",
+            CONTEXT,
+            actor_identity=IDENTITY,
+        )
+        client.protect.assert_called_once_with(
+            agent="agent:a1",
+            action="production.deploy",
+            context=CONTEXT,
+            execution_payload_hash=None,
+            actor_identity=IDENTITY,
+        )
