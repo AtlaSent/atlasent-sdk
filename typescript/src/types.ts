@@ -217,6 +217,12 @@ export interface DeployGateRequest {
     complete?: boolean;
     payload?: Record<string, unknown>;
   };
+  /**
+   * The actor's `actor_identity.v1` assertion. Forwarded unchanged to both
+   * evaluate and permit verification so verified-actor deployment classes can
+   * use the dedicated Deploy Gate helper without losing their identity proof.
+   */
+  actorIdentity?: Record<string, unknown>;
 }
 
 /** Evidence metadata returned by {@link AtlaSentClient.deployGate}. */
