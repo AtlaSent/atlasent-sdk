@@ -1150,11 +1150,7 @@ export class AtlaSentClient {
     const normalized = normalizeEvaluateRequest(
       input as LegacyEvaluateRequest | V2EvaluateRequest,
     );
-    const body = {
-      action_type: normalized.action_type,
-      actor_id: normalized.actor_id,
-      context: normalized.context ?? {},
-    };
+    const body = buildEvaluateBody(normalized);
     const query = new URLSearchParams({ include: "constraint_trace" });
     const { body: wire, rateLimit } = await this.post<EvaluateWire>(
       "/v1-evaluate",
@@ -1325,6 +1321,9 @@ export class AtlaSentClient {
       ...(input.stateSnapshot !== undefined
         ? { state_snapshot: input.stateSnapshot }
         : {}),
+      ...(input.actorIdentity !== undefined
+        ? { actor_identity: input.actorIdentity }
+        : {}),
     } as Parameters<typeof this.evaluate>[0]);
     if (evaluation.decision !== "allow") {
       return {
@@ -1346,6 +1345,9 @@ export class AtlaSentClient {
       action,
       context,
       ...(environment !== undefined ? { environment } : {}),
+      ...(input.actorIdentity !== undefined
+        ? { actorIdentity: input.actorIdentity }
+        : {}),
     });
 
     if (!verification.verified) {
