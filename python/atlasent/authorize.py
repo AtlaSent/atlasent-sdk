@@ -59,13 +59,17 @@ def evaluate(
     action_type: str,
     actor_id: str,
     context: dict[str, Any] | None = None,
+    *,
+    actor_identity: dict[str, Any] | None = None,
 ) -> EvaluateResult:
     """Evaluate an action using the globally configured client.
 
     Shortcut for ``AtlaSentClient.evaluate``.  Requires a prior call
     to :func:`atlasent.configure` or the ``ATLASENT_API_KEY`` env var.
     """
-    return _get_default_client().evaluate(action_type, actor_id, context)
+    return _get_default_client().evaluate(
+        action_type, actor_id, context, actor_identity=actor_identity
+    )
 
 
 def verify(
@@ -73,9 +77,17 @@ def verify(
     action_type: str = "",
     actor_id: str = "",
     context: dict[str, Any] | None = None,
+    *,
+    actor_identity: dict[str, Any] | None = None,
 ) -> VerifyResult:
     """Verify a permit token using the globally configured client."""
-    return _get_default_client().verify(permit_token, action_type, actor_id, context)
+    return _get_default_client().verify(
+        permit_token,
+        action_type,
+        actor_id,
+        context,
+        actor_identity=actor_identity,
+    )
 
 
 def gate(
@@ -101,6 +113,7 @@ def protect(
     action: str,
     context: dict[str, Any] | None = None,
     execution_payload_hash: str | None = None,
+    actor_identity: dict[str, Any] | None = None,
 ) -> Permit:
     """Authorize an action end-to-end — the category primitive.
 
@@ -144,6 +157,7 @@ def protect(
         action=action,
         context=context,
         execution_payload_hash=execution_payload_hash,
+        actor_identity=actor_identity,
     )
 
 
