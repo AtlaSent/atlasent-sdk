@@ -161,4 +161,39 @@ describe("AtlaSentClient: actor_identity on evaluate and verifyPermit", () => {
     expect(bodyAt(captured, 0).body.actor_identity).toEqual(IDENTITY);
     expect(bodyAt(captured, 1).body).not.toHaveProperty("actor_identity");
   });
+
+  it("evaluatePreflight preserves actor_identity in the canonical evaluate body", async () => {
+    const captured: Captured[] = [];
+    const client = new AtlaSentClient({
+      apiKey: "ask_live_test",
+      fetch: recordingFetch(captured, [EVALUATE_ALLOW_WIRE]),
+    });
+    await client.evaluatePreflight({
+      actor_id: "agent:a1",
+      action_type: "production.deploy",
+      context: {},
+      actor_identity: IDENTITY,
+    });
+    expect(bodyAt(captured, 0).body.actor_identity).toEqual(IDENTITY);
+    expect(bodyAt(captured, 0).body).not.toHaveProperty("actorIdentity");
+  });
+
+  it("deployGate presents actor identity at evaluate and verify", async () => {
+    const captured: Captured[] = [];
+    const client = new AtlaSentClient({
+      apiKey: "ask_live_test",
+      fetch: recordingFetch(captured, [EVALUATE_ALLOW_WIRE, VERIFY_OK_WIRE]),
+    });
+    await client.deployGate({
+      agent: "agent:a1",
+      action: "production.deploy",
+      context: { environment: "production" },
+      actorIdentity: IDENTITY,
+    });
+    expect(bodyAt(captured, 0).body.actor_identity).toEqual(IDENTITY);
+    expect(bodyAt(captured, 1).body.actor_identity).toEqual(IDENTITY);
+    expect(bodyAt(captured, 0).body).not.toHaveProperty("actorIdentity");
+    expect(bodyAt(captured, 1).body).not.toHaveProperty("actorIdentity");
+  });
+
 });
