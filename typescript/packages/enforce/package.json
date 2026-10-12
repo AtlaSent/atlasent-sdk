@@ -47,10 +47,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Atlasent/atlasent-sdk.git",
+    "url": "git+https://github.com/AtlaSent/atlasent-sdk.git",
     "directory": "typescript/packages/enforce"
   },
-  "homepage": "https://github.com/Atlasent/atlasent-sdk/tree/main/typescript/packages/enforce#readme",
+  "homepage": "https://github.com/AtlaSent/atlasent-sdk/tree/main/typescript/packages/enforce#readme",
   "publishConfig": {
     "access": "public",
     "tag": "latest"

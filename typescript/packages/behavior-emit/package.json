@@ -4,7 +4,7 @@
   "description": "Type-safe HMAC-signed BVS event emitter for AtlaSent consumer apps",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Atlasent/atlasent-sdk"
+    "url": "https://github.com/AtlaSent/atlasent-sdk"
   },
   "main": "dist/index.js",
   "module": "dist/index.mjs",
