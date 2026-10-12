@@ -8,6 +8,8 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+## 2.22.0
+
 ### Changed: missing-key errors say where to get a key
 
 The error raised when no API key is configured now ends with

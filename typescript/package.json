@@ -1,6 +1,6 @@
 {
   "name": "@atlasent/sdk",
-  "version": "2.21.2",
+  "version": "2.22.0",
   "description": "AtlaSent TypeScript SDK: check that the organization authorized a consequential action before it runs, with signed proof your auditor can verify.",
   "license": "Apache-2.0",
   "type": "module",
