@@ -27,10 +27,10 @@
   "keywords": ["atlasent", "llamaindex", "authorization", "middleware", "agent-security", "guardrails", "ai-agent-gating", "llm-security"],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Atlasent/atlasent-sdk.git",
+    "url": "git+https://github.com/AtlaSent/atlasent-sdk.git",
     "directory": "typescript/packages/llamaindex"
   },
-  "homepage": "https://github.com/Atlasent/atlasent-sdk/tree/main/typescript/packages/llamaindex#readme",
+  "homepage": "https://github.com/AtlaSent/atlasent-sdk/tree/main/typescript/packages/llamaindex#readme",
   "publishConfig": {
     "access": "public"
   },

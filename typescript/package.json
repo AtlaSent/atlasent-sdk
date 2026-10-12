@@ -99,12 +99,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Atlasent/atlasent-sdk.git",
+    "url": "git+https://github.com/AtlaSent/atlasent-sdk.git",
     "directory": "typescript"
   },
-  "homepage": "https://github.com/Atlasent/atlasent-sdk/tree/main/typescript#readme",
+  "homepage": "https://github.com/AtlaSent/atlasent-sdk/tree/main/typescript#readme",
   "bugs": {
-    "url": "https://github.com/Atlasent/atlasent-sdk/issues"
+    "url": "https://github.com/AtlaSent/atlasent-sdk/issues"
   },
   "publishConfig": {
     "access": "public"

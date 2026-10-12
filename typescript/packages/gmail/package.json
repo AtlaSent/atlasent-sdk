@@ -27,10 +27,10 @@
   "keywords": ["atlasent", "gmail", "email", "authorization", "middleware", "agent-security", "data-loss-prevention"],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Atlasent/atlasent-sdk.git",
+    "url": "git+https://github.com/AtlaSent/atlasent-sdk.git",
     "directory": "typescript/packages/gmail"
   },
-  "homepage": "https://github.com/Atlasent/atlasent-sdk/tree/main/typescript/packages/gmail#readme",
+  "homepage": "https://github.com/AtlaSent/atlasent-sdk/tree/main/typescript/packages/gmail#readme",
   "publishConfig": {
     "access": "public"
   },

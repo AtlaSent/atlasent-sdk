@@ -52,7 +52,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Atlasent/atlasent-sdk.git",
+    "url": "git+https://github.com/AtlaSent/atlasent-sdk.git",
     "directory": "typescript/packages/verify-cli"
   },
   "publishConfig": {
