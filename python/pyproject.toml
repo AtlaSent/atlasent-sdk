@@ -12,7 +12,7 @@ requires-python = ">=3.9"
 authors = [
     { name = "AtlaSent Systems Inc.", email = "sdk@atlasent.io" },
 ]
-keywords = ["atlasent", "authorization", "ai", "agents", "gxp", "compliance"]
+keywords = ["atlasent", "authorization", "ai", "agents", "ai-agents", "agent-guardrails", "guardrails", "llm", "mcp", "permits", "fail-closed", "audit", "approval", "gxp", "compliance"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -49,10 +49,10 @@ dev = [
 atlasent-verify-bundle = "atlasent._cli_verify:main"
 
 [project.urls]
-Homepage = "https://github.com/AtlaSent-Systems-Inc/atlasent-sdk"
-Documentation = "https://github.com/AtlaSent-Systems-Inc/atlasent-sdk#readme"
-Repository = "https://github.com/AtlaSent-Systems-Inc/atlasent-sdk"
-Issues = "https://github.com/AtlaSent-Systems-Inc/atlasent-sdk/issues"
+Homepage = "https://github.com/AtlaSent/atlasent-sdk"
+Documentation = "https://github.com/AtlaSent/atlasent-sdk#readme"
+Repository = "https://github.com/AtlaSent/atlasent-sdk"
+Issues = "https://github.com/AtlaSent/atlasent-sdk/issues"
 
 [tool.setuptools.dynamic]
 version = {attr = "atlasent._version.__version__"}
