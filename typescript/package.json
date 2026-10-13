@@ -95,7 +95,18 @@
     "agents",
     "gxp",
     "compliance",
-    "policy"
+    "policy",
+    "ai-agents",
+    "agent-guardrails",
+    "guardrails",
+    "llm",
+    "mcp",
+    "permits",
+    "fail-closed",
+    "audit",
+    "audit-trail",
+    "approval",
+    "deploy-gate"
   ],
   "repository": {
     "type": "git",
