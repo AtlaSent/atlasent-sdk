@@ -124,6 +124,20 @@ export {
   type AtlaSentErrorInit,
   type PermitOutcome,
 } from "./errors.js";
+// ── Framework tool-guard core (shared by @atlasent/cursor, /langchain, /llamaindex) ──
+export {
+  DEFAULT_GUARD_TOOL_ACTION,
+  jsonStringResultAdapter,
+  objectResultAdapter,
+  resolveGuardValue,
+  runGuardedToolCall,
+  type GuardAdapter,
+  type GuardCoreOptions,
+  type GuardDenialResult,
+  type GuardPermitInfo,
+  type GuardResolver,
+  type GuardedToolCall,
+} from "./guardCore.js";
 export {
   configure,
   deployGate,

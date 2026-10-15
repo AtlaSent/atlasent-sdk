@@ -8,6 +8,32 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: shared framework tool-guard core (additive)
+
+AtlaSent/atlasent#350 (D-03). `@atlasent/cursor`, `@atlasent/langchain` and
+`@atlasent/llamaindex` each carried their own copy of the evaluate →
+verifyPermit → heartbeat loop. That loop now lives once, in
+`src/guardCore.ts`, exported from the package entrypoint:
+`runGuardedToolCall`, `resolveGuardValue`, `DEFAULT_GUARD_TOOL_ACTION`, the
+stock adapters `jsonStringResultAdapter` (string-returning tools) and
+`objectResultAdapter` (object-returning tools), and the types
+`GuardCoreOptions`, `GuardAdapter`, `GuardDenialResult`, `GuardPermitInfo`,
+`GuardResolver` and `GuardedToolCall`. No wire change: it calls the existing
+`evaluate`, `verifyPermit` and `checkPermitValid`.
+
+### Framework guards — `@atlasent/langchain`, `@atlasent/llamaindex`, `@atlasent/cursor` (unpublished 1.6.0)
+
+- **Refactor, no runtime behaviour change:** each guard is now a thin adapter
+  over `runGuardedToolCall`. Every public export, type and option is
+  unchanged, and the existing guard test suites pass unmodified.
+- **Peer dependency raised to `@atlasent/sdk@^2.23.0`**, the first SDK release
+  that will carry the guard core. Publish `@atlasent/sdk` 2.23.0 before any of
+  the three guard packages.
+- Docs only: `withCursorGuard`'s comment said JSON-object string results
+  were returned unchanged. They have always been annotated with
+  `_atlasent_permit_id` / `_atlasent_audit_hash` (a test asserts it); the
+  comment now says so.
+
 ## 2.22.0
 
 ### Changed: missing-key errors say where to get a key

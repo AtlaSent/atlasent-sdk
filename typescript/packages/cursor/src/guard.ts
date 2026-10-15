@@ -21,7 +21,12 @@
  */
 
 import type { AtlaSentClient } from "@atlasent/sdk";
-import { AtlaSentDeniedError, PermitRevoked } from "@atlasent/sdk";
+import {
+  DEFAULT_GUARD_TOOL_ACTION,
+  runGuardedToolCall,
+  jsonStringResultAdapter,
+  type GuardResolver,
+} from "@atlasent/sdk";
 
 // ── Cursor tool shape (MCP-compatible, duck-typed) ────────────────────────────
 
@@ -69,26 +74,11 @@ export interface CursorGuardedTool<
  * requires context inputs `tool` (supplied by the guard) and `environment`
  * (supplied by the caller).
  */
-export const DEFAULT_TOOL_ACTION = "agent.tool.invoke";
+export const DEFAULT_TOOL_ACTION = DEFAULT_GUARD_TOOL_ACTION;
 
 // ── Options ───────────────────────────────────────────────────────────────────
 
-type Resolver<T> =
-  | T
-  | ((toolName: string, toolInput: Record<string, unknown>) => T | Promise<T>);
-
-async function resolve<T>(
-  r: Resolver<T>,
-  toolName: string,
-  toolInput: Record<string, unknown>,
-): Promise<T> {
-  return typeof r === "function"
-    ? await (r as (n: string, i: Record<string, unknown>) => T | Promise<T>)(
-        toolName,
-        toolInput,
-      )
-    : r;
-}
+type Resolver<T> = GuardResolver<T>;
 
 export interface CursorGuardOptions {
   /** Agent identifier (e.g. `"cursor:my-project"`). */
@@ -147,65 +137,6 @@ export interface DenialResult {
   auditHash?: string;
 }
 
-// ── Heartbeat (PROD-D9 continuous-authorization) ──────────────────────────────
-
-interface PermitValidResponse {
-  valid: boolean;
-  status: "active" | "expired" | "revoked" | "consumed";
-  revoked_at?: string;
-  revocation_id?: string;
-}
-
-type ClientWithHeartbeat = AtlaSentClient & {
-  checkPermitValid?: (permitId: string) => Promise<PermitValidResponse>;
-};
-
-interface HeartbeatHandle {
-  revocationSignal: Promise<never>;
-  stop: () => void;
-}
-
-function startHeartbeat(
-  client: AtlaSentClient,
-  permitId: string,
-  intervalMs: number,
-): HeartbeatHandle {
-  const clampedMs = Math.max(intervalMs, 1000);
-  let stopped = false;
-  let rejectFn: ((e: PermitRevoked) => void) | undefined;
-  const revocationSignal = new Promise<never>((_, reject) => {
-    rejectFn = reject;
-  });
-
-  const extended = client as ClientWithHeartbeat;
-  if (!extended.checkPermitValid) {
-    return { revocationSignal, stop: () => { stopped = true; } };
-  }
-
-  const timer = setInterval(() => {
-    if (stopped) return;
-    void (extended.checkPermitValid!(permitId)
-      .then((resp) => {
-        if (!stopped && resp.status === "revoked") {
-          stopped = true;
-          clearInterval(timer);
-          rejectFn!(new PermitRevoked(permitId, resp.revocation_id));
-        }
-      })
-      .catch(() => {
-        // Network error during heartbeat poll — continue polling.
-      }));
-  }, clampedMs);
-
-  return {
-    revocationSignal,
-    stop: () => {
-      stopped = true;
-      clearInterval(timer);
-    },
-  };
-}
-
 // ── withCursorGuard ───────────────────────────────────────────────────────────
 
 /**
@@ -214,8 +145,10 @@ function startHeartbeat(
  * replaced by an authorize-first version.
  *
  * Successful string results are returned as-is (Cursor renders them
- * directly). JSON object results embedded in the string are unchanged
- * — Cursor's agent reads the raw string from MCP content blocks.
+ * directly), except that a result which parses as a JSON object is
+ * re-serialized with `_atlasent_permit_id` and `_atlasent_audit_hash`
+ * added (this has always been the runtime behaviour; an earlier version of
+ * this comment said such results were unchanged).
  *
  * @example
  * ```ts
@@ -240,124 +173,16 @@ export function withCursorGuard<T extends CursorGuardedTool>(
 ): T[] {
   return tools.map((tool) => ({
     ...tool,
-    execute: async (input: Record<string, unknown>): Promise<string> => {
-      const name = tool.name;
-      const agent = await resolve(options.agent, name, input);
-      const action = options.action
-        ? await resolve(options.action, name, input)
-        : DEFAULT_TOOL_ACTION;
-      const extra = options.extraContext
-        ? await resolve(options.extraContext, name, input)
-        : {};
-      // `tool` is spread AFTER `extra` on purpose: the tool actually being
-      // invoked is authoritative. A caller-supplied `extraContext.tool` must
-      // not be able to make a call to one tool evaluate as another.
-      const context: Record<string, unknown> = {
-        ...extra,
-        tool: name,
-        tool_input: input,
-      };
-      const stateSnapshot = options.stateSnapshot
-        ? await resolve(options.stateSnapshot, name, input)
-        : undefined;
-      const verifyEnvironment =
-        typeof context.environment === "string"
-          ? context.environment
-          : typeof context.environment_name === "string"
-            ? context.environment_name
-            : undefined;
-
-      try {
-        const evalResp = await client.evaluate({
-          agent,
-          action,
-          context,
-          ...(stateSnapshot !== undefined ? { state_snapshot: stateSnapshot } : {}),
-        } as Parameters<typeof client.evaluate>[0]);
-
-        if (evalResp.decision !== "allow") {
-          return handleDenial(options.onDeny, {
-            denied: true,
-            decision: evalResp.decision,
-            evaluationId: evalResp.permitId,
-            reason: evalResp.reason,
-            auditHash: evalResp.auditHash,
-          });
-        }
-
-        const verifyResp = await client.verifyPermit({
-          permitId: evalResp.permitId,
-          agent,
-          action,
-          context,
-          ...(verifyEnvironment !== undefined
-            ? { environment: verifyEnvironment }
-            : {}),
-        });
-
-        if (!verifyResp.verified) {
-          return handleDenial(options.onDeny, {
-            denied: true,
-            decision: "verify_failed",
-            evaluationId: evalResp.permitId,
-            reason: `permit verification failed: ${verifyResp.outcome}`,
-            auditHash: evalResp.auditHash,
-          });
-        }
-
-        // Start continuous-authorization heartbeat (PROD-D9).
-        const hb =
-          options.permitRevalidationIntervalMs != null
-            ? startHeartbeat(client, evalResp.permitId, options.permitRevalidationIntervalMs)
-            : null;
-
-        const result = await (hb
-          ? Promise.race([
-              tool.execute(input as Parameters<T["execute"]>[0]),
-              hb.revocationSignal,
-            ]).finally(() => hb.stop())
-          : tool.execute(input as Parameters<T["execute"]>[0]));
-
-        // Append permit metadata when the result is a JSON object string.
-        try {
-          const parsed = JSON.parse(result) as unknown;
-          if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-            return JSON.stringify({
-              ...(parsed as Record<string, unknown>),
-              _atlasent_permit_id: evalResp.permitId,
-              _atlasent_audit_hash: evalResp.auditHash,
-            });
-          }
-        } catch {
-          // Plain text or non-object JSON — return unchanged.
-        }
-        return result;
-      } catch (err) {
-        if (err instanceof AtlaSentDeniedError) throw err;
-        if (err instanceof PermitRevoked) throw err;
-        if ((options.onDeny ?? "throw") === "tool-result") {
-          return JSON.stringify({
-            denied: true,
-            decision: "error",
-            evaluationId: "",
-            reason: err instanceof Error ? err.message : String(err),
-          } satisfies DenialResult);
-        }
-        throw err;
-      }
-    },
+    execute: async (input: Record<string, unknown>): Promise<string> =>
+      runGuardedToolCall(
+        client,
+        options,
+        {
+          toolName: tool.name,
+          input,
+          execute: () => tool.execute(input as Parameters<T["execute"]>[0]),
+        },
+        jsonStringResultAdapter,
+      ),
   })) as unknown as T[];
-}
-
-function handleDenial(
-  onDeny: "throw" | "tool-result" | undefined,
-  denial: DenialResult,
-): string {
-  if ((onDeny ?? "throw") === "tool-result") return JSON.stringify(denial);
-  throw new AtlaSentDeniedError({
-    decision: "deny",
-    evaluationId: denial.evaluationId,
-    reason: denial.reason,
-    ...(denial.auditHash !== undefined ? { auditHash: denial.auditHash } : {}),
-  });
 }
