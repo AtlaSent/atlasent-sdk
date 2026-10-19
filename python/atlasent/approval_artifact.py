@@ -465,6 +465,62 @@ class ApprovalReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class SigningHintBind(BaseModel):
+    """The binding a signed approval must reproduce (ADR-055).
+
+    ``action_hash`` is the runtime's ``sha256Canonical`` over the
+    request it enriched server-side, so a caller cannot recompute it;
+    the approver signs this value. The role fields name who may sign
+    and are omitted when the action class does not restrict it.
+    """
+
+    action_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    tenant_id: str
+    environment: str
+    required_role: str | None = None
+    required_roles: list[str] | None = None
+
+    # Extra fields are kept so a binding field this SDK predates still
+    # reaches the signer instead of being dropped.
+    model_config = ConfigDict(extra="allow")
+
+
+class EvaluateSigningHint(BaseModel):
+    """``signing_hint`` on an ``INSUFFICIENT_APPROVALS`` denial.
+
+    Read it from :attr:`atlasent.AtlaSentDenied.signing_hint`, which is
+    ``None`` unless the runtime sent a well-formed hint.
+    """
+
+    assertion_type: str
+    bind: SigningHintBind
+
+    model_config = ConfigDict(extra="allow")
+
+
+def parse_signing_hint(value: Any) -> EvaluateSigningHint | None:
+    """Return ``value`` as an :class:`EvaluateSigningHint`, or ``None``.
+
+    A partial or mistyped hint would let a caller sign the wrong thing
+    or route the approval to the wrong signer, so it is dropped, which
+    leaves the caller where a runtime without the field leaves them.
+    The runtime omits the role fields when unset; an explicit ``null``
+    is treated as malformed, as the TypeScript SDK does.
+    """
+    if not isinstance(value, dict):
+        return None
+    bind = value.get("bind")
+    if not isinstance(bind, dict):
+        return None
+    for key in ("required_role", "required_roles"):
+        if key in bind and bind[key] is None:
+            return None
+    try:
+        return EvaluateSigningHint.model_validate(value)
+    except ValueError:
+        return None
+
+
 class PermitApprovalBinding(BaseModel):
     """Cryptographic permit ↔ approval-artifact linkage.
 

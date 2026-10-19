@@ -7,7 +7,10 @@ without an explicit permit.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from .approval_artifact import EvaluateSigningHint
 
 AtlaSentDecision = Literal["deny", "hold", "escalate"]
 """Policy decision outcomes on a denial.
@@ -198,6 +201,22 @@ class AtlaSentDenied(AtlaSentError):
         from .deny_codes import requires_human_approval
 
         return requires_human_approval(self.deny_code)
+
+    @property
+    def signing_hint(self) -> EvaluateSigningHint | None:
+        """The binding a signed approval for this exact request must
+        reproduce (ADR-055), from the denial's ``signing_hint``.
+
+        ``bind.action_hash`` is what the approver signs into an
+        ``approval_artifact.v1``; retry the same evaluate with that
+        artifact as ``approval=``. ``None`` when the runtime sent no
+        hint (it is disclosure-gated) or a malformed one.
+        """
+        if not isinstance(self.response_body, dict):
+            return None
+        from .approval_artifact import parse_signing_hint
+
+        return parse_signing_hint(self.response_body.get("signing_hint"))
 
 
 class ConfigurationError(AtlaSentError):
