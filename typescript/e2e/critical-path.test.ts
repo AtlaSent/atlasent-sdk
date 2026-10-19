@@ -205,19 +205,16 @@ describe.skipIf(!haveEnv)("evaluate → permit → verify", () => {
   });
 
   /**
-   * CANONICAL BEHAVIOUR: A valid permit_token from an allow decision must
-   * be verifiable via POST /v1/permits/{id}/verify.
+   * CANONICAL BEHAVIOUR: before executing, the caller verifies the permit
+   * at the execution boundary with POST /v1-verify-permit (verifyPermit):
+   * signature, action/actor binding and replay are checked and the permit
+   * is consumed. Execution proceeds only on verified === true.
    *
-   * The canonical REST surface (verifyPermitById) returns:
-   *   valid: true
-   *   verification_type: "permit"
-   *
-   * The legacy surface (verifyPermit) returns:
-   *   verified: true (aliased to valid)
-   *
-   * Both must work; this test uses the canonical REST surface.
+   * This is always verifyPermit(). The per-id lifecycle route
+   * (POST /v1-permits/{id}/verify, verifyPermitById) only moves permit
+   * status and is NOT a substitute; it is covered separately below.
    */
-  it("POST /v1/permits/{id}/verify → valid=true for a fresh allow permit", async () => {
+  it("POST /v1-verify-permit → verified=true for a fresh allow permit", async () => {
     if (decision !== "allow" || !evaluationId) {
       console.log(
         `[e2e] Skipping permit verify: decision=${decision} (no permit to verify)`,
@@ -226,30 +223,40 @@ describe.skipIf(!haveEnv)("evaluate → permit → verify", () => {
     }
 
     const client = new AtlaSentClient({ apiKey: API_KEY, baseUrl: API_URL });
+    const result = await client.verifyPermit({
+      permitId: evaluationId,
+      action: "e2e:smoke",
+      agent: "e2e-test-runner",
+    });
+    expect(result.verified).toBe(true);
+    permitToken = evaluationId;
+  });
 
-    // Prefer the canonical REST surface (verifyPermitById).
-    // Falls back to legacy verifyPermit if the canonical path is not wired.
-    let verified = false;
+  /**
+   * Lifecycle route (not a verifier): GET /v1-permits/{id} reads the
+   * permit's status. Independent of the execution-boundary check above;
+   * it asserts nothing about authorization. Requires atlasent-api#4522 on
+   * the target runtime; a 404 there is logged, not treated as a pass of
+   * the verify step (which has already been asserted on its own).
+   */
+  it("GET /v1-permits/{id} returns the permit's lifecycle row", async () => {
+    if (decision !== "allow" || !permitToken) {
+      console.log(`[e2e] Skipping lifecycle read: no verified permit`);
+      return;
+    }
+    const client = new AtlaSentClient({ apiKey: API_KEY, baseUrl: API_URL });
     try {
-      const result = await client.verifyPermitById(evaluationId);
-      verified = result.valid;
-      expect(result.valid).toBe(true);
+      const { permit } = await client.getPermit(permitToken);
+      expect(typeof permit.status).toBe("string");
     } catch (err) {
       if (err instanceof AtlaSentError && err.status === 404) {
-        // Canonical path not yet wired — fall back to legacy.
-        const legacyResult = await client.verifyPermit({
-          permitId: evaluationId,
-          action: "e2e:smoke",
-          agent: "e2e-test-runner",
-        });
-        verified = legacyResult.verified;
-        expect(legacyResult.verified).toBe(true);
-      } else {
-        throw err;
+        console.log(
+          `[e2e] /v1-permits/{id} not served by this runtime (atlasent-api#4522 not deployed)`,
+        );
+        return;
       }
+      throw err;
     }
-    expect(verified).toBe(true);
-    permitToken = evaluationId;
   });
 });
 
@@ -318,7 +325,7 @@ describe.skipIf(!haveEnv)("audit trail", () => {
       [k: string]: unknown;
     };
 
-    const events = result.events as AuditEventWire[];
+    const events = result.events as unknown as AuditEventWire[];
 
     const getHash = (e: AuditEventWire): string | undefined =>
       e.audit_hash ?? e.hash;
@@ -345,6 +352,7 @@ describe.skipIf(!haveEnv)("audit trail", () => {
     for (let i = 1; i < chronological.length; i++) {
       const prev = chronological[i - 1];
       const curr = chronological[i];
+      if (prev === undefined || curr === undefined) continue;
       const prevHash = getHash(prev);
       const currPrevHash = getPrevHash(curr);
 

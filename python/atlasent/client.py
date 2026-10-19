@@ -20,6 +20,7 @@ from . import evidence_exports as _evx
 from . import scim as _scim
 from . import siem as _siem
 from ._api_key_hint import MISSING_API_KEY_HINT
+from ._base_url import DEFAULT_BASE_URL, resolve_base_url
 from ._function_region import UNSET, _Unset, function_region_headers
 from ._version import __version__
 from .access_governance_log import AccessGovernanceLogClient
@@ -95,7 +96,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("atlasent")
 
-DEFAULT_BASE_URL = "https://api.atlasent.io"
 DEFAULT_TIMEOUT = 10
 # Retry schedule parity with the TypeScript SDK:
 #   4 total attempts (1 initial + 3 retries), delays 2 s → 4 s → 8 s
@@ -260,7 +260,9 @@ class AtlaSentClient:
     ) -> None:
         self._api_key = _validate_api_key(api_key)
         self._anon_key = anon_key
-        self._base_url = _enforce_tls(base_url).rstrip("/")
+        # resolve_base_url appends /functions/v1 to a bare hosted-runtime host:
+        # the gateway serves no function at the root (see ._base_url).
+        self._base_url = resolve_base_url(_enforce_tls(base_url))
         self._timeout = timeout
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
@@ -481,14 +483,17 @@ class AtlaSentClient:
         execution_hash: str | None = None,
         actor_identity: dict[str, Any] | None = None,
     ) -> VerifyResult:
-        warnings.warn(
-            "AtlaSentClient.verify() is deprecated. Use verify_permit_by_id() "
-            "for the canonical REST surface; it returns the unified "
-            "verification envelope (valid/verification_type/reason/verified_at/"
-            "evidence) plus the full PermitRecord. Will be removed in v3.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        """Verify a permit token at the execution boundary.
+
+        Calls ``POST /v1-verify-permit``: the runtime checks the permit's
+        signature, its bindings (action type, actor, environment,
+        ``execution_hash``) and replay state, and consumes it. This is the
+        verifier to call immediately before executing a protected action;
+        it is not deprecated.
+
+        :meth:`verify_permit_by_id` is a different operation: a permit
+        lifecycle/status call that does not perform these checks.
+        """
         del context
         req = VerifyRequest(
             permit_token=permit_token,
@@ -653,17 +658,15 @@ class AtlaSentClient:
         # verify_unavailable: if the verify step returns 5xx, surface a typed
         # denial rather than propagating a raw AtlaSentError — fail-closed.
         try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", DeprecationWarning)
-                verify_result = self.verify(
-                    eval_result.permit_token,
-                    action,
-                    agent,
-                    ctx,
-                    environment=_ctx_env,
-                    execution_hash=_execution_hash,
-                    actor_identity=actor_identity,
-                )
+            verify_result = self.verify(
+                eval_result.permit_token,
+                action,
+                agent,
+                ctx,
+                environment=_ctx_env,
+                execution_hash=_execution_hash,
+                actor_identity=actor_identity,
+            )
         except AtlaSentError as verify_err:
             if (
                 verify_err.status_code is not None and verify_err.status_code >= 500
@@ -1158,7 +1161,7 @@ class AtlaSentClient:
         body: dict[str, Any] = {}
         if reason is not None:
             body["reason"] = reason
-        path = f"/v1/permits/{quote(permit_id, safe='')}/revoke"
+        path = f"/v1-permits/{quote(permit_id, safe='')}/revoke"
         data, rate_limit, _ = self._post(path, body)
         return RevokePermitByIdResult(
             permit=PermitRecord.model_validate(data),
@@ -1166,9 +1169,18 @@ class AtlaSentClient:
         )
 
     def verify_permit_by_id(self, permit_id: str) -> VerifyPermitByIdResult:
+        """Run the permit lifecycle ``verify`` transition by permit id.
+
+        Calls ``POST /v1-permits/{permit_id}/verify``. This is a
+        lifecycle/status operation: it moves the permit row's status and
+        returns the verification envelope plus the full PermitRecord. It
+        is **not** the execution-boundary verifier: it does not check the
+        permit's signature, its action/actor/environment/execution-hash
+        bindings, or replay. Gate execution on :meth:`verify` instead.
+        """
         if not permit_id:
             raise AtlaSentError("permit_id is required", code="bad_request")
-        path = f"/v1/permits/{quote(permit_id, safe='')}/verify"
+        path = f"/v1-permits/{quote(permit_id, safe='')}/verify"
         data, rate_limit, request_id = self._post(path, {})
         envelope_keys = {
             "valid",
@@ -1181,7 +1193,7 @@ class AtlaSentClient:
         if "valid" not in data or "evidence" not in data:
             raise AtlaSentError(
                 (
-                    "Malformed /v1/permits/{id}/verify response: "
+                    "Malformed /v1-permits/{id}/verify response: "
                     "missing canonical envelope fields"
                 ),
                 code="bad_response",
@@ -1201,7 +1213,7 @@ class AtlaSentClient:
     def get_permit(self, permit_id: str) -> GetPermitResult:
         if not permit_id:
             raise AtlaSentError("permit_id is required", code="bad_request")
-        path = f"/v1/permits/{quote(permit_id, safe='')}"
+        path = f"/v1-permits/{quote(permit_id, safe='')}"
         data, rate_limit, _ = self._get(path)
         return GetPermitResult(
             permit=PermitRecord.model_validate(data),
@@ -1265,11 +1277,11 @@ class AtlaSentClient:
         if cursor is not None:
             params["cursor"] = cursor
 
-        data, rate_limit, request_id = self._get("/v1/permits", params=params or None)
+        data, rate_limit, request_id = self._get("/v1-permits", params=params or None)
         permits_raw = data.get("permits")
         if not isinstance(permits_raw, list):
             raise AtlaSentError(
-                "Malformed /v1/permits response: missing `permits` array",
+                "Malformed /v1-permits response: missing `permits` array",
                 code="bad_response",
                 request_id=request_id,
                 response_body=data,

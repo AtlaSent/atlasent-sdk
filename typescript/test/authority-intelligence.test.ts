@@ -454,7 +454,7 @@ describe("client.authorityIntelligence", () => {
     );
     const report = await client.authorityIntelligence.integrityAudit();
     expect(seenUrl).toBe(
-      "https://api.atlasent.io/v1-authority-intelligence/integrity-audit",
+      "https://api.atlasent.io/functions/v1/v1-authority-intelligence/integrity-audit",
     );
     expect(seenInit.method).toBe("GET");
     expect(
@@ -475,7 +475,7 @@ describe("client.authorityIntelligence", () => {
       decisionWindowDays: 30,
     });
     expect(seenUrl).toBe(
-      "https://api.atlasent.io/v1-authority-intelligence/integrity-audit?decision_window_days=30",
+      "https://api.atlasent.io/functions/v1/v1-authority-intelligence/integrity-audit?decision_window_days=30",
     );
   });
 

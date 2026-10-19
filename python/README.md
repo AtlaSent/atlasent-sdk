@@ -194,7 +194,7 @@ import atlasent
 
 atlasent.configure(
     api_key="ask_live_...",               # else reads ATLASENT_API_KEY
-    base_url="https://api.atlasent.io",   # default
+    base_url="https://api.atlasent.io/functions/v1",  # default
 )
 ```
 
@@ -206,7 +206,7 @@ from atlasent import AtlaSentClient
 
 client = AtlaSentClient(
     api_key="ask_live_...",
-    base_url="https://api.atlasent.io",  # default
+    base_url="https://api.atlasent.io/functions/v1",  # default
     timeout=10,                          # seconds, default
     max_retries=2,                       # on 5xx / timeouts, default
     retry_backoff=0.5,                   # seconds, doubles each retry
@@ -222,11 +222,23 @@ pick one of these:
 |---|---|---|
 | **`protect()`** | You want fail-closed execution: "no permit, no execution." | Evaluate + verify in one call. Returns a `Permit` on allow; raises on `deny` / `hold` / `escalate` / verification failure / transport error. |
 | **`evaluate()`** | You need to inspect the four-value decision (`allow` / `deny` / `hold` / `escalate`). | Returns the raw decision object. Does not collapse `hold` and `escalate` into a deny; does not auto-verify. |
-| **`verify()`** | You hold a permit token from a prior `evaluate()` and want to confirm it before execution. | Distinct from the other two — operates on an existing permit. |
+| **`verify()`** | You hold a permit token from a prior `evaluate()` and want to confirm it before execution. | Distinct from the other two — operates on an existing permit. Calls `/v1-verify-permit` (signature, binding and replay checks). Not deprecated. |
 
 ```python
 from atlasent import protect, evaluate, verify
 ```
+
+### Permit lifecycle (by permit id)
+
+`get_permit(id)`, `list_permits(...)`, `verify_permit_by_id(id)` and
+`revoke_permit_by_id(id, reason=...)` call the `v1-permits` function
+(`/v1-permits`, `/v1-permits/{id}`, `/v1-permits/{id}/verify`,
+`/v1-permits/{id}/revoke`; the id is URL-encoded). They read or move a
+permit's lifecycle status. `verify_permit_by_id()` is **not** the
+execution-boundary verifier: it does not check the permit's signature,
+bindings or replay. Gate execution on `protect()` or `verify()`.
+These routes are served by atlasent-api#4522 and work against a runtime that
+has it deployed.
 
 ### Decision replay
 
@@ -301,11 +313,16 @@ fail-closed, and there is no `authorize(...)` lifecycle that
 
 The SDK calls:
 
-- `POST https://api.atlasent.io/v1-evaluate`
-- `POST https://api.atlasent.io/v1-verify-permit`
-- `POST https://api.atlasent.io/v1/decisions/{id}/replay` (`.replay()` — alpha)
+- `POST https://api.atlasent.io/functions/v1/v1-evaluate`
+- `POST https://api.atlasent.io/functions/v1/v1-verify-permit`
+- `{base_url}/v1-permits[/{id}[/verify|/revoke]]` (permit lifecycle methods above)
+- `POST {base_url}/v1/decisions/{id}/replay` (`.replay()` — alpha)
 
-Override with the `base_url` argument.
+Override with the `base_url` argument (or `ATLASENT_BASE_URL`). The base URL is
+the runtime's functions root and must end at `/functions/v1`; for a Supabase
+project that is `https://<project-ref>.supabase.co/functions/v1`. The hosted
+gateway serves no function at the bare host, so a bare `https://api.atlasent.io`
+(the default documented by earlier releases) has `/functions/v1` appended for you.
 
 ## Requirements
 

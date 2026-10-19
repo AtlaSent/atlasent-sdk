@@ -334,7 +334,7 @@ export class AtlaSentEscalateError extends AtlaSentError {
 // ── Permit revocation error (PROD-D9 continuous-authorization) ────────────────
 
 /**
- * Thrown by an SDK guard heartbeat when `GET /v1/permits/:id/valid`
+ * Thrown by an SDK guard heartbeat when `GET /v1-permits/:id/valid`
  * returns `status: 'revoked'` during tool execution (PROD-D9
  * continuous-authorization lease model).
  *
@@ -355,7 +355,7 @@ export class AtlaSentEscalateError extends AtlaSentError {
  * Guard heartbeat is configured via `permitRevalidationIntervalMs` in
  * the guard options (minimum 1000 ms). The heartbeat activates only
  * when the {@link AtlaSentClient} exposes `checkPermitValid` — i.e.
- * when `atlasent-api` has deployed `GET /v1/permits/:id/valid`.
+ * when `atlasent-api` has deployed `GET /v1-permits/:id/valid`.
  */
 export class PermitRevoked extends AtlaSentError {
   override name: string = 'PermitRevoked';

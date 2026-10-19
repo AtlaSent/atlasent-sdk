@@ -1180,7 +1180,7 @@ class TestAsyncGetPermit:
         )
         result = await async_client.get_permit("pt_a")
         url = mock_get.call_args[0][0]
-        assert url.endswith("/v1/permits/pt_a")
+        assert url.endswith("/v1-permits/pt_a")
         assert result.permit.id == "pt_a"
 
     @pytest.mark.asyncio
@@ -1327,7 +1327,7 @@ class TestAsyncListPermits:
         )
         result = await async_client.list_permits()
         url = mock_get.call_args[0][0]
-        assert url.endswith("/v1/permits")
+        assert url.endswith("/v1-permits")
         assert len(result.permits) == 1
 
     @pytest.mark.asyncio
@@ -1371,7 +1371,7 @@ class TestAsyncRevokePermitById:
         )
         url = mock_post.call_args[0][0]
         body = mock_post.call_args[1]["json"]
-        assert url.endswith("/v1/permits/pt_a/revoke")
+        assert url.endswith("/v1-permits/pt_a/revoke")
         assert body == {"reason": "approval rescinded"}
         assert result.permit.status == "revoked"
         assert result.permit.revoke_reason == "approval rescinded"
@@ -1409,7 +1409,7 @@ class TestAsyncVerifyPermitById:
         )
         result = await async_client.verify_permit_by_id("pt_a")
         url = mock_post.call_args[0][0]
-        assert url.endswith("/v1/permits/pt_a/verify")
+        assert url.endswith("/v1-permits/pt_a/verify")
         assert result.valid is True
         assert result.verification_type == "permit"
         assert result.evidence.permit_id == "pt_a"
@@ -1429,12 +1429,91 @@ class TestAsyncLegacyDeprecation:
             await async_client.revoke_permit("dec_x")
 
     @pytest.mark.asyncio
-    async def test_async_legacy_verify_emits_warning(self, async_client, mocker):
+    async def test_async_verify_does_not_warn(self, async_client, mocker):
+        # verify() is the execution-boundary verifier (/v1-verify-permit);
+        # it is not deprecated and must not warn.
         resp = _mock_resp(mocker, json_data={"valid": True, "outcome": "allow"})
-        mocker.patch.object(
+        post = mocker.patch.object(
             async_client._client,
             "post",
             return_value=resp,
         )
-        with pytest.warns(DeprecationWarning, match="verify"):
+        import warnings as _warnings
+
+        with _warnings.catch_warnings(record=True) as caught:
+            _warnings.simplefilter("always")
             await async_client.verify("pt_x")
+        assert [w for w in caught if issubclass(w.category, DeprecationWarning)] == []
+        assert post.call_args[0][0].endswith("/v1-verify-permit")
+
+
+class TestAsyncPermitFunctionRoutes:
+    """Async per-permit calls address the ``v1-permits`` function, id encoded."""
+
+    NASTY = "pt/a b?c"
+    ENC = "pt%2Fa%20b%3Fc"
+    ROW = {
+        "id": "pt_alpha",
+        "org_id": "org_x",
+        "actor_id": "agent-1",
+        "action_id": "ehr.write",
+        "status": "verified",
+        "issued_at": "2026-05-07T01:00:00Z",
+        "expires_at": "2026-05-07T01:15:00Z",
+    }
+
+    @pytest.mark.asyncio
+    async def test_get_permit(self, async_client, mocker):
+        get = mocker.patch.object(
+            async_client._client,
+            "get",
+            return_value=_mock_resp(mocker, json_data=self.ROW),
+        )
+        await async_client.get_permit(self.NASTY)
+        assert get.call_args[0][0].endswith(f"/functions/v1/v1-permits/{self.ENC}")
+
+    @pytest.mark.asyncio
+    async def test_list_permits(self, async_client, mocker):
+        get = mocker.patch.object(
+            async_client._client,
+            "get",
+            return_value=_mock_resp(mocker, json_data={"permits": [self.ROW]}),
+        )
+        await async_client.list_permits()
+        assert get.call_args[0][0].endswith("/functions/v1/v1-permits")
+
+    @pytest.mark.asyncio
+    async def test_verify_permit_by_id(self, async_client, mocker):
+        wire = {
+            "valid": True,
+            "verification_type": "permit",
+            "reason": None,
+            "verified_at": "2026-05-07T01:00:00Z",
+            "evidence": {"permit_id": "pt_alpha", "status": "verified"},
+            **self.ROW,
+        }
+        post = mocker.patch.object(
+            async_client._client,
+            "post",
+            return_value=_mock_resp(mocker, json_data=wire),
+        )
+        await async_client.verify_permit_by_id(self.NASTY)
+        assert post.call_args[0][0].endswith(
+            f"/functions/v1/v1-permits/{self.ENC}/verify"
+        )
+        assert post.call_args.kwargs["json"] == {}
+
+    @pytest.mark.asyncio
+    async def test_revoke_permit_by_id(self, async_client, mocker):
+        post = mocker.patch.object(
+            async_client._client,
+            "post",
+            return_value=_mock_resp(
+                mocker, json_data={**self.ROW, "status": "revoked"}
+            ),
+        )
+        await async_client.revoke_permit_by_id(self.NASTY, reason="superseded")
+        assert post.call_args[0][0].endswith(
+            f"/functions/v1/v1-permits/{self.ENC}/revoke"
+        )
+        assert post.call_args.kwargs["json"] == {"reason": "superseded"}

@@ -12,7 +12,7 @@
  *
  * When `permitRevalidationIntervalMs` is set, the guard also runs a
  * continuous-authorization heartbeat (PROD-D9): it polls
- * `GET /v1/permits/:id/valid` at the configured interval and throws
+ * `GET /v1-permits/:id/valid` at the configured interval and throws
  * `PermitRevoked` if the permit is revoked mid-execution.
  *
  * Zero dependency on `llamaindex` — duck-typed so the wrapped `execute`
@@ -118,11 +118,11 @@ export interface LlamaIndexGuardOptions {
   /**
    * Continuous-authorization heartbeat interval in milliseconds (PROD-D9).
    *
-   * When set (minimum 1000 ms), the guard polls `GET /v1/permits/:id/valid`
+   * When set (minimum 1000 ms), the guard polls `GET /v1-permits/:id/valid`
    * at this interval during tool execution. If the permit is revoked
    * mid-execution, `PermitRevoked` is thrown immediately regardless of
    * `onDeny`. Requires the `AtlaSentClient` to expose `checkPermitValid`
-   * (available once atlasent-api ships `GET /v1/permits/:id/valid`).
+   * (available once atlasent-api ships `GET /v1-permits/:id/valid`).
    */
   permitRevalidationIntervalMs?: number;
 }

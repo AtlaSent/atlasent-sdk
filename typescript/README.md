@@ -80,7 +80,19 @@ client.deployGate({ agent?, action?, context? })
   // defaults action to "production.deploy" and returns { allowed, reason, evidence }
 ```
 
-`verifyPermit()` confirms a previously-issued permit server-side. Signed/offline permit artifacts never imply deployment authorization by themselves.
+`verifyPermit()` confirms a previously-issued permit server-side (`POST /v1-verify-permit`: signature, binding and replay checks, then consume). It is the execution-boundary verifier and is not deprecated. Signed/offline permit artifacts never imply deployment authorization by themselves.
+
+### Permit lifecycle (by permit id)
+
+```ts
+client.getPermit(id)                    // GET  /v1-permits/{id}
+client.checkPermitValid(id)             // GET  /v1-permits/{id}/valid
+client.listPermits({ status, ... })     // GET  /v1-permits
+client.verifyPermitById(id)             // POST /v1-permits/{id}/verify
+client.revokePermitById(id, { reason }) // POST /v1-permits/{id}/revoke
+```
+
+These call the `v1-permits` function (the id is URL-encoded) and read or move a permit's lifecycle status. `verifyPermitById()` is **not** the execution-boundary verifier: it does not check the permit's signature, bindings or replay. Gate execution on `verifyPermit()`. These routes are served by atlasent-api#4522 and work against a runtime that has it deployed.
 
 ## Decision replay
 
@@ -154,11 +166,18 @@ See [`examples/deploy-gate.ts`](./examples/deploy-gate.ts) for a complete CI-sha
 ```ts
 new AtlaSentClient({
   apiKey: "ask_live_...", // required
-  baseUrl: "https://api.atlasent.io", // default
+  baseUrl: "https://api.atlasent.io/functions/v1", // default
   timeoutMs: 10_000, // default — per-request
   fetch: customFetch, // default: globalThis.fetch
 });
 ```
+
+`baseUrl` is the runtime's functions root: `/v1-evaluate`, `/v1-verify-permit`
+and the other function paths are appended to it, so it must end at
+`/functions/v1` (for a Supabase project, `https://<project-ref>.supabase.co/functions/v1`).
+The hosted gateway serves no function at the bare host, so a bare
+`https://api.atlasent.io`, the default documented by earlier releases, has
+`/functions/v1` appended for you. Any other host is used exactly as given.
 
 ## Error handling
 

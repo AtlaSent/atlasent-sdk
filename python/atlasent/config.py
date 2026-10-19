@@ -6,11 +6,11 @@ import logging
 import os
 
 from ._api_key_hint import MISSING_API_KEY_HINT
+from ._base_url import DEFAULT_BASE_URL
 from .exceptions import ConfigurationError
 
 logger = logging.getLogger("atlasent")
 
-DEFAULT_BASE_URL = "https://api.atlasent.io"
 
 _global_config: dict[str, str | None] = {
     "api_key": None,
@@ -34,7 +34,7 @@ def configure(
             ``ATLASENT_ANON_KEY``.
         base_url: Override the base API URL.  Falls back to the
             ``ATLASENT_BASE_URL`` or ``ATLASENT_API_URL`` environment
-            variable, then ``https://api.atlasent.io``.
+            variable, then ``https://api.atlasent.io/functions/v1``.
             Pass ``None`` (the default) to use the environment variable
             or the built-in default.
     """
@@ -71,10 +71,11 @@ def get_base_url() -> str:
     1. Value passed to :func:`configure` (``base_url`` argument).
     2. ``ATLASENT_BASE_URL`` environment variable.
     3. ``ATLASENT_API_URL`` environment variable.
-    4. Built-in default (``https://api.atlasent.io``).
+    4. Built-in default (``https://api.atlasent.io/functions/v1``).
 
     Supabase-hosted instances must set one of the env vars to
-    ``https://<project-ref>.supabase.co/functions/v1``.
+    ``https://<project-ref>.supabase.co/functions/v1``. The client appends
+    ``/functions/v1`` to a bare hosted-runtime host (see ``._base_url``).
     """
     return (
         _global_config["base_url"]

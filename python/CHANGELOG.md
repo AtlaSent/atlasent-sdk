@@ -26,6 +26,60 @@ the same `evaluate()` with `approval={"artifact": ...}`.
 `VerifyResult.consumed`, the other field #592 added to TypeScript, was already
 here.
 
+### Fixed: per-permit methods address the `v1-permits` function
+
+Under the hosted functions root the first path segment is the function name,
+so the slash-form paths these methods used (`/v1/permits/{id}/verify` and
+friends) reached no function. They now call the `v1-permits` function:
+
+| Method (sync and async) | Route |
+|---|---|
+| `get_permit(id)` | `GET /v1-permits/{id}` |
+| `list_permits(...)` | `GET /v1-permits` |
+| `verify_permit_by_id(id)` | `POST /v1-permits/{id}/verify` |
+| `revoke_permit_by_id(id, reason=)` | `POST /v1-permits/{id}/revoke` |
+
+The id is still URL-encoded (`quote(id, safe="")`, so `/` and `?` cannot
+change the route). Request bodies and return types are unchanged. The runtime
+serves this shape from atlasent-api#4522; until that is deployed to
+production these calls fail closed with an `AtlaSentError` there, as before.
+
+### Fixed: `verify()` is no longer deprecated
+
+`AtlaSentClient.verify()` and `AsyncAtlaSentClient.verify()` were marked
+deprecated in favour of `verify_permit_by_id()` and emitted a
+`DeprecationWarning` on every call. That pointed callers the wrong way:
+`verify()` calls `/v1-verify-permit`, the execution-boundary verifier
+(signature, binding and replay checks, then consume), while
+`verify_permit_by_id()` is a permit lifecycle/status transition that performs
+none of those checks. The deprecation and the warning are removed and the
+docstrings now say which is which. No public API is removed. `revoke_permit()`,
+`gate()` and `authorize()` keep their existing deprecations.
+
+### Fixed: the default `base_url` reached no function
+
+`AtlaSentClient(api_key=...)`, `AsyncAtlaSentClient()` and the module-level
+`atlasent.configure()` path posted to `https://api.atlasent.io/v1-evaluate`
+unless `ATLASENT_BASE_URL` was set. The hosted gateway serves edge functions
+only under `/functions/v1` and answers every other path with
+`404 {"error":"requested path is invalid"}`, so every call from a client built
+with the default failed with an `AtlaSentError` before reaching the evaluator.
+It failed closed: nothing ran, but nothing could be authorized either.
+
+- `DEFAULT_BASE_URL` is now `https://api.atlasent.io/functions/v1` (same name
+  in `atlasent.client`, `atlasent.async_client` and `atlasent.config`).
+- A `base_url` whose host is the hosted runtime (`api.atlasent.io` or the
+  hosted Supabase project hosts) and whose path is empty or `/` has
+  `/functions/v1` appended, so code copied from earlier READMEs keeps working.
+  Any other host, and a hosted host with an explicit path, is used as given.
+- New module `atlasent/_base_url.py` holds the rule; tests in
+  `tests/test_base_url.py`.
+
+Not changed by this fix: the per-permit methods (`verify_permit_by_id`,
+`get_permit`, `list_permits`, `revoke_permit_by_id`) still used slash-form
+paths; see "per-permit methods address the `v1-permits` function" above. Use
+`protect()` or `verify()` (`/v1-verify-permit`) at the execution boundary.
+
 ## 2.21.0
 
 ### Changed: missing-key errors say where to get a key

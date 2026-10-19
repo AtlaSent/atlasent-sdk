@@ -71,7 +71,7 @@ class TestInit:
         c = AtlaSentClient(api_key="ask_test_xxxxxxxx")
         assert c._api_key == "ask_test_xxxxxxxx"
         assert c._anon_key == ""
-        assert c._base_url == "https://api.atlasent.io"
+        assert c._base_url == "https://api.atlasent.io/functions/v1"
         assert c._timeout == 10
         assert c._max_retries == 3
 
@@ -1612,14 +1612,14 @@ class TestGetPermit:
         assert result.permit.id == "pt_alpha"
         assert result.permit.status == "verified"
         url = mock_get.call_args[0][0]
-        assert url.endswith("/v1/permits/pt_alpha")
+        assert url.endswith("/v1-permits/pt_alpha")
 
     def test_url_encodes_id(self, client, mocker):
         resp = _mock_resp(mocker, json_data=self.PERMIT)
         mock_get = mocker.patch.object(client._client, "get", return_value=resp)
         client.get_permit("pt with spaces")
         url = mock_get.call_args[0][0]
-        assert url.endswith("/v1/permits/pt%20with%20spaces")
+        assert url.endswith("/v1-permits/pt%20with%20spaces")
 
     def test_empty_id_raises(self, client):
         with pytest.raises(AtlaSentError) as exc_info:
@@ -1784,7 +1784,7 @@ class TestListPermits:
         assert len(result.permits) == 2
         assert result.total == 2
         url = mock_get.call_args[0][0]
-        assert url.endswith("/v1/permits")
+        assert url.endswith("/v1-permits")
         # No query params when no filters
         assert mock_get.call_args[1].get("params") is None
 
@@ -1924,7 +1924,7 @@ class TestRevokePermitById:
         result = client.revoke_permit_by_id("pt_alpha", reason="approval rescinded")
         url = mock_post.call_args[0][0]
         body = mock_post.call_args[1]["json"]
-        assert url.endswith("/v1/permits/pt_alpha/revoke")
+        assert url.endswith("/v1-permits/pt_alpha/revoke")
         assert body == {"reason": "approval rescinded"}
         assert result.permit.status == "revoked"
         assert result.permit.revoked_at == "2026-05-07T01:10:00Z"
@@ -1943,7 +1943,7 @@ class TestRevokePermitById:
         mock_post = mocker.patch.object(client._client, "post", return_value=resp)
         client.revoke_permit_by_id("pt with spaces")
         url = mock_post.call_args[0][0]
-        assert url.endswith("/v1/permits/pt%20with%20spaces/revoke")
+        assert url.endswith("/v1-permits/pt%20with%20spaces/revoke")
 
     def test_empty_id_raises(self, client):
         with pytest.raises(AtlaSentError) as exc_info:
@@ -1983,7 +1983,7 @@ class TestVerifyPermitById:
         mock_post = mocker.patch.object(client._client, "post", return_value=resp)
         result = client.verify_permit_by_id("pt_alpha")
         url = mock_post.call_args[0][0]
-        assert url.endswith("/v1/permits/pt_alpha/verify")
+        assert url.endswith("/v1-permits/pt_alpha/verify")
         assert result.valid is True
         assert result.verification_type == "permit"
         assert result.reason is None
@@ -1998,7 +1998,7 @@ class TestVerifyPermitById:
         mock_post = mocker.patch.object(client._client, "post", return_value=resp)
         client.verify_permit_by_id("pt with spaces")
         url = mock_post.call_args[0][0]
-        assert url.endswith("/v1/permits/pt%20with%20spaces/verify")
+        assert url.endswith("/v1-permits/pt%20with%20spaces/verify")
 
     def test_empty_id_raises(self, client):
         with pytest.raises(AtlaSentError) as exc_info:
@@ -2014,7 +2014,13 @@ class TestVerifyPermitById:
 
 
 class TestLegacyRevokeVerifyDeprecated:
-    """Confirm legacy revoke_permit() and verify() emit DeprecationWarning."""
+    """Legacy revoke_permit() is deprecated; verify() is NOT.
+
+    verify() calls /v1-verify-permit, the execution-boundary verifier
+    (signature, binding and replay checks). verify_permit_by_id() is a
+    lifecycle/status operation and is not a substitute, so verify() must
+    not warn.
+    """
 
     def test_legacy_revoke_permit_emits_warning(self, client, mocker):
         resp = _mock_resp(mocker, json_data={"revoked": True, "decision_id": "dec_x"})
@@ -2022,8 +2028,94 @@ class TestLegacyRevokeVerifyDeprecated:
         with pytest.warns(DeprecationWarning, match="revoke_permit"):
             client.revoke_permit("dec_x")
 
-    def test_legacy_verify_emits_warning(self, client, mocker):
+    def test_verify_does_not_warn(self, client, mocker):
         resp = _mock_resp(mocker, json_data={"valid": True, "outcome": "allow"})
-        mocker.patch.object(client._client, "post", return_value=resp)
-        with pytest.warns(DeprecationWarning, match="verify"):
+        post = mocker.patch.object(client._client, "post", return_value=resp)
+        import warnings as _warnings
+
+        with _warnings.catch_warnings(record=True) as caught:
+            _warnings.simplefilter("always")
             client.verify("pt_x")
+        assert [w for w in caught if issubclass(w.category, DeprecationWarning)] == []
+        assert post.call_args[0][0].endswith("/v1-verify-permit")
+
+    def test_verify_docstring_not_deprecated(self):
+        doc = AtlaSentClient.verify.__doc__ or ""
+        assert ".. deprecated::" not in doc
+        assert "it is not deprecated" in doc
+        assert "execution boundary" in doc
+        by_id = AtlaSentClient.verify_permit_by_id.__doc__ or ""
+        assert "lifecycle/status operation" in by_id
+        assert ":meth:`verify`" in by_id
+
+
+class TestPermitFunctionRoutes:
+    """Per-permit calls address the ``v1-permits`` function, id encoded.
+
+    Under the hosted functions root the first path segment is the
+    function name, so ``/v1/permits/...`` reaches no function.
+    """
+
+    NASTY = "pt/a b?c"
+    ENC = "pt%2Fa%20b%3Fc"
+    ROW = {
+        "id": "pt_alpha",
+        "org_id": "org_x",
+        "actor_id": "agent-1",
+        "action_id": "ehr.write",
+        "status": "verified",
+        "issued_at": "2026-05-07T01:00:00Z",
+        "expires_at": "2026-05-07T01:15:00Z",
+    }
+
+    def _verify_wire(self):
+        return {
+            "valid": True,
+            "verification_type": "permit",
+            "reason": None,
+            "verified_at": "2026-05-07T01:00:00Z",
+            "evidence": {"permit_id": "pt_alpha", "status": "verified"},
+            **self.ROW,
+        }
+
+    def test_get_permit(self, client, mocker):
+        get = mocker.patch.object(
+            client._client, "get", return_value=_mock_resp(mocker, json_data=self.ROW)
+        )
+        client.get_permit(self.NASTY)
+        assert get.call_args[0][0].endswith(f"/functions/v1/v1-permits/{self.ENC}")
+
+    def test_list_permits(self, client, mocker):
+        get = mocker.patch.object(
+            client._client,
+            "get",
+            return_value=_mock_resp(mocker, json_data={"permits": [self.ROW]}),
+        )
+        client.list_permits(status="verified")
+        assert get.call_args[0][0].endswith("/functions/v1/v1-permits")
+
+    def test_verify_permit_by_id(self, client, mocker):
+        post = mocker.patch.object(
+            client._client,
+            "post",
+            return_value=_mock_resp(mocker, json_data=self._verify_wire()),
+        )
+        client.verify_permit_by_id(self.NASTY)
+        assert post.call_args[0][0].endswith(
+            f"/functions/v1/v1-permits/{self.ENC}/verify"
+        )
+        assert post.call_args.kwargs["json"] == {}
+
+    def test_revoke_permit_by_id(self, client, mocker):
+        post = mocker.patch.object(
+            client._client,
+            "post",
+            return_value=_mock_resp(
+                mocker, json_data={**self.ROW, "status": "revoked"}
+            ),
+        )
+        client.revoke_permit_by_id(self.NASTY, reason="superseded")
+        assert post.call_args[0][0].endswith(
+            f"/functions/v1/v1-permits/{self.ENC}/revoke"
+        )
+        assert post.call_args.kwargs["json"] == {"reason": "superseded"}

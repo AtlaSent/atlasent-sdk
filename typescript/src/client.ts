@@ -11,6 +11,7 @@
  */
 
 import { functionRegionHeaders } from "./functionRegion.js";
+import { DEFAULT_BASE_URL, resolveBaseUrl } from "./baseUrl.js";
 import { MISSING_API_KEY_HINT } from "./apiKeyHint.js";
 import type {
   AuditEventsPage,
@@ -225,7 +226,6 @@ import type {
 } from "./rbacRules.js";
 import type { GetApprovalSlaResponse } from "./approvalsSla.js";
 
-const DEFAULT_BASE_URL = "https://api.atlasent.io";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const SDK_VERSION = "2.18.0";
 
@@ -721,9 +721,10 @@ export class AtlaSentClient {
       );
     }
     this.apiKey = _validateApiKey(options.apiKey);
-    this.baseUrl = _enforceTls(options.baseUrl ?? DEFAULT_BASE_URL).replace(
-      /\/+$/,
-      "",
+    // resolveBaseUrl appends /functions/v1 to a bare hosted-runtime host:
+    // the gateway serves no function at the root (see ./baseUrl).
+    this.baseUrl = resolveBaseUrl(
+      _enforceTls(options.baseUrl ?? DEFAULT_BASE_URL),
     );
     this.regionHeaders = functionRegionHeaders(this.baseUrl, options.functionRegion);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -866,7 +867,7 @@ export class AtlaSentClient {
       evaluationId: permitId,
       permitId,
       // /v1-evaluate does not return a control-plane-shaped Permit body;
-      // callers needing the full record fetch GET /v1/permits/:id.
+      // callers needing the full record fetch GET /v1-permits/:id.
       permit: null,
       permitToken: decision === "allow" ? (permitToken ?? null) : null,
       reasons: reason ? [reason] : [],
@@ -1227,7 +1228,7 @@ export class AtlaSentClient {
       evaluationId: permitId,
       permitId,
       // /v1-evaluate does not return a control-plane-shaped Permit body;
-      // callers needing the full record fetch GET /v1/permits/:id.
+      // callers needing the full record fetch GET /v1-permits/:id.
       permit: null,
       permitToken: decision === "allow" ? (permitToken ?? null) : null,
       reasons: reason ? [reason] : [],
@@ -1273,13 +1274,15 @@ export class AtlaSentClient {
   }
 
   /**
-   * Verify that a previously issued permit is still valid.
+   * Verify a permit at the execution boundary, immediately before the
+   * protected action runs.
    *
-   * @deprecated Use {@link verifyPermitById} — the canonical REST
-   * surface (`POST /v1/permits/{id}/verify`) returns the unified
-   * verification envelope plus the full {@link PermitRecord}, instead
-   * of the legacy `{verified, outcome, permitHash}` shape this method
-   * emits. Will be removed in `@atlasent/sdk@3`.
+   * Calls `POST /v1-verify-permit`: the runtime checks the permit's
+   * signature, its bindings (action type, actor, environment,
+   * `executionHash`) and replay state, and consumes it. This is the
+   * execution-boundary verifier and is not deprecated. Do not
+   * substitute {@link verifyPermitById}, which is a permit
+   * lifecycle/status operation and performs none of these checks.
    *
    * A `verified: false` response is **not** thrown — inspect the
    * returned object. Only transport / server errors throw.
@@ -1424,7 +1427,7 @@ export class AtlaSentClient {
    * {@link verifyPermit}.
    *
    * @deprecated Use {@link revokePermitById} — the canonical REST
-   * surface (`POST /v1/permits/{id}/revoke`) returns the full updated
+   * surface (`POST /v1-permits/{id}/revoke`) returns the full updated
    * {@link PermitRecord} with `revoked_at`/`revoked_by`/`revoke_reason`
    * populated, instead of the legacy `{revoked, permitId}` envelope
    * this method emits. Will be removed in `@atlasent/sdk@3`.
@@ -1471,7 +1474,7 @@ export class AtlaSentClient {
 
   /**
    * Revoke a permit through the canonical REST surface
-   * (`POST /v1/permits/{permitId}/revoke`).
+   * (`POST /v1-permits/{permitId}/revoke`).
    *
    * Returns the full updated {@link PermitRecord} with `status === 'revoked'`
    * and `revoked_at` / `revoked_by` / `revoke_reason` populated. After
@@ -1494,15 +1497,21 @@ export class AtlaSentClient {
     const body: { reason?: string } = {};
     if (input.reason !== undefined) body.reason = input.reason;
     const { body: wire, rateLimit } = await this.post<PermitRecord>(
-      `/v1/permits/${encodeURIComponent(permitId)}/revoke`,
+      `/v1-permits/${encodeURIComponent(permitId)}/revoke`,
       body,
     );
     return { permit: wire, rateLimit };
   }
 
   /**
-   * Verify a permit through the canonical REST surface
-   * (`POST /v1/permits/{permitId}/verify`).
+   * Run the permit lifecycle `verify` transition by permit id
+   * (`POST /v1-permits/{permitId}/verify`).
+   *
+   * This is a lifecycle/status operation, **not** the execution-boundary
+   * verifier: it moves the permit row's status but does not check the
+   * permit's signature, its action/actor/environment/execution-hash
+   * bindings, or replay. To gate execution, call {@link verifyPermit}
+   * (`POST /v1-verify-permit`) instead.
    *
    * Returns the unified verification envelope (`valid`,
    * `verification_type: 'permit'`, `reason`, `verified_at`, `evidence`)
@@ -1519,7 +1528,7 @@ export class AtlaSentClient {
     }
     const { body: wire, rateLimit } = await this.post<
       VerifyPermitByIdResponse & PermitRecord
-    >(`/v1/permits/${encodeURIComponent(permitId)}/verify`, {});
+    >(`/v1-permits/${encodeURIComponent(permitId)}/verify`, {});
     // Server returns the canonical envelope merged with the Permit row
     // (allOf in openapi). Pull out the legacy permit row into `permit`
     // for callers that want it as a sub-object too.
@@ -1539,7 +1548,7 @@ export class AtlaSentClient {
   /**
    * Get a single permit's full lifecycle state.
    *
-   * Calls `GET /v1/permits/{permitId}` (the canonical REST surface).
+   * Calls `GET /v1-permits/{permitId}` (the canonical REST surface).
    * Returns `status`, all timestamps, `revoked_at` / `revoked_by` /
    * `revoke_reason` (when applicable), and the bound `payload_hash`
    * / `decision_id`.
@@ -1555,7 +1564,7 @@ export class AtlaSentClient {
       throw new AtlaSentError("permitId is required", { code: "bad_request" });
     }
     const { body: wire, rateLimit } = await this.get<PermitRecord>(
-      `/v1/permits/${encodeURIComponent(permitId)}`,
+      `/v1-permits/${encodeURIComponent(permitId)}`,
     );
     return { permit: wire, rateLimit };
   }
@@ -1563,7 +1572,7 @@ export class AtlaSentClient {
   /**
    * Poll whether a permit is currently valid.
    *
-   * Calls `GET /v1/permits/{permitId}/valid` — a lightweight read
+   * Calls `GET /v1-permits/{permitId}/valid` — a lightweight read
    * returning only the status snapshot optimised for guard heartbeat
    * polling. Guards with `permitRevalidationIntervalMs` set race this
    * against `tool.execute()` and throw {@link PermitRevoked} when
@@ -1576,7 +1585,7 @@ export class AtlaSentClient {
       throw new AtlaSentError("permitId is required", { code: "bad_request" });
     }
     const { body } = await this.get<PermitValidResponse>(
-      `/v1/permits/${encodeURIComponent(permitId)}/valid`,
+      `/v1-permits/${encodeURIComponent(permitId)}/valid`,
     );
     return body;
   }
@@ -1584,7 +1593,7 @@ export class AtlaSentClient {
   /**
    * List permits issued to the calling org, most-recently-issued first.
    *
-   * Calls `GET /v1/permits` (the canonical REST surface). Cursor-paged.
+   * Calls `GET /v1-permits` (the canonical REST surface). Cursor-paged.
    * Filters narrow on server side; pagination uses the `created_at`
    * timestamp opaquely (`nextCursor`).
    *
@@ -1607,11 +1616,11 @@ export class AtlaSentClient {
       permits?: PermitRecord[];
       total?: number;
       next_cursor?: string;
-    }>("/v1/permits", params);
+    }>("/v1-permits", params);
 
     if (!Array.isArray(wire.permits)) {
       throw new AtlaSentError(
-        "Malformed response from /v1/permits: missing `permits` array",
+        "Malformed response from /v1-permits: missing `permits` array",
         { code: "bad_response" },
       );
     }
