@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-import atlasent
-import atlasent.config as config
+from atlasent import AsyncAtlaSentClient, AtlaSentClient, config
 from atlasent._base_url import (
     DEFAULT_BASE_URL,
     HOSTED_FUNCTIONS_PATH,
@@ -101,34 +100,34 @@ def test_idempotent() -> None:
 
 class TestClients:
     def test_sync_default(self) -> None:
-        c = atlasent.AtlaSentClient(api_key=KEY)
+        c = AtlaSentClient(api_key=KEY)
         assert c._base_url == "https://api.atlasent.io/functions/v1"
 
     def test_sync_normalizes_bare_host(self) -> None:
-        c = atlasent.AtlaSentClient(api_key=KEY, base_url="https://api.atlasent.io")
+        c = AtlaSentClient(api_key=KEY, base_url="https://api.atlasent.io")
         assert c._base_url == "https://api.atlasent.io/functions/v1"
 
     def test_sync_leaves_self_hosted(self) -> None:
-        c = atlasent.AtlaSentClient(api_key=KEY, base_url="https://rt.example.com/fn/")
+        c = AtlaSentClient(api_key=KEY, base_url="https://rt.example.com/fn/")
         assert c._base_url == "https://rt.example.com/fn"
 
     def test_async_default(self) -> None:
-        c = atlasent.AsyncAtlaSentClient(api_key=KEY)
+        c = AsyncAtlaSentClient(api_key=KEY)
         assert c._base_url == "https://api.atlasent.io/functions/v1"
 
     def test_async_normalizes_bare_host_from_env(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("ATLASENT_BASE_URL", "https://api.atlasent.io")
-        c = atlasent.AsyncAtlaSentClient(api_key=KEY)
+        c = AsyncAtlaSentClient(api_key=KEY)
         assert c._base_url == "https://api.atlasent.io/functions/v1"
 
     def test_still_refuses_non_https(self) -> None:
         with pytest.raises(ValueError, match="https"):
-            atlasent.AtlaSentClient(api_key=KEY, base_url="http://api.atlasent.io")
+            AtlaSentClient(api_key=KEY, base_url="http://api.atlasent.io")
 
     def test_sync_evaluate_posts_to_functions_root(self, mocker) -> None:
-        c = atlasent.AtlaSentClient(api_key=KEY, function_region="auto")
+        c = AtlaSentClient(api_key=KEY, function_region="auto")
         resp = mocker.Mock()
         resp.status_code = 200
         resp.headers = {}
