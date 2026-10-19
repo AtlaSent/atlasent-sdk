@@ -18,7 +18,7 @@ import pytest
 from atlasent import AtlaSentClient
 
 API_KEY = "ask_test_enterprise"
-BASE_URL = "https://api.atlasent.io"
+BASE_URL = "https://api.atlasent.io/functions/v1"
 ORG = "org_ent_test"
 
 

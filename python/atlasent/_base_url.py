@@ -1,0 +1,62 @@
+"""Base-URL resolution for calls to the AtlaSent runtime.
+
+The runtime is a set of Supabase edge functions. Supabase's gateway serves
+functions under ``/functions/v1/<name>`` and answers every other path on the
+host, including ``/<name>`` at the root, with
+``404 {"error":"requested path is invalid"}``. A base URL of bare
+``https://api.atlasent.io`` therefore sends ``/v1-evaluate`` to a path that
+can never route, and every call fails before it reaches the evaluator.
+
+The SDK's paths (``/v1-evaluate``, ``/v1-verify-permit``, ...) are function
+names, so the base URL has to end at ``/functions/v1``. This module is the
+only place that decides that, in two parts:
+
+1. The built-in default is ``https://api.atlasent.io/functions/v1``.
+2. A caller-supplied base URL whose host is AtlaSent's hosted runtime
+   (``HOSTED_RUNTIME_HOSTS``) and whose path is empty or ``/`` gets
+   ``/functions/v1`` appended. Earlier releases documented the bare host as
+   the default, so code copied from those READMEs keeps working.
+
+Part 2 is scoped to the hosted hosts on purpose. A self-hosted runtime or a
+proxy may mount functions anywhere, so any other host is passed through
+unchanged, as is a hosted host with any explicit path.
+
+Keep in step with the TypeScript SDK's ``src/baseUrl.ts``.
+"""
+
+from __future__ import annotations
+
+from urllib.parse import urlparse
+
+from ._function_region import HOSTED_RUNTIME_HOSTS
+
+#: Path at which Supabase's gateway serves edge functions.
+HOSTED_FUNCTIONS_PATH = "/functions/v1"
+
+#: Built-in base URL: the hosted runtime's functions root.
+DEFAULT_BASE_URL = "https://api.atlasent.io" + HOSTED_FUNCTIONS_PATH
+
+
+def resolve_base_url(base_url: str) -> str:
+    """Strip trailing slashes and, for a bare hosted-runtime host, append
+    :data:`HOSTED_FUNCTIONS_PATH`.
+
+    An unparseable value is returned with its trailing slashes stripped and
+    otherwise untouched; the TLS guard that runs before this rejects it.
+    """
+    trimmed = base_url.rstrip("/")
+    try:
+        parsed = urlparse(trimmed)
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return trimmed
+    at_root = parsed.path in ("", "/")
+    if (
+        at_root
+        and not parsed.query
+        and not parsed.fragment
+        and not parsed.params
+        and host in HOSTED_RUNTIME_HOSTS
+    ):
+        return trimmed + HOSTED_FUNCTIONS_PATH
+    return trimmed

@@ -32,7 +32,7 @@ import pytest
 from atlasent import AsyncAtlaSentClient, StreamDecisionEvent, StreamProgressEvent
 
 API_KEY = "ask_test_stream"
-BASE_URL = "https://api.atlasent.io"
+BASE_URL = "https://api.atlasent.io/functions/v1"
 
 
 # ── SSE helpers — shaped like the REAL /v1-evaluate-stream wire frames ───────

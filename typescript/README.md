@@ -154,11 +154,18 @@ See [`examples/deploy-gate.ts`](./examples/deploy-gate.ts) for a complete CI-sha
 ```ts
 new AtlaSentClient({
   apiKey: "ask_live_...", // required
-  baseUrl: "https://api.atlasent.io", // default
+  baseUrl: "https://api.atlasent.io/functions/v1", // default
   timeoutMs: 10_000, // default — per-request
   fetch: customFetch, // default: globalThis.fetch
 });
 ```
+
+`baseUrl` is the runtime's functions root: `/v1-evaluate`, `/v1-verify-permit`
+and the other function paths are appended to it, so it must end at
+`/functions/v1` (for a Supabase project, `https://<project-ref>.supabase.co/functions/v1`).
+The hosted gateway serves no function at the bare host, so a bare
+`https://api.atlasent.io`, the default documented by earlier releases, has
+`/functions/v1` appended for you. Any other host is used exactly as given.
 
 ## Error handling
 

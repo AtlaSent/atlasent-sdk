@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Fixed: the default `base_url` reached no function
+
+`AtlaSentClient(api_key=...)`, `AsyncAtlaSentClient()` and the module-level
+`atlasent.configure()` path posted to `https://api.atlasent.io/v1-evaluate`
+unless `ATLASENT_BASE_URL` was set. The hosted gateway serves edge functions
+only under `/functions/v1` and answers every other path with
+`404 {"error":"requested path is invalid"}`, so every call from a client built
+with the default failed with an `AtlaSentError` before reaching the evaluator.
+It failed closed: nothing ran, but nothing could be authorized either.
+
+- `DEFAULT_BASE_URL` is now `https://api.atlasent.io/functions/v1` (same name
+  in `atlasent.client`, `atlasent.async_client` and `atlasent.config`).
+- A `base_url` whose host is the hosted runtime (`api.atlasent.io` or the
+  hosted Supabase project hosts) and whose path is empty or `/` has
+  `/functions/v1` appended, so code copied from earlier READMEs keeps working.
+  Any other host, and a hosted host with an explicit path, is used as given.
+- New module `atlasent/_base_url.py` holds the rule; tests in
+  `tests/test_base_url.py`.
+
+Not changed by this fix: methods that call slash-form paths such as
+`/v1/permits/{id}/verify` (`verify_permit_by_id`, `get_permit`,
+`list_permits`, `revoke_permit_by_id`) still reach no deployed route under
+either base URL. Use `protect()` or `verify()` (`/v1-verify-permit`) at
+the execution boundary.
+
 ## 2.21.0
 
 ### Changed: missing-key errors say where to get a key

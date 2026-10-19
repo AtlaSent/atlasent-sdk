@@ -195,7 +195,10 @@ class TestReplayWire:
         )
         client.replay(evaluation_id="dec_abc")
         args, kwargs = post.call_args
-        assert args[0] == "https://api.atlasent.io/v1/decisions/dec_abc/replay"
+        assert (
+            args[0]
+            == "https://api.atlasent.io/functions/v1/v1/decisions/dec_abc/replay"
+        )
         assert kwargs["json"] == {}
 
     def test_url_encodes_evaluation_id(self, client, mocker):

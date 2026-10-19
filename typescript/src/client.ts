@@ -11,6 +11,7 @@
  */
 
 import { functionRegionHeaders } from "./functionRegion.js";
+import { DEFAULT_BASE_URL, resolveBaseUrl } from "./baseUrl.js";
 import { MISSING_API_KEY_HINT } from "./apiKeyHint.js";
 import type {
   AuditEventsPage,
@@ -224,7 +225,6 @@ import type {
 } from "./rbacRules.js";
 import type { GetApprovalSlaResponse } from "./approvalsSla.js";
 
-const DEFAULT_BASE_URL = "https://api.atlasent.io";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const SDK_VERSION = "2.18.0";
 
@@ -686,9 +686,10 @@ export class AtlaSentClient {
       );
     }
     this.apiKey = _validateApiKey(options.apiKey);
-    this.baseUrl = _enforceTls(options.baseUrl ?? DEFAULT_BASE_URL).replace(
-      /\/+$/,
-      "",
+    // resolveBaseUrl appends /functions/v1 to a bare hosted-runtime host:
+    // the gateway serves no function at the root (see ./baseUrl).
+    this.baseUrl = resolveBaseUrl(
+      _enforceTls(options.baseUrl ?? DEFAULT_BASE_URL),
     );
     this.regionHeaders = functionRegionHeaders(this.baseUrl, options.functionRegion);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;

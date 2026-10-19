@@ -28,7 +28,7 @@ from atlasent.v2_endpoints import (
 )
 
 API_KEY = "ask_test_v2wave"
-BASE_URL = "https://api.atlasent.io"
+BASE_URL = "https://api.atlasent.io/functions/v1"
 VALID_BATCH_ID = "12345678-1234-5678-1234-567812345678"
 
 

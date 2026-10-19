@@ -8,6 +8,29 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Fixed: the default `baseUrl` reached no function
+
+`new AtlaSentClient({ apiKey })` posted to `https://api.atlasent.io/v1-evaluate`.
+The hosted gateway serves edge functions only under `/functions/v1` and answers
+every other path with `404 {"error":"requested path is invalid"}`, so every
+call from a client built with the default base URL (including the README
+quickstart, `deployGate()`, `protect()` and `withPermit()` without
+`ATLASENT_BASE_URL`) failed with `bad_request` before reaching the evaluator.
+It failed closed: nothing ran, but nothing could be authorized either.
+
+- The default is now `https://api.atlasent.io/functions/v1`.
+- A `baseUrl` whose host is the hosted runtime (`api.atlasent.io` or the
+  hosted Supabase project hosts) and whose path is empty or `/` has
+  `/functions/v1` appended, so code copied from earlier READMEs keeps working.
+  Any other host, and a hosted host with an explicit path, is used as given.
+- New module `src/baseUrl.ts` holds the rule; tests in `test/base-url.test.ts`.
+
+Not changed by this fix: methods that call slash-form paths such as
+`/v1/permits/:id/verify` (`verifyPermitById`, `getPermit`, `listPermits`,
+`revokePermitById`, `checkPermitValid`) still reach no deployed route under
+either base URL. Use `verifyPermit()` (`/v1-verify-permit`) at the execution
+boundary.
+
 ### Added: shared framework tool-guard core (additive)
 
 AtlaSent/atlasent#350 (D-03). `@atlasent/cursor`, `@atlasent/langchain` and
