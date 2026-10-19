@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 import atlasent
-from atlasent import config
+import atlasent.config as config
 from atlasent._base_url import (
     DEFAULT_BASE_URL,
     HOSTED_FUNCTIONS_PATH,
