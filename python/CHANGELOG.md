@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Added: `AtlaSentDenied.signing_hint` (additive)
+
+Parity with the TypeScript SDK's `EvaluateResponse.signingHint`
+(atlasent-sdk#592). An `INSUFFICIENT_APPROVALS` denial from `/v1-evaluate`
+carries `signing_hint` (ADR-055): the `action_hash` an approval for this
+exact request must sign. A caller cannot recompute it, because the runtime
+hashes the context it enriched server-side. Until now it was reachable only
+as the raw `response_body["signing_hint"]`.
+
+`AtlaSentDenied.signing_hint` returns it as an `EvaluateSigningHint`
+(`assertion_type`, `bind: SigningHintBind` with `action_hash`, `tenant_id`,
+`environment` and the optional `required_role` / `required_roles`), or
+`None` when the runtime sent none or a malformed one. The shape check matches
+TypeScript's: a non-hex or short `action_hash`, a missing or non-string
+`tenant_id` / `environment`, a non-string `required_role`, a `required_roles`
+that is not a list of strings, or an explicit `null` for either role field
+drops the hint. Binding fields this SDK does not know are kept, so they reach
+the signer. Sign `bind.action_hash` into an `approval_artifact.v1` and retry
+the same `evaluate()` with `approval={"artifact": ...}`.
+
+`protect()` takes no approval, so its `AtlaSentDeniedError` carries no hint.
+`VerifyResult.consumed`, the other field #592 added to TypeScript, was already
+here.
+
 ### Fixed: per-permit methods address the `v1-permits` function
 
 Under the hosted functions root the first path segment is the function name,

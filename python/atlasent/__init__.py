@@ -88,6 +88,7 @@ _LAZY_MODULES: dict[str, tuple[str, ...]] = {
         "ApproverGrantIssuer",
         "ApproverGrantSubject",
         "EntraProvenanceV1",
+        "EvaluateSigningHint",
         "IdentityAssertionBinding",
         "IdentityAssertionV1",
         "IdentityIssuer",
@@ -106,6 +107,7 @@ _LAZY_MODULES: dict[str, tuple[str, ...]] = {
         "QuorumProof",
         "QuorumRoleRequirement",
         "SignatureMeaning",
+        "SigningHintBind",
         "TrustedIssuerKey",
     ),
     ".async_client": ("AsyncAtlaSentClient",),
@@ -610,6 +612,7 @@ if TYPE_CHECKING:
         ApproverGrantIssuer,
         ApproverGrantSubject,
         EntraProvenanceV1,
+        EvaluateSigningHint,
         IdentityAssertionBinding,
         IdentityAssertionV1,
         IdentityIssuer,
@@ -628,6 +631,7 @@ if TYPE_CHECKING:
         QuorumProof,
         QuorumRoleRequirement,
         SignatureMeaning,
+        SigningHintBind,
         TrustedIssuerKey,
     )
     from .async_client import AsyncAtlaSentClient
@@ -1229,6 +1233,7 @@ __all__ = [
     "ApproverGrantIssuer",
     "ApproverGrantSubject",
     "EntraProvenanceV1",
+    "EvaluateSigningHint",
     "IdentityAssertionBinding",
     "IdentityAssertionV1",
     "IdentityIssuer",
@@ -1247,6 +1252,7 @@ __all__ = [
     "QuorumProof",
     "QuorumRoleRequirement",
     "SignatureMeaning",
+    "SigningHintBind",
     "TrustedIssuerKey",
     # Governance webhooks (parity with the TS SDK).
     "GovernanceWebhookEvent",
