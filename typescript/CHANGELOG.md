@@ -8,6 +8,27 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: human-approval binding on the wire (additive, contract-conforming)
+
+- **`EvaluateRequest.resource_id` and `EvaluateRequest.approval`** are now
+  sent at the top level of the `/v1-evaluate` body. Both were already
+  declared by `contract/schemas/evaluate-request`, but `buildEvaluateBody`
+  whitelisted the body and dropped them without an error, so no SDK caller
+  could name the resource a human approval's `action_hash` covers, or deliver
+  an `approval_artifact.v1` at all (the runtime reads it only from
+  `body.approval.artifact`). The legacy `{agent, action}` normalizer, which
+  `protect()` uses, carries both too.
+- **`EvaluateResponse.signingHint`** surfaces the runtime's `signing_hint`
+  (ADR-055): the `action_hash` an approval for this exact request must sign,
+  which a caller cannot recompute because the runtime hashes its enriched
+  context. Shape-checked; a partial hint is omitted rather than surfaced.
+  Contract-first: `signing_hint` is added to
+  `contract/schemas/evaluate-response.schema.json` and `contract/openapi.yaml`.
+- **`VerifyPermitResponse.consumed`** surfaces whether verify burned the
+  permit (declared by `contract/schemas/verify-permit-response`). An executor
+  that must run an action once should require `consumed === true`.
+- New exported types `EvaluateApproval` and `EvaluateSigningHint`.
+
 ### Added: shared framework tool-guard core (additive)
 
 AtlaSent/atlasent#350 (D-03). `@atlasent/cursor`, `@atlasent/langchain` and

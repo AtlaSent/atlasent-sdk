@@ -21,7 +21,7 @@
  * Both shims will be removed in a future major release.
  */
 
-import type { CompletionProof, EmergencyOverrideV1, EvaluationProfile } from "./types.js";
+import type { CompletionProof, EmergencyOverrideV1, EvaluateApproval, EvaluationProfile } from "./types.js";
 
 /** Legacy v1.x evaluate request shape (deprecated field names). */
 export interface LegacyEvaluateRequest {
@@ -38,6 +38,10 @@ export interface LegacyEvaluateRequest {
   execution_payload_hash?: string;
   /** Present on the legacy shape for the same reason as the digest above. */
   actor_identity?: Record<string, unknown>;
+  /** Present on the legacy shape for the same reason as the digest above. */
+  resource_id?: string;
+  /** Present on the legacy shape for the same reason as the digest above. */
+  approval?: EvaluateApproval;
 }
 
 /** v2.0 evaluate request shape (canonical wire format). */
@@ -87,6 +91,10 @@ export interface V2EvaluateRequest {
   execution_payload_hash?: string;
   /** The actor's `actor_identity.v1` assertion, sent top-level and unchanged. */
   actor_identity?: Record<string, unknown>;
+  /** Resource the action targets, sent top-level; bound into the approval action hash. */
+  resource_id?: string;
+  /** Signed approval, sent top-level as `approval`; the runtime reads `body.approval.artifact`. */
+  approval?: EvaluateApproval;
   /**
    * State snapshot of the system at evaluation time. Required when the action
    * class has `requires_state_snapshot = true`. Omitting causes a
@@ -197,6 +205,8 @@ export function normalizeEvaluateRequest(
   if (src.execution_payload_hash !== undefined) normalized.execution_payload_hash = src.execution_payload_hash;
   // Same rebuild hazard as the digest: protect() takes this branch.
   if (src.actor_identity !== undefined) normalized.actor_identity = src.actor_identity;
+  if (src.resource_id !== undefined) normalized.resource_id = src.resource_id;
+  if (src.approval !== undefined) normalized.approval = src.approval;
   if (src.state_snapshot !== undefined) normalized.state_snapshot = src.state_snapshot;
   if (src.evaluation_profile !== undefined) normalized.evaluation_profile = src.evaluation_profile;
   if (src.override !== undefined) normalized.override = src.override;
