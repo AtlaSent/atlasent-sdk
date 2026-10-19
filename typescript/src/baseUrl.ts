@@ -41,7 +41,11 @@ export const DEFAULT_BASE_URL = `https://api.atlasent.io${HOSTED_FUNCTIONS_PATH}
  * otherwise untouched; the TLS guard that runs before this is what rejects it.
  */
 export function resolveBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.replace(/\/+$/, "");
+  // A loop rather than /\/+$/: that regex backtracks polynomially on input
+  // with many slashes, and the base URL is caller-supplied.
+  let end = baseUrl.length;
+  while (end > 0 && baseUrl.charCodeAt(end - 1) === 47 /* "/" */) end--;
+  const trimmed = baseUrl.slice(0, end);
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
