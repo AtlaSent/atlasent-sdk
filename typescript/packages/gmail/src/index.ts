@@ -1,12 +1,18 @@
 export {
   guardedGmailSend,
   guardedGmailSendDraft,
+  requestGmailSendApproval,
+  requestGmailSendDraftApproval,
   computeExternalSendTargetId,
+  computeGmailSendDigest,
   GmailSendDeniedError,
   COMMUNICATION_EXTERNAL_SEND,
+  GMAIL_SEND_BINDING_VERSION,
   type GmailExternalSendFacts,
   type GmailSendGuardOptions,
   type GmailSendDenial,
   type GmailSendSuccess,
   type GmailSendResult,
+  type GmailSendApprovalRequest,
+  type GmailSendSnapshot,
 } from "./guard.js";
