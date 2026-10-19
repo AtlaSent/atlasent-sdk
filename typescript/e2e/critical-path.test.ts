@@ -325,7 +325,7 @@ describe.skipIf(!haveEnv)("audit trail", () => {
       [k: string]: unknown;
     };
 
-    const events = result.events as AuditEventWire[];
+    const events = result.events as unknown as AuditEventWire[];
 
     const getHash = (e: AuditEventWire): string | undefined =>
       e.audit_hash ?? e.hash;
@@ -352,6 +352,7 @@ describe.skipIf(!haveEnv)("audit trail", () => {
     for (let i = 1; i < chronological.length; i++) {
       const prev = chronological[i - 1];
       const curr = chronological[i];
+      if (prev === undefined || curr === undefined) continue;
       const prevHash = getHash(prev);
       const currPrevHash = getPrevHash(curr);
 
