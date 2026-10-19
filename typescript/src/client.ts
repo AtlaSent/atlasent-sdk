@@ -64,6 +64,7 @@ import type {
   SubscribeDecisionsOptions,
   EvaluateRequest,
   EvaluateResponse,
+  EvaluateSigningHint,
   GetPermitResponse,
   LicenseStatus,
   LicenseVerifyResult,
@@ -421,6 +422,33 @@ interface EvaluateWire {
    * Absent on responses from a runtime predating this field.
    */
   human_approval_status?: string;
+  /** ADR-055: the binding an approval must reproduce. Shape-checked before it is surfaced. */
+  signing_hint?: unknown;
+}
+
+/**
+ * Surface `signing_hint` only when it has the shape a signer needs. A partial
+ * hint would let a caller sign the wrong thing; omitting it leaves them where
+ * a runtime without the field leaves them.
+ */
+function wellFormedSigningHint(value: unknown): EvaluateSigningHint | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const hint = value as { assertion_type?: unknown; bind?: unknown };
+  if (typeof hint.assertion_type !== "string") return undefined;
+  if (!hint.bind || typeof hint.bind !== "object" || Array.isArray(hint.bind)) return undefined;
+  const bind = hint.bind as Record<string, unknown>;
+  if (typeof bind.action_hash !== "string" || !/^[0-9a-f]{64}$/.test(bind.action_hash)) return undefined;
+  if (typeof bind.tenant_id !== "string" || typeof bind.environment !== "string") return undefined;
+  // The role fields route the approval to its signer, so a wrong type is as
+  // unusable as a missing hash. The runtime omits them when unset.
+  if (bind.required_role !== undefined && typeof bind.required_role !== "string") return undefined;
+  if (
+    bind.required_roles !== undefined &&
+    (!Array.isArray(bind.required_roles) || !bind.required_roles.every((r) => typeof r === "string"))
+  ) {
+    return undefined;
+  }
+  return value as EvaluateSigningHint;
 }
 
 interface EvaluateBatchWireItem {
@@ -565,6 +593,7 @@ interface VerifyPermitWire {
   verify_error_code?: string;
   reason?: string;
   expires_at?: string | null;
+  consumed?: boolean;
   // Legacy passthrough.
   verified?: boolean;
   permit_hash?: string;
@@ -612,6 +641,12 @@ export function buildEvaluateBody(
   // runtime's bare-hex gate is the authority on the accepted form, and
   // `ProtectRequest.executionPayloadHash` normalizes before it reaches here.
   if (normalized.execution_payload_hash !== undefined) body.execution_payload_hash = normalized.execution_payload_hash;
+  // TOP-LEVEL, both declared by contract/schemas/evaluate-request. resource_id
+  // is part of the action hash a human approval binds, and the runtime reads
+  // the artifact only from `body.approval.artifact`; dropping either one here
+  // left an approval unable to name the resource, or unable to arrive at all.
+  if (normalized.resource_id !== undefined) body.resource_id = normalized.resource_id;
+  if (normalized.approval !== undefined) body.approval = normalized.approval;
   // TOP-LEVEL, same as the digest: the runtime reads `body.actor_identity`.
   if (normalized.actor_identity !== undefined) body.actor_identity = normalized.actor_identity;
   if (normalized.state_snapshot !== undefined) body.state_snapshot = normalized.state_snapshot;
@@ -824,6 +859,7 @@ export class AtlaSentClient {
     const reason = wire.deny_reason ?? wire.denial?.reason ?? wire.reason ?? "";
     const denyCode = wire.deny_code ?? wire.denial?.code ?? null;
     const permitId = permitToken ?? "";
+    const signingHint = wellFormedSigningHint(wire.signing_hint);
     return {
       decision,
       decision_canonical: decision,
@@ -868,6 +904,7 @@ export class AtlaSentClient {
           EvaluateResponse["humanApprovalStatus"]
         >,
       }),
+      ...(signingHint && { signingHint }),
     };
   }
 
@@ -1289,6 +1326,7 @@ export class AtlaSentClient {
       permitHash: wire.permit_hash ?? "",
       timestamp: wire.timestamp ?? "",
       expiresAt: wire.expires_at ?? null,
+      ...(typeof wire.consumed === "boolean" && { consumed: wire.consumed }),
       rateLimit,
     };
   }

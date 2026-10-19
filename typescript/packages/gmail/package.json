@@ -1,6 +1,6 @@
 {
   "name": "@atlasent/gmail",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AtlaSent send-time authorization gate for the Gmail API — evaluate + verify communication.external.send BEFORE a message actually sends",
   "license": "Apache-2.0",
   "type": "module",
@@ -35,7 +35,7 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@atlasent/sdk": "^2.10.0",
+    "@atlasent/sdk": "^2.23.0",
     "googleapis": ">=140.0.0"
   },
   "peerDependenciesMeta": {

@@ -8,6 +8,73 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: human-approval binding on the wire (additive, contract-conforming)
+
+- **`EvaluateRequest.resource_id` and `EvaluateRequest.approval`** are now
+  sent at the top level of the `/v1-evaluate` body. Both were already
+  declared by `contract/schemas/evaluate-request`, but `buildEvaluateBody`
+  whitelisted the body and dropped them without an error, so no SDK caller
+  could name the resource a human approval's `action_hash` covers, or deliver
+  an `approval_artifact.v1` at all (the runtime reads it only from
+  `body.approval.artifact`). The legacy `{agent, action}` normalizer, which
+  `protect()` uses, carries both too.
+- **`EvaluateResponse.signingHint`** surfaces the runtime's `signing_hint`
+  (ADR-055): the `action_hash` an approval for this exact request must sign,
+  which a caller cannot recompute because the runtime hashes its enriched
+  context. Shape-checked, including the optional `required_role` /
+  `required_roles`; a partial or mistyped hint is omitted rather than surfaced.
+  Contract-first: `signing_hint` is added to
+  `contract/schemas/evaluate-response.schema.json` and `contract/openapi.yaml`.
+- **`VerifyPermitResponse.consumed`** surfaces whether verify burned the
+  permit (declared by `contract/schemas/verify-permit-response`). An executor
+  that must run an action once should require `consumed === true`.
+- New exported types `EvaluateApproval` and `EvaluateSigningHint`.
+
+### `@atlasent/gmail` 0.2.0 (unpublished) — breaking on 0.x
+
+- **Fixed: no guarded send could ever succeed.** The guard presented at
+  verify a bare-hex digest of `{action_type, actor_id, context}`. The runtime
+  binds a permit with no caller digest to `"sha256:" +` a hash of the whole
+  posted body, which includes `environment`, so every send ended in a
+  deterministic `PAYLOAD_MISMATCH`. The 0.1.0 suite stubbed the client and
+  could not see it; the new suite drives the real `AtlaSentClient` against a
+  fake runtime that applies the binding rules.
+- **Changed: the permit and any human approval are bound to the exact
+  message.** The guard snapshots the `userId`, base64url `raw` RFC 2822
+  message and `threadId`, hashes them (`computeGmailSendDigest`), sends the
+  digest as top-level `execution_payload_hash` and `resource_id`, and
+  re-presents it at verify. Gmail is called with a request built from the
+  snapshot, so mutating the caller's object mid-flight changes nothing sent,
+  and other `requestBody` fields are no longer forwarded. Media uploads and
+  requests without `requestBody.raw` are refused (`invalid_request`).
+- **Changed: `context.approvals` is no longer a caller claim.** It is 1 only
+  when `options.approvalArtifact` is attached for the runtime to verify, else
+  0. `GmailExternalSendFacts.approvals` is deprecated and ignored: on an
+  action class that does not demand an artifact, 0.1.0 sent a typed count
+  that the template accepted as the approval itself.
+- **Added: the ADR-055 two-step approval.** `requestGmailSendApproval` /
+  `requestGmailSendDraftApproval` return the runtime's `signingHint` for
+  exactly this message; sign it, then send with `approvalArtifact`. Both
+  calls compose the evaluate request in one place, so they differ only in
+  the artifact.
+- **Changed: a verified permit must also be consumed.** `verified: true`
+  without `consumed: true` blocks the send.
+- **Changed: `guardedGmailSendDraft` binds the draft's content.** It reads
+  the draft (`drafts.get`, `format: "raw"`), binds those bytes, and reads it
+  again just before `drafts.send`; an edit after authorization blocks the send
+  (`content_changed`). `drafts.send` with replacement `message` content or a
+  media upload is refused.
+- `GmailSendSuccess.messageDigest` / `GmailSendDenial.messageDigest` report
+  the bound digest. New decisions: `invalid_request`, `content_changed`.
+- **Peer dependency raised to `@atlasent/sdk@^2.23.0`** (the release that
+  carries `resource_id` / `approval` / `signingHint` / `consumed`).
+- The package's tests now run in CI (`gmail-ci.yml`). They never did before,
+  and the test file did not typecheck, which would have failed
+  `prepublishOnly`.
+- `publish-npm-gmail.yml` installs and builds the root SDK before testing and
+  publishing, as the cursor/langchain/llamaindex publish workflows do; a clean
+  tag checkout otherwise failed with `ERR_MODULE_NOT_FOUND`.
+
 ### Added: shared framework tool-guard core (additive)
 
 AtlaSent/atlasent#350 (D-03). `@atlasent/cursor`, `@atlasent/langchain` and

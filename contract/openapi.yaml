@@ -451,6 +451,30 @@ components:
         deny_reason:
           type: string
           description: "Top-level human-readable explanation accompanying deny_code. May change without notice — do not parse it. Absent on allow."
+        signing_hint:
+          type: object
+          description: "ADR-055: the binding an approval_artifact.v1 (or approval_quorum.v1) must reproduce for THIS request. Emitted on an INSUFFICIENT_APPROVALS deny, or on an approval-lifecycle escalate, and disclosure-gated by the handler. bind.action_hash is computed over the server's enriched context, which a caller cannot recompute, so this is its only source. Absent otherwise."
+          required: [assertion_type, bind]
+          properties:
+            assertion_type:
+              type: string
+            bind:
+              type: object
+              required: [action_hash, tenant_id, environment]
+              properties:
+                action_hash:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+                tenant_id:
+                  type: string
+                environment:
+                  type: string
+                required_role:
+                  type: string
+                required_roles:
+                  type: array
+                  items:
+                    type: string
         mode:
           type: string
           enum: [live, shadow]

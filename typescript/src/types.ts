@@ -368,6 +368,33 @@ export interface EmergencyOverrideV1 {
  * await client.evaluate({ agent: "clinical-data-agent", action: "modify_patient_record" });
  * ```
  */
+/**
+ * A signed approval presented at evaluate (`contract/schemas/evaluate-request`
+ * `approval`): either the `approval_artifact.v1` itself or the id of one the
+ * runtime stores.
+ */
+export interface EvaluateApproval {
+  artifact?: Record<string, unknown>;
+  approval_id?: string;
+}
+
+/**
+ * The binding an `approval_artifact.v1` must reproduce, as `/v1-evaluate`
+ * returns it (`signing_hint`) on an approval-required outcome. `action_hash`
+ * is computed over the runtime's enriched context, which a caller cannot
+ * recompute, so this is the only source for it. Field names are the wire's.
+ */
+export interface EvaluateSigningHint {
+  assertion_type: string;
+  bind: {
+    action_hash: string;
+    tenant_id: string;
+    environment: string;
+    required_role?: string;
+    required_roles?: string[];
+  };
+}
+
 export interface EvaluateRequest {
   /**
    * Identifier of the calling actor / agent (e.g. "clinical-data-agent").
@@ -422,6 +449,22 @@ export interface EvaluateRequest {
    * caller building this shape directly is responsible for the bare-hex form.
    */
   execution_payload_hash?: string;
+  /**
+   * The resource this action targets, sent at the TOP LEVEL of the wire body.
+   * The runtime binds it into the canonical action hash an
+   * `approval_artifact.v1` covers, so an approval issued for one resource
+   * cannot authorize another. Declared by `contract/schemas/evaluate-request`;
+   * forwarded unchanged.
+   */
+  resource_id?: string;
+  /**
+   * A signed human approval for this exact action, sent at the TOP LEVEL as
+   * `approval` — the runtime reads `body.approval.artifact`, so an artifact
+   * placed anywhere else never reaches its human-approval gate. Forwarded
+   * unchanged; the runtime verifies it. The `action_hash` it must bind is the
+   * one `/v1-evaluate` returns as {@link EvaluateResponse.signingHint}.
+   */
+  approval?: EvaluateApproval;
   /**
    * The actor's `actor_identity.v1` assertion, sent at the TOP LEVEL of the
    * wire body and forwarded unchanged. The SDK does not mint or inspect it:
@@ -651,6 +694,14 @@ export interface EvaluateResponse {
    * `undefined` on responses from a runtime predating this field.
    */
   humanApprovalStatus?: "not_required" | "pending" | "satisfied" | "rejected" | "expired" | "revoked";
+  /**
+   * What a human approval for this exact request must bind, present only
+   * when the runtime returned a well-formed `signing_hint` (an
+   * `INSUFFICIENT_APPROVALS` deny, or an approval-lifecycle escalate).
+   * Present the same request again with {@link EvaluateRequest.approval}
+   * carrying an artifact signed over `bind.action_hash`.
+   */
+  signingHint?: EvaluateSigningHint;
 }
 
 /** Per-factor contribution in a {@link EvaluateRiskEnvelope}. */
@@ -830,6 +881,14 @@ export interface VerifyPermitResponse {
    * server versions that do not yet surface this field.
    */
   expiresAt: string | null;
+  /**
+   * Whether this verify burned the permit (the runtime's atomic
+   * verify-and-consume). A permit that verified without being consumed —
+   * verify-only mode — can be presented again, so an executor that runs
+   * the action exactly once must require `consumed === true`. `undefined`
+   * from a runtime that does not report it.
+   */
+  consumed?: boolean;
   /**
    * Per-key rate-limit state for this request's response, parsed from
    * `X-RateLimit-*` headers. `null` when the server didn't emit them.
