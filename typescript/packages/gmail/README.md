@@ -151,3 +151,6 @@ account — there is no fixture for that in this repository, and none is
 fabricated. `test/guard.test.ts` drives the real `AtlaSentClient` against a
 fake runtime that applies the runtime's binding, approval and consume rules,
 with a recording Gmail mock. CI: `.github/workflows/gmail-ci.yml`.
+
+The Python SDK's `atlasent.gmail` computes the same message digest; both
+suites pin the same vectors, so an approval shows the same value either way.

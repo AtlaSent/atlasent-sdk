@@ -604,3 +604,44 @@ describe("computeExternalSendTargetId", () => {
 it("uses the canonical action type", () => {
   expect(COMMUNICATION_EXTERNAL_SEND).toBe("communication.external.send");
 });
+
+// The same values are pinned by python/tests/test_gmail_guard.py, so the digest
+// an approval desk shows does not depend on which SDK prepared the send. A change
+// to either serialization fails one of the two suites.
+describe("digest parity with the Python SDK (atlasent.gmail)", () => {
+  const vectors: Array<[GmailSendSnapshot, string]> = [
+    [
+      { kind: "message", userId: "me", raw: "VG86IGJvYXJkQGV4YW1wbGUuY29tDQpTdWJqZWN0OiBRMw0KDQpEcmFmdA", threadId: null, draftId: null },
+      "e0348537ec616f8d51a59ef95fc10c563ce576cd3507abd3c1a0d48aed101660",
+    ],
+    [
+      { kind: "message", userId: "founder@example.com", raw: "VG86IGNmb0BleGFtcGxlLmNvbQ0KDQpoaQ", threadId: "18c2f0a1b2c3d4e5", draftId: null },
+      "5ee70358999964889bb3efe9e533b87c8809e71fad72430b178540535f9bf2a3",
+    ],
+    [
+      { kind: "draft", userId: "me", raw: "VG86IGJvYXJkQGV4YW1wbGUuY29tDQoNCkRyYWZ0IG9ubHk", threadId: null, draftId: "r-4815162342" },
+      "9a443373dc4ff153cf2a6b783d7078a6751b4e26a6d83dd599fbf49d87153696",
+    ],
+    [
+      { kind: "message", userId: "josé@exämple.com", raw: "eA", threadId: null, draftId: null },
+      "3a6d95f5779e323e04d0fe7873f16688556d40a496f6bcdb95aa7a8528519d7e",
+    ],
+  ];
+  it.each(vectors)("message digest %#", async (snapshot, expected) => {
+    expect(await computeGmailSendDigest(snapshot)).toBe(expected);
+  });
+
+  it("target id", async () => {
+    expect(
+      await computeExternalSendTargetId({
+        recipient: "board@example.com",
+        recipientKnown: false,
+        sensitiveAttachment: true,
+        attachmentSha256: "3b".repeat(32),
+      }),
+    ).toBe("c20d7c236a4dfac7def7ba35e08e98a365991dc1faf5a4b2bf2227abb3fc9553");
+    expect(
+      await computeExternalSendTargetId({ recipient: "cfo@example.com", recipientKnown: true, sensitiveAttachment: false }),
+    ).toBe("521c91f2b7887268fe8bee8d4de123ddebc2c4632e67e121a24e4a1862fb4f48");
+  });
+});
