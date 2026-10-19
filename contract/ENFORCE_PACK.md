@@ -209,7 +209,7 @@ new `ReasonCode` values surfaced by `Enforce.run()`:
 | `binding_mismatch` | 403 | permit org/actor/action doesn't match Enforce bindings |
 | `permit_expired` | 403 | permit TTL passed before verify completed |
 | `permit_consumed` | 409 | permit was already used (replay attempt) |
-| `permit_revoked` | 403 | permit explicitly revoked via `POST /v1/permits/{id}/revoke` (D3) |
+| `permit_revoked` | 403 | permit explicitly revoked via `POST /v1-permits/{id}/revoke` (D3) |
 | `permit_not_found` | 404 | permit id not recognized server-side |
 | `permit_tampered` | 403 | permit signature invalid |
 

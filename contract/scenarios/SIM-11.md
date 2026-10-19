@@ -6,7 +6,7 @@
 ## Scenario
 
 A permit is issued by `evaluate` but explicitly revoked by an admin
-(via `POST /v1/permits/{id}/revoke`, ledger row D3) before the gate's
+(via `POST /v1-permits/{id}/revoke`, ledger row D3) before the gate's
 `verifyPermit` lands. `Enforce.run()` must deny with `reason_code:
 permit_revoked`. `execute` must not run.
 
@@ -57,4 +57,4 @@ weakens.
 
 By pinning `reason_code: permit_revoked` byte-identical to the
 server response, this scenario locks the contract from
-`POST /v1/permits/{id}/revoke` all the way to `EnforceRunResult.reasonCode`.
+`POST /v1-permits/{id}/revoke` all the way to `EnforceRunResult.reasonCode`.

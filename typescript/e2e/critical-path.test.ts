@@ -206,7 +206,7 @@ describe.skipIf(!haveEnv)("evaluate → permit → verify", () => {
 
   /**
    * CANONICAL BEHAVIOUR: A valid permit_token from an allow decision must
-   * be verifiable via POST /v1/permits/{id}/verify.
+   * be verifiable via POST /v1-permits/{id}/verify.
    *
    * The canonical REST surface (verifyPermitById) returns:
    *   valid: true
@@ -217,7 +217,7 @@ describe.skipIf(!haveEnv)("evaluate → permit → verify", () => {
    *
    * Both must work; this test uses the canonical REST surface.
    */
-  it("POST /v1/permits/{id}/verify → valid=true for a fresh allow permit", async () => {
+  it("POST /v1-permits/{id}/verify → valid=true for a fresh allow permit", async () => {
     if (decision !== "allow" || !evaluationId) {
       console.log(
         `[e2e] Skipping permit verify: decision=${decision} (no permit to verify)`,

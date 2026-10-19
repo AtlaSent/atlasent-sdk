@@ -530,7 +530,7 @@ export interface EvaluateRequest {
 /**
  * Slim permit object embedded in {@link EvaluateResponse} when the decision
  * is `"allow"`. Contains the essential fields needed to act on the permit
- * immediately without a separate `GET /v1/permits/:id` round-trip.
+ * immediately without a separate `GET /v1-permits/:id` round-trip.
  *
  * Mirrors the `Permit` schema in atlasent-control-plane
  * `api/src/schemas/permits.ts`.
@@ -858,14 +858,12 @@ export interface VerifyPermitRequest {
 }
 
 /**
- * Result of {@link AtlaSentClient.verifyPermit}.
+ * Result of {@link AtlaSentClient.verifyPermit}, the execution-boundary
+ * verifier (`POST /v1-verify-permit`). Not deprecated.
  *
- * @deprecated Use {@link VerifyPermitByIdResponse} via
- * {@link AtlaSentClient.verifyPermitById} — the canonical REST surface
- * (`POST /v1/permits/{id}/verify`) returns the unified verification
- * envelope (`valid`, `verification_type`, `reason`, `verified_at`,
- * `evidence`) plus the full {@link PermitRecord} fields. Will be
- * removed in `@atlasent/sdk@3`.
+ * {@link VerifyPermitByIdResponse} (from
+ * {@link AtlaSentClient.verifyPermitById}) is the result of a different,
+ * lifecycle/status operation and is not a substitute for this one.
  */
 export interface VerifyPermitResponse {
   /** `true` when the permit is valid and un-revoked. */

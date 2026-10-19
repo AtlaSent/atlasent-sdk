@@ -11,7 +11,7 @@
  *
  * All timestamps are ISO-8601 UTC strings.
  *
- * This is the richer V1 shape returned by `GET /v1/permits/:id` and
+ * This is the richer V1 shape returned by `GET /v1-permits/:id` and
  * embedded in proof bundles. It differs from the legacy `PermitRecord`
  * in `types.ts` which uses snake_case and legacy fields from the
  * Supabase function surface.
