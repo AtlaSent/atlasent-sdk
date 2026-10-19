@@ -93,6 +93,12 @@ describe("evaluate: signingHint", () => {
     expect(res.signingHint).toEqual(HINT);
   });
 
+  it("surfaces a hint carrying a role list", async () => {
+    const hint = { ...HINT, bind: { ...HINT.bind, required_roles: ["email_send_approver", "compliance"] } };
+    const res = await evaluateWith({ decision: "deny", deny_code: "INSUFFICIENT_APPROVALS", signing_hint: hint });
+    expect(res.signingHint).toEqual(hint);
+  });
+
   it.each([
     ["absent", undefined],
     ["null", null],
@@ -105,6 +111,10 @@ describe("evaluate: signingHint", () => {
     ["an uppercase action_hash", { ...HINT, bind: { ...HINT.bind, action_hash: "B".repeat(64) } }],
     ["no tenant_id", { ...HINT, bind: { action_hash: "b".repeat(64), environment: "production" } }],
     ["no environment", { ...HINT, bind: { action_hash: "b".repeat(64), tenant_id: "org-1" } }],
+    ["a non-string required_role", { ...HINT, bind: { ...HINT.bind, required_role: 7 } }],
+    ["a null required_role", { ...HINT, bind: { ...HINT.bind, required_role: null } }],
+    ["required_roles as a string", { ...HINT, bind: { ...HINT.bind, required_roles: "email_send_approver" } }],
+    ["required_roles with a non-string entry", { ...HINT, bind: { ...HINT.bind, required_roles: ["email_send_approver", 1] } }],
   ])("omits a hint that is %s", async (_label, hint) => {
     const res = await evaluateWith({ decision: "deny", deny_code: "INSUFFICIENT_APPROVALS", signing_hint: hint });
     expect("signingHint" in res).toBe(false);

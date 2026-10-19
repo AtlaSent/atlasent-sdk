@@ -21,7 +21,8 @@ follows [semver](https://semver.org/): breaking changes bump the major
 - **`EvaluateResponse.signingHint`** surfaces the runtime's `signing_hint`
   (ADR-055): the `action_hash` an approval for this exact request must sign,
   which a caller cannot recompute because the runtime hashes its enriched
-  context. Shape-checked; a partial hint is omitted rather than surfaced.
+  context. Shape-checked, including the optional `required_role` /
+  `required_roles`; a partial or mistyped hint is omitted rather than surfaced.
   Contract-first: `signing_hint` is added to
   `contract/schemas/evaluate-response.schema.json` and `contract/openapi.yaml`.
 - **`VerifyPermitResponse.consumed`** surfaces whether verify burned the
@@ -70,6 +71,9 @@ follows [semver](https://semver.org/): breaking changes bump the major
 - The package's tests now run in CI (`gmail-ci.yml`). They never did before,
   and the test file did not typecheck, which would have failed
   `prepublishOnly`.
+- `publish-npm-gmail.yml` installs and builds the root SDK before testing and
+  publishing, as the cursor/langchain/llamaindex publish workflows do; a clean
+  tag checkout otherwise failed with `ERR_MODULE_NOT_FOUND`.
 
 ### Added: shared framework tool-guard core (additive)
 

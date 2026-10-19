@@ -439,6 +439,15 @@ function wellFormedSigningHint(value: unknown): EvaluateSigningHint | undefined 
   const bind = hint.bind as Record<string, unknown>;
   if (typeof bind.action_hash !== "string" || !/^[0-9a-f]{64}$/.test(bind.action_hash)) return undefined;
   if (typeof bind.tenant_id !== "string" || typeof bind.environment !== "string") return undefined;
+  // The role fields route the approval to its signer, so a wrong type is as
+  // unusable as a missing hash. The runtime omits them when unset.
+  if (bind.required_role !== undefined && typeof bind.required_role !== "string") return undefined;
+  if (
+    bind.required_roles !== undefined &&
+    (!Array.isArray(bind.required_roles) || !bind.required_roles.every((r) => typeof r === "string"))
+  ) {
+    return undefined;
+  }
   return value as EvaluateSigningHint;
 }
 
