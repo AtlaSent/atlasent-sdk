@@ -52,6 +52,13 @@ jobs:
       - name: Test (with coverage)
         run: npm run test:coverage
 
+      # tsup 9 builds require Node >=22.18; tests above still cover Node 20.
+      - name: Use Node.js 22 for the root SDK build
+        if: matrix.node-version == '20.x'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+
       - name: Build
         run: npm run build
 

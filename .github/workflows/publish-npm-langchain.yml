@@ -26,10 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      # Build the root SDK with tsup 9's supported Node version.
+      - name: Use Node.js 22 for the root SDK build
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: "22.x"
           cache: npm
           cache-dependency-path: typescript/packages/langchain/package-lock.json
 
@@ -39,6 +40,12 @@ jobs:
       - name: Install and build the root SDK
         working-directory: typescript
         run: npm ci && npm run build
+
+      # Exercise the wrapper on every supported runtime after building the root.
+      - name: Use Node.js ${{ matrix.node-version }} for wrapper tests
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
 
       - name: Install dependencies
         run: npm ci
@@ -69,10 +76,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Use Node.js 20
+      - name: Use Node.js 22
         uses: actions/setup-node@v7
         with:
-          node-version: "20.x"
+          node-version: "22.x"
           cache: npm
           cache-dependency-path: typescript/packages/langchain/package-lock.json
           registry-url: "https://registry.npmjs.org"
