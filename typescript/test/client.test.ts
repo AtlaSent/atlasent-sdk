@@ -1849,12 +1849,12 @@ describe("getPermit()", () => {
     decision_id: "eval_a",
   };
 
-  it("hits GET /v1/permits/:id and returns the permit row", async () => {
+  it("hits GET /v1-permits/:id and returns the permit row", async () => {
     const fetchImpl = mockFetch(() => jsonResponse(PERMIT_WIRE));
     const client = makeClient(fetchImpl);
     const result = await client.getPermit("pt_alpha");
     const [url, init] = fetchImpl.mock.calls[0]!;
-    expect(url).toBe("https://api.atlasent.io/functions/v1/v1/permits/pt_alpha");
+    expect(url).toBe("https://api.atlasent.io/functions/v1/v1-permits/pt_alpha");
     expect(init!.method).toBe("GET");
     expect(result.permit.id).toBe("pt_alpha");
     expect(result.permit.status).toBe("verified");
@@ -1865,7 +1865,7 @@ describe("getPermit()", () => {
     const client = makeClient(fetchImpl);
     await client.getPermit("pt with spaces");
     const [url] = fetchImpl.mock.calls[0]!;
-    expect(url).toBe("https://api.atlasent.io/functions/v1/v1/permits/pt%20with%20spaces");
+    expect(url).toBe("https://api.atlasent.io/functions/v1/v1-permits/pt%20with%20spaces");
   });
 
   it("throws when permitId is empty", async () => {
@@ -1918,12 +1918,12 @@ describe("listPermits()", () => {
     total: 2,
   };
 
-  it("hits GET /v1/permits with no query params when no filters", async () => {
+  it("hits GET /v1-permits with no query params when no filters", async () => {
     const fetchImpl = mockFetch(() => jsonResponse(LIST_WIRE));
     const client = makeClient(fetchImpl);
     const result = await client.listPermits();
     const [url, init] = fetchImpl.mock.calls[0]!;
-    expect(url).toBe("https://api.atlasent.io/functions/v1/v1/permits");
+    expect(url).toBe("https://api.atlasent.io/functions/v1/v1-permits");
     expect(init!.method).toBe("GET");
     expect(result.permits).toHaveLength(2);
     expect(result.total).toBe(2);
@@ -1943,7 +1943,7 @@ describe("listPermits()", () => {
     });
     const [url] = fetchImpl.mock.calls[0]!;
     const u = new URL(url as string);
-    expect(u.pathname).toBe("/functions/v1/v1/permits");
+    expect(u.pathname).toBe("/functions/v1/v1-permits");
     expect(u.searchParams.get("status")).toBe("revoked");
     expect(u.searchParams.get("actor_id")).toBe("user_42");
     expect(u.searchParams.get("action_type")).toBe("ehr.write");
@@ -1996,14 +1996,14 @@ describe("revokePermitById()", () => {
     revoke_reason: "approval rescinded",
   };
 
-  it("hits POST /v1/permits/:id/revoke and returns updated permit", async () => {
+  it("hits POST /v1-permits/:id/revoke and returns updated permit", async () => {
     const fetchImpl = mockFetch(() => jsonResponse(REVOKED_WIRE));
     const client = makeClient(fetchImpl);
     const result = await client.revokePermitById("pt_alpha", {
       reason: "approval rescinded",
     });
     const [url, init] = fetchImpl.mock.calls[0]!;
-    expect(url).toBe("https://api.atlasent.io/functions/v1/v1/permits/pt_alpha/revoke");
+    expect(url).toBe("https://api.atlasent.io/functions/v1/v1-permits/pt_alpha/revoke");
     expect(init!.method).toBe("POST");
     expect(JSON.parse(init!.body as string)).toEqual({
       reason: "approval rescinded",
@@ -2028,7 +2028,7 @@ describe("revokePermitById()", () => {
     await client.revokePermitById("pt with spaces");
     const [url] = fetchImpl.mock.calls[0]!;
     expect(url).toBe(
-      "https://api.atlasent.io/functions/v1/v1/permits/pt%20with%20spaces/revoke",
+      "https://api.atlasent.io/functions/v1/v1-permits/pt%20with%20spaces/revoke",
     );
   });
 
@@ -2067,12 +2067,12 @@ describe("verifyPermitById()", () => {
     decision_id: "eval_a",
   };
 
-  it("hits POST /v1/permits/:id/verify and returns the canonical envelope", async () => {
+  it("hits POST /v1-permits/:id/verify and returns the canonical envelope", async () => {
     const fetchImpl = mockFetch(() => jsonResponse(VERIFY_OK_WIRE));
     const client = makeClient(fetchImpl);
     const result = await client.verifyPermitById("pt_alpha");
     const [url, init] = fetchImpl.mock.calls[0]!;
-    expect(url).toBe("https://api.atlasent.io/functions/v1/v1/permits/pt_alpha/verify");
+    expect(url).toBe("https://api.atlasent.io/functions/v1/v1-permits/pt_alpha/verify");
     expect(init!.method).toBe("POST");
     expect(result.valid).toBe(true);
     expect(result.verification_type).toBe("permit");
@@ -2090,7 +2090,7 @@ describe("verifyPermitById()", () => {
     await client.verifyPermitById("pt with spaces");
     const [url] = fetchImpl.mock.calls[0]!;
     expect(url).toBe(
-      "https://api.atlasent.io/functions/v1/v1/permits/pt%20with%20spaces/verify",
+      "https://api.atlasent.io/functions/v1/v1-permits/pt%20with%20spaces/verify",
     );
   });
 

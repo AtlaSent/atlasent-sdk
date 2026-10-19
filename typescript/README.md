@@ -80,7 +80,19 @@ client.deployGate({ agent?, action?, context? })
   // defaults action to "production.deploy" and returns { allowed, reason, evidence }
 ```
 
-`verifyPermit()` confirms a previously-issued permit server-side. Signed/offline permit artifacts never imply deployment authorization by themselves.
+`verifyPermit()` confirms a previously-issued permit server-side (`POST /v1-verify-permit`: signature, binding and replay checks, then consume). It is the execution-boundary verifier and is not deprecated. Signed/offline permit artifacts never imply deployment authorization by themselves.
+
+### Permit lifecycle (by permit id)
+
+```ts
+client.getPermit(id)                    // GET  /v1-permits/{id}
+client.checkPermitValid(id)             // GET  /v1-permits/{id}/valid
+client.listPermits({ status, ... })     // GET  /v1-permits
+client.verifyPermitById(id)             // POST /v1-permits/{id}/verify
+client.revokePermitById(id, { reason }) // POST /v1-permits/{id}/revoke
+```
+
+These call the `v1-permits` function (the id is URL-encoded) and read or move a permit's lifecycle status. `verifyPermitById()` is **not** the execution-boundary verifier: it does not check the permit's signature, bindings or replay. Gate execution on `verifyPermit()`. These routes are served by atlasent-api#4522 and work against a runtime that has it deployed.
 
 ## Decision replay
 

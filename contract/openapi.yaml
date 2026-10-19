@@ -21,7 +21,13 @@
 # server-side specs before they can be added here):
 # - Streaming evaluate
 # - session, audit/events, audit/exports, audit/verify, approvals,
-#   overrides, permits/consume, permits/revoke
+#   overrides, and the permit lifecycle function `/v1-permits`
+#   (`GET /v1-permits`, `GET /v1-permits/{id}`, and
+#   `/v1-permits/{id}/{valid|verify|consume|revoke}`). Under the hosted
+#   functions root the function name is the first path segment, so the
+#   legacy slash form `/v1/permits/...` reaches no function there. Note
+#   `/v1-permits/{id}/verify` is a lifecycle/status transition, not the
+#   execution-boundary verifier: that is `POST /v1-verify-permit` below.
 # - Offline audit-bundle format
 
 openapi: 3.1.0

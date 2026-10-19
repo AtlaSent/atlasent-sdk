@@ -8,6 +8,37 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Fixed: per-permit methods address the `v1-permits` function
+
+Under the hosted functions root the first path segment is the function name,
+so the slash-form paths these methods used (`/v1/permits/:id/verify` and
+friends) reached no function. They now call the `v1-permits` function:
+
+| Method | Route |
+|---|---|
+| `getPermit(id)` | `GET /v1-permits/{id}` |
+| `checkPermitValid(id)` | `GET /v1-permits/{id}/valid` |
+| `listPermits(...)` | `GET /v1-permits` |
+| `verifyPermitById(id)` | `POST /v1-permits/{id}/verify` |
+| `revokePermitById(id, { reason })` | `POST /v1-permits/{id}/revoke` |
+
+The id is still `encodeURIComponent`-encoded, so `/` and `?` cannot change the
+route. Request bodies and return types are unchanged. The framework guards'
+`permitRevalidationIntervalMs` heartbeat uses `checkPermitValid` and so moves
+with it. The runtime serves this shape from atlasent-api#4522; until that is
+deployed to production these calls fail closed with an `AtlaSentError` there,
+as before.
+
+### Fixed: `verifyPermit()` is no longer deprecated
+
+`verifyPermit()` (and its `VerifyPermitResponse`) carried `@deprecated` in
+favour of `verifyPermitById()`. That pointed callers the wrong way:
+`verifyPermit()` calls `/v1-verify-permit`, the execution-boundary verifier
+(signature, binding and replay checks, then consume), while
+`verifyPermitById()` is a permit lifecycle/status transition that performs none
+of those checks. The tags are removed and the JSDoc now says which is which. No
+public API is removed. `revokePermit()` keeps its existing deprecation.
+
 ### Added: human-approval binding on the wire (additive, contract-conforming)
 
 - **`EvaluateRequest.resource_id` and `EvaluateRequest.approval`** are now
@@ -92,11 +123,10 @@ It failed closed: nothing ran, but nothing could be authorized either.
   Any other host, and a hosted host with an explicit path, is used as given.
 - New module `src/baseUrl.ts` holds the rule; tests in `test/base-url.test.ts`.
 
-Not changed by this fix: methods that call slash-form paths such as
-`/v1/permits/:id/verify` (`verifyPermitById`, `getPermit`, `listPermits`,
-`revokePermitById`, `checkPermitValid`) still reach no deployed route under
-either base URL. Use `verifyPermit()` (`/v1-verify-permit`) at the execution
-boundary.
+Not changed by this fix: the per-permit methods (`verifyPermitById`,
+`getPermit`, `listPermits`, `revokePermitById`, `checkPermitValid`) still used
+slash-form paths; see "per-permit methods address the `v1-permits` function"
+above. Use `verifyPermit()` (`/v1-verify-permit`) at the execution boundary.
 
 ### Added: shared framework tool-guard core (additive)
 
