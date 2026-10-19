@@ -1088,7 +1088,13 @@ export interface AuditExportResult extends AuditExport {
 export interface AtlaSentClientOptions {
   /** Required. Your AtlaSent API key. */
   apiKey: string;
-  /** API base URL. Defaults to "https://api.atlasent.io". */
+  /**
+   * API base URL: the functions root the runtime's paths (`/v1-evaluate`,
+   * `/v1-verify-permit`, ...) are appended to. Defaults to
+   * "https://api.atlasent.io/functions/v1". A bare hosted-runtime host such as
+   * "https://api.atlasent.io" has `/functions/v1` appended; any other URL is
+   * used as given (for a Supabase project, `https://<ref>.supabase.co/functions/v1`).
+   */
   baseUrl?: string;
   /** Per-request timeout in milliseconds. Defaults to 10_000. */
   timeoutMs?: number;

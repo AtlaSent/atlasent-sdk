@@ -194,7 +194,7 @@ import atlasent
 
 atlasent.configure(
     api_key="ask_live_...",               # else reads ATLASENT_API_KEY
-    base_url="https://api.atlasent.io",   # default
+    base_url="https://api.atlasent.io/functions/v1",  # default
 )
 ```
 
@@ -206,7 +206,7 @@ from atlasent import AtlaSentClient
 
 client = AtlaSentClient(
     api_key="ask_live_...",
-    base_url="https://api.atlasent.io",  # default
+    base_url="https://api.atlasent.io/functions/v1",  # default
     timeout=10,                          # seconds, default
     max_retries=2,                       # on 5xx / timeouts, default
     retry_backoff=0.5,                   # seconds, doubles each retry
@@ -301,11 +301,15 @@ fail-closed, and there is no `authorize(...)` lifecycle that
 
 The SDK calls:
 
-- `POST https://api.atlasent.io/v1-evaluate`
-- `POST https://api.atlasent.io/v1-verify-permit`
-- `POST https://api.atlasent.io/v1/decisions/{id}/replay` (`.replay()` — alpha)
+- `POST https://api.atlasent.io/functions/v1/v1-evaluate`
+- `POST https://api.atlasent.io/functions/v1/v1-verify-permit`
+- `POST {base_url}/v1/decisions/{id}/replay` (`.replay()` — alpha)
 
-Override with the `base_url` argument.
+Override with the `base_url` argument (or `ATLASENT_BASE_URL`). The base URL is
+the runtime's functions root and must end at `/functions/v1`; for a Supabase
+project that is `https://<project-ref>.supabase.co/functions/v1`. The hosted
+gateway serves no function at the bare host, so a bare `https://api.atlasent.io`
+(the default documented by earlier releases) has `/functions/v1` appended for you.
 
 ## Requirements
 

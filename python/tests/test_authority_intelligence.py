@@ -28,7 +28,7 @@ from atlasent.authority_intelligence import (
 from atlasent.exceptions import AtlaSentError
 
 API_KEY = "ask_test_authint"
-BASE_URL = "https://api.atlasent.io"
+BASE_URL = "https://api.atlasent.io/functions/v1"
 
 WIRE_FINDING: dict[str, Any] = {
     "finding_type": "authority_without_action_class",

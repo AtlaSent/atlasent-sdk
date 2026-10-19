@@ -71,7 +71,7 @@ class TestInit:
         c = AtlaSentClient(api_key="ask_test_xxxxxxxx")
         assert c._api_key == "ask_test_xxxxxxxx"
         assert c._anon_key == ""
-        assert c._base_url == "https://api.atlasent.io"
+        assert c._base_url == "https://api.atlasent.io/functions/v1"
         assert c._timeout == 10
         assert c._max_retries == 3
 

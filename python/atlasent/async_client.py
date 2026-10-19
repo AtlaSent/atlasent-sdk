@@ -14,6 +14,8 @@ from urllib.parse import quote
 
 import httpx
 
+from ._base_url import DEFAULT_BASE_URL as DEFAULT_BASE_URL  # re-export
+from ._base_url import resolve_base_url
 from ._function_region import UNSET, _Unset, function_region_headers
 from ._version import __version__
 from .approval_artifact import ApprovalReference
@@ -108,7 +110,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("atlasent")
 
-DEFAULT_BASE_URL = "https://api.atlasent.io"
 DEFAULT_TIMEOUT = 10
 # Retry schedule parity with the TypeScript SDK:
 #   4 total attempts (1 initial + 3 retries), delays 2 s -> 4 s -> 8 s
@@ -155,7 +156,9 @@ class AsyncAtlaSentClient:
         resolved_base_url = base_url or _get_base_url()
         self._api_key = _validate_api_key(resolved_api_key)
         self._anon_key = anon_key
-        self._base_url = _enforce_tls(resolved_base_url).rstrip("/")
+        # resolve_base_url appends /functions/v1 to a bare hosted-runtime host:
+        # the gateway serves no function at the root (see ._base_url).
+        self._base_url = resolve_base_url(_enforce_tls(resolved_base_url))
         self._timeout = timeout
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
