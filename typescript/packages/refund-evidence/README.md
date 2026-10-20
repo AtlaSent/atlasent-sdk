@@ -6,8 +6,9 @@ This package does two things for the refund gate demos:
   period, the rule that decided it, and every refund made around the gate. It
   is a self-contained HTML page plus a CSV.
 - **A one-command demo**, `npm run demo`. It runs one refund policy across the
-  Shopify gate, the support agent's refund tool and the Stripe gate, refunds
-  two orders around the gate, and produces the report.
+  Shopify gate, the support agent's refund tool and the Stripe gate. A
+  manager then approves one escalation and declines the other. Two refunds
+  are made around the gate, and the demo produces the report.
 
 `private: true`. This package is a demo and is not published to npm.
 
@@ -34,14 +35,24 @@ The demo writes `evidence-out/report.html`, `report.csv` and
 | Agent's refund tool | #PPS-1005, asked for by a different customer | Refused before the gate |
 | Stripe gate | PPS-2001 $29.00 | Refunded |
 | Stripe gate | PPS-2002 $85.00 | Sent to a manager |
-| Around the gate | #PPS-1002 $72.00 in the Shopify admin | **Flagged** |
-| Around the gate | pi_2002 $85.00 in the Stripe Dashboard | **Flagged** |
+| Manager approves | #PPS-1002 $72.00, resumed by the Shopify gate | Refunded, exactly as escalated |
+| Manager declines | PPS-2002 $85.00, resumed by the Stripe gate | Declined by a manager |
+| Around the gate | #PPS-1004 $25.00 in the Shopify admin, after the policy declined it | **Flagged** |
+| Around the gate | pi_2002 $85.00 in the Stripe Dashboard, after the manager declined it | **Flagged** |
 
 The demo uses the real Shopify and Stripe gate code (imported from the
 sibling packages), but **the stores are always simulated** and no money
 moves. Without an API key, decisions come from a local stand-in that applies
 the same policy. The report says both things in a banner on its face, and
 its audit references are placeholders.
+
+The manager's decisions are simulated too: the local stand-in opens an
+approval request for each escalation, as the runtime does, and the demo
+plays the manager. **With a real API key, nobody is playing the manager.**
+The demo leaves both escalations waiting and prints their approval request
+ids. A person decides them in the AtlaSent console, and each is then resumed
+with `npm run refund -- resume --approval <id>` in the Shopify or Stripe
+package.
 
 The agent path calls the agent's `issue_refund` tool directly, which is the
 same code the Claude support agent runs. The model itself is not called. To
@@ -78,7 +89,9 @@ dropped.
 - It is **not** itself signed. The proof is AtlaSent's signed audit export for
   the same period, verified with the offline verifier. The report says this
   in its "How to check this report" section, and lists AtlaSent's audit
-  reference beside every decision that reached AtlaSent.
+  reference beside every decision that reached AtlaSent. A manager's decision
+  on an escalation is its own row, marked "approval <id>": it was not a fresh
+  evaluation, so it is checked against that approval request.
 - Totals are kept per currency and never added across currencies.
 
 ## Tests
@@ -87,16 +100,18 @@ dropped.
 npm ci && npm run typecheck && npm test
 ```
 
-The 17 tests cover:
+The 20 tests cover:
 
 - the summary, the period filter and per-currency totals;
 - the simulated banner, present only when it applies;
 - HTML escaping of hostile values, the CSV formula guard and quoting;
 - log parsing, with rejected lines reported;
+- manager-approved and manager-declined rows, their labels and approval
+  references, and records written before approvals existed;
 - the whole demo end to end, including that no permit token reaches the log
   or the report.
 
-The suite was checked against seven specific defects, and each one made it
+The suite was checked against twelve specific defects, and each one made it
 fail:
 
 - dropping `<` escaping;
@@ -105,4 +120,14 @@ fail:
 - an inclusive period end;
 - dropping bad log lines silently;
 - counting ignored alarm verdicts as outside the gate;
-- the agent reading orders without their email.
+- the agent reading orders without their email;
+- labelling a manager-approved refund "within policy";
+- leaving `APPROVAL_*` codes unlabelled;
+- showing "not evaluated" for a resumed decision;
+- accepting a non-string approval request id;
+- the demo's manager approving nothing.
+
+One defect was tried and did **not** make it fail: the stand-in letting a
+permit be claimed for an approval that was not approved. The gates check the
+approval status before they claim, so no test reaches that check in the
+stand-in.

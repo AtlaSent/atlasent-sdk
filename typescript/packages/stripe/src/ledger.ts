@@ -36,6 +36,27 @@ export interface LedgerEntry {
   aborted_reason?: string;
 }
 
+/**
+ * An escalated refund waiting for a person's decision, frozen exactly as it
+ * was evaluated, so resuming it can only ever issue that refund.
+ */
+export interface PendingApproval {
+  approval_request_id: string;
+  /** The escalated attempt's gate reference; the resumed refund carries it too (metadata and Idempotency-Key). */
+  gate_ref: string;
+  actor_id: string;
+  environment: string;
+  payment_intent: string;
+  amount_cents: number;
+  /** The refund snapshot the permit will be bound to. */
+  snapshot: Record<string, unknown>;
+  digest: string;
+  reason?: string;
+  created_at: string;
+  /** Set once the approval is final (refunded, not approved, or stopped). */
+  resolved?: { outcome: "refunded" | "not_approved" | "stopped"; at: string; detail: string };
+}
+
 export interface PermitLedger {
   recordAuthorized(entry: LedgerEntry): Promise<void>;
   recordExecuted(gateRef: string, refundId: string): Promise<void>;
@@ -44,10 +65,14 @@ export interface PermitLedger {
   get(gateRef: string): Promise<LedgerEntry | undefined>;
   /** Marks the entry as accounting for `refundId`. False if already used by another refund. */
   claim(gateRef: string, refundId: string): Promise<boolean>;
+  recordPendingApproval(pending: PendingApproval): Promise<void>;
+  getPendingApproval(approvalRequestId: string): Promise<PendingApproval | undefined>;
+  resolvePendingApproval(approvalRequestId: string, resolved: NonNullable<PendingApproval["resolved"]>): Promise<void>;
 }
 
 export class InMemoryLedger implements PermitLedger {
   protected entries = new Map<string, LedgerEntry>();
+  protected pending = new Map<string, PendingApproval>();
 
   async recordAuthorized(entry: LedgerEntry): Promise<void> {
     if (this.entries.has(entry.gate_ref)) throw new Error(`duplicate ledger entry ${entry.gate_ref}`);
@@ -83,6 +108,24 @@ export class InMemoryLedger implements PermitLedger {
     return true;
   }
 
+  async recordPendingApproval(p: PendingApproval): Promise<void> {
+    if (this.pending.has(p.approval_request_id)) throw new Error(`duplicate pending approval ${p.approval_request_id}`);
+    this.pending.set(p.approval_request_id, JSON.parse(JSON.stringify(p)) as PendingApproval);
+    this.persist();
+  }
+
+  async getPendingApproval(id: string): Promise<PendingApproval | undefined> {
+    const p = this.pending.get(id);
+    return p ? (JSON.parse(JSON.stringify(p)) as PendingApproval) : undefined;
+  }
+
+  async resolvePendingApproval(id: string, resolved: NonNullable<PendingApproval["resolved"]>): Promise<void> {
+    const p = this.pending.get(id);
+    if (!p) throw new Error(`no pending approval ${id}`);
+    p.resolved = { ...resolved };
+    this.persist();
+  }
+
   protected persist(): void {}
 }
 
@@ -91,14 +134,17 @@ export class JsonFileLedger extends InMemoryLedger {
   constructor(private readonly path: string) {
     super();
     if (existsSync(path)) {
-      const rows = JSON.parse(readFileSync(path, "utf8")) as LedgerEntry[];
+      const data = JSON.parse(readFileSync(path, "utf8")) as LedgerEntry[] | { entries: LedgerEntry[]; pending?: PendingApproval[] };
+      // An array is the file format before pending approvals existed.
+      const rows = Array.isArray(data) ? data : data.entries;
       for (const r of rows) this.entries.set(r.gate_ref, r);
+      if (!Array.isArray(data)) for (const p of data.pending ?? []) this.pending.set(p.approval_request_id, p);
     }
   }
 
   protected override persist(): void {
     const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify([...this.entries.values()], null, 2));
+    writeFileSync(tmp, JSON.stringify({ entries: [...this.entries.values()], pending: [...this.pending.values()] }, null, 2));
     renameSync(tmp, this.path);
   }
 }

@@ -34,6 +34,8 @@ export interface RefundDecisionRecord {
   refund_id: string | null;
   order_status: string | null;
   days_since_delivery: number | null;
+  /** The approval request behind an escalation, or behind a refund a manager approved. Absent in older records. */
+  approval_request_id?: string | null;
 }
 
 export interface RefundAlarmRecord {
@@ -68,7 +70,8 @@ export function asRecord(v: unknown): EvidenceRecord | null {
       system && isStr(r.at) && isStr(r.gate_ref) && isStr(r.actor) && isStr(r.environment) && isStr(r.target) &&
       strOrNull(r.order_ref) && numOrNull(r.amount_cents) && strOrNull(r.currency) && OUTCOMES.has(r.outcome as string) &&
       isStr(r.decision) && strOrNull(r.deny_code) && isStr(r.reason) && strOrNull(r.audit_hash) && strOrNull(r.refund_id) &&
-      strOrNull(r.order_status) && numOrNull(r.days_since_delivery);
+      strOrNull(r.order_status) && numOrNull(r.days_since_delivery) &&
+      (r.approval_request_id === undefined || strOrNull(r.approval_request_id));
     return ok ? (r as unknown as RefundDecisionRecord) : null;
   }
   if (r.schema === REFUND_ALARM_SCHEMA) {

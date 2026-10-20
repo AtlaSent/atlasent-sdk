@@ -8,7 +8,7 @@ gate issued.
 
 `private: true`. This package is a demo and is not published to npm.
 
-> **Status:** 59 unit tests over fakes of Stripe and the AtlaSent runtime.
+> **Status:** 78 unit tests over fakes of Stripe and the AtlaSent runtime.
 > **Nothing here has been run against a live Stripe account or a live
 > AtlaSent org yet.** See [What has not been verified](#what-has-not-been-verified).
 >
@@ -21,6 +21,7 @@ gate issued.
 | | What | Where |
 |---|---|---|
 | Gate | read payment and order → evaluate → verify → re-read → `POST /v1/refunds` | `src/guard.ts`, CLI `src/cli.ts` |
+| Approval | resume an escalated refund once a manager decides it | `resumeApprovedStripeRefund` in `src/guard.ts`, `src/approvals.ts` |
 | Alarm | every `refund.created` event is matched to a permit, or flagged | `src/webhook.ts`, `src/webhook-server.ts` |
 | Stripe client | `GET /v1/payment_intents/:id`, `POST /v1/refunds`; no SDK dependency | `src/stripe.ts` |
 
@@ -68,6 +69,38 @@ policy denies it as not delivered.
   includes a request error and a refund Stripe returns as `failed`. The
   permit token itself is never stored; the ledger keeps its SHA-256.
 
+## When a refund goes to a manager
+
+Refunds of $50 and up escalate. The runtime opens an approval request, and
+the gate saves the refund exactly as it was evaluated (its snapshot and
+digest) under that request's id, returned as `approvalRequestId`. A manager
+decides it in the AtlaSent console. Then
+`resumeApprovedStripeRefund` (or `npm run refund -- resume --approval <id>`)
+checks the decision. It is single-shot, so call it again while the decision
+is pending:
+
+| Approval status | What happens |
+|---|---|
+| `pending` | `hold`; nothing changes |
+| `approved` | the steps below |
+| declined, expired, revoked, ... | `deny` with `APPROVAL_<STATUS>`; closed, nothing refunded |
+
+On approval, every step must pass, or nothing is refunded:
+
+1. re-read the payment and order, and recompute the digest; it must equal the
+   frozen one, and the charge must not be disputed or refunded elsewhere;
+2. claim the one permit the runtime minted for the approval
+   (`POST /v1-approvals/{id}/claim-permit`), and check it is bound to that
+   digest;
+3. verify it, as the actor who asked for the refund, and require `consumed`;
+4. record it in the ledger, re-read again, then `POST /v1/refunds`. The
+   Idempotency-Key and `metadata.atlasent_gate_ref` are the escalated
+   attempt's gateRef, so the alarm accounts for the refund.
+
+This code cannot approve anything. It reads a person's decision and claims
+the permit that decision produced. Only a refund this gate escalated can be
+resumed, only once, and only for the Stripe account it was escalated on.
+
 ## The alarm, and making the gate the only way to refund
 
 Stripe has no hook to approve a refund before it is created, so
@@ -103,6 +136,7 @@ JSON
 export STRIPE_SECRET_KEY=rk_test_... ATLASENT_API_KEY=... ATLASENT_ENVIRONMENT=test DELIVERY_FACTS_FILE=delivery.json
 npm run refund -- facts  --payment pi_...                       # Stripe + delivery file only
 npm run refund -- refund --payment pi_... --amount 18.99 --reason "arrived torn"
+npm run refund -- resume --approval <id>                       # after a manager decides an escalation
 
 STRIPE_WEBHOOK_SECRET=whsec_... npm run webhook                 # alarm on :3001/webhooks/stripe
 ```
@@ -143,6 +177,20 @@ checked against 14 specific defects, and each one made it fail:
 - counting "delivered" without a date;
 - skipping PaymentIntent id validation.
 
+The resume path was checked against eleven more, and each made it fail:
+
+- skipping the digest check before the claim;
+- skipping the claimed permit's binding check;
+- skipping `consumed` on resume;
+- treating any final status as approved;
+- not closing the approval after the refund;
+- skipping the account check;
+- not cancelling the ledger entry on a stop;
+- skipping the re-read after verify;
+- verifying as the caller instead of the original actor;
+- not saving the escalation;
+- a resumed refund not keyed by its gateRef.
+
 ## What has not been verified
 
 - Any call against a live Stripe account in test mode:
@@ -150,6 +198,11 @@ checked against 14 specific defects, and each one made it fail:
     (no `Stripe-Version` header is sent);
   - the `refund.created` event payload;
   - the exact restricted-key permissions.
-- Any call against a live AtlaSent org, and the manager-approval path.
+- Any call against a live AtlaSent org, including the approval endpoints
+  (`GET /v1-approvals/{id}`, `POST /v1-approvals/{id}/claim-permit`). The
+  resume path follows the protocol `atlasent-action` and the MCP server use,
+  against fakes only.
+- Whether the runtime opens an approval request for an escalate on your org.
+  If it returns no `approval_request_id`, there is nothing to resume.
 - PaymentIntents with more than one charge: only `latest_charge` is used.
 - Account credits (see the note at the top).

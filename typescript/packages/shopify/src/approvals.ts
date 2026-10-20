@@ -1,0 +1,81 @@
+/**
+ * The two runtime calls that resume an escalated refund after a person
+ * decides it in the AtlaSent console. Same protocol as atlasent-action's
+ * `waitForApprovalResolution` and the MCP server's `awaitApproval`:
+ *
+ *   GET  /v1-approvals/{id}              status poll; never carries a token
+ *   POST /v1-approvals/{id}/claim-permit one-time atomic claim of the permit
+ *
+ * This code cannot approve anything. It reads the decision a person made and,
+ * on approval, claims the single permit the runtime minted for it.
+ *
+ * The @atlasent/stripe package carries the same file; the two install
+ * independently.
+ */
+
+/** Built-in base: the hosted runtime's functions root (same as @atlasent/sdk). */
+export const DEFAULT_APPROVALS_BASE_URL = "https://api.atlasent.io/functions/v1";
+
+/** Statuses on which a permit can be claimed. Everything else that is not "pending" is final and has no permit. */
+export const CLAIMABLE_APPROVAL_STATUSES: ReadonlySet<string> = new Set(["approved", "approved_awaiting_claim"]);
+
+export type ApprovalStatus = { found: false } | { found: true; status: string; reEvaluationDecision?: string };
+
+export type ApprovalClaim =
+  | { claimed: true; permitToken: string; executionHashExpected?: string }
+  | { claimed: false; failure: string };
+
+export interface ApprovalsApi {
+  getStatus(approvalRequestId: string): Promise<ApprovalStatus>;
+  claimPermit(approvalRequestId: string): Promise<ApprovalClaim>;
+}
+
+export class ApprovalsApiError extends Error {
+  override name = "ApprovalsApiError";
+}
+
+export function assertApprovalRequestId(id: string): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new ApprovalsApiError(`not an approval request id: ${JSON.stringify(id)}`);
+  return id;
+}
+
+export function createApprovalsClient(opts: { apiKey: string; baseUrl?: string; fetch?: typeof fetch; timeoutMs?: number }): ApprovalsApi {
+  const doFetch = opts.fetch ?? fetch;
+  const raw = opts.baseUrl ?? DEFAULT_APPROVALS_BASE_URL;
+  let end = raw.length;
+  while (end > 0 && raw.charCodeAt(end - 1) === 47) end--;
+  const base = raw.slice(0, end);
+  const timeoutMs = opts.timeoutMs ?? 10_000;
+  const headers = { authorization: `Bearer ${opts.apiKey}`, "content-type": "application/json" };
+
+  async function call(method: "GET" | "POST", path: string): Promise<{ status: number; json: Record<string, unknown> | null }> {
+    const res = await doFetch(`${base}${path}`, {
+      method,
+      headers,
+      ...(method === "POST" ? { body: "{}" } : {}),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const json = (await res.json().catch(() => null)) as unknown;
+    return { status: res.status, json: json && typeof json === "object" ? (json as Record<string, unknown>) : null };
+  }
+
+  return {
+    async getStatus(id) {
+      const { status, json } = await call("GET", `/v1-approvals/${encodeURIComponent(assertApprovalRequestId(id))}`);
+      if (status === 404) return { found: false };
+      if (status !== 200 || json === null || typeof json.status !== "string") {
+        throw new ApprovalsApiError(`approval status read failed: HTTP ${status}`);
+      }
+      const re = json.re_evaluation_decision;
+      return { found: true, status: json.status, ...(typeof re === "string" ? { reEvaluationDecision: re } : {}) };
+    },
+    async claimPermit(id) {
+      const { status, json } = await call("POST", `/v1-approvals/${encodeURIComponent(assertApprovalRequestId(id))}/claim-permit`);
+      if (status !== 200) return { claimed: false, failure: typeof json?.error === "string" ? json.error : `HTTP ${status}` };
+      const token = json?.permit_token;
+      if (json?.claimed !== true || typeof token !== "string" || token.length === 0) return { claimed: false, failure: "not_claimed" };
+      const hash = json.execution_hash_expected;
+      return { claimed: true, permitToken: token, ...(typeof hash === "string" && hash.length > 0 ? { executionHashExpected: hash } : {}) };
+    },
+  };
+}

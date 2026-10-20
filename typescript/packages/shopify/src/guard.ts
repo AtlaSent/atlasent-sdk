@@ -29,7 +29,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { AtlaSentClient, EvaluateResponse, VerifyPermitResponse } from "@atlasent/sdk";
 import { toOrderGid, type CreatedRefund, type RefundCreateInput, type ShopifyAdmin, type ShopifyOrder } from "./admin.js";
 import { centsToMoney, deriveRefundFacts, SUPPORTED_CURRENCY, type RefundFacts } from "./facts.js";
-import { refundNote, type PermitLedger } from "./ledger.js";
+import { refundNote, type PendingApproval, type PermitLedger } from "./ledger.js";
+import { CLAIMABLE_APPROVAL_STATUSES, type ApprovalsApi } from "./approvals.js";
 import { outcomeOf, REFUND_DECISION_SCHEMA, type RefundDecisionRecord } from "./decision-record.js";
 
 /** ACT-0024 canonical action: releasing a payment, refund or payout. */
@@ -89,6 +90,10 @@ export interface RefundDenial {
   auditHash?: string;
   /** Present on escalate when the runtime opened a human-review escalation. */
   escalationId?: string;
+  /** Present on escalate/hold when the runtime created an approval request; resume with {@link resumeApprovedShopifyRefund}. */
+  approvalRequestId?: string;
+  /** Set when the approval request could not be saved for resuming. */
+  approvalWarning?: string;
   digest?: string;
   facts?: RefundFacts;
   /** Set when `onDecision` failed. */
@@ -161,6 +166,17 @@ function bookkeepingProblem(facts: RefundFacts, amountCents: number): string | u
   return undefined;
 }
 
+/** The order still carries this exact refund: same status, parent payment, currency, and enough left to refund. */
+function stillSupports(current: RefundFacts | null, facts: Pick<RefundFacts, "order_status" | "currency"> & { parent_id: string }, amountCents: number): boolean {
+  return (
+    current !== null &&
+    current.order_status === facts.order_status &&
+    current.parent_transaction?.id === facts.parent_id &&
+    current.currency === facts.currency &&
+    current.refundable_cents >= amountCents
+  );
+}
+
 async function readFacts(shopify: ShopifyAdmin, orderGid: string, now: Date): Promise<RefundFacts | null> {
   const order: ShopifyOrder | null = await shopify.getOrder(orderGid);
   return order === null ? null : deriveRefundFacts(order, now);
@@ -173,8 +189,20 @@ export async function guardedShopifyRefund(
   options: RefundGuardOptions,
 ): Promise<RefundResult> {
   const result = await decideShopifyRefund(shopify, atlasent, request, options);
+  return emitDecision(result, request.orderId, request.amountCents, options, null);
+}
+
+/** Calls `onDecision` with the record for one result; a failing callback sets `logWarning` and never changes the outcome. */
+async function emitDecision<T extends RefundResult>(
+  result: T,
+  requestedOrderId: string,
+  requestedAmountCents: number,
+  options: RefundGuardOptions,
+  approval: { id: string; decision: string; reason: string; orderRef: string | null; currency: string | null } | null,
+): Promise<T> {
   if (options.onDecision === undefined) return result;
   const facts = result.facts;
+  const approvalRequestId = approval?.id ?? (result.refunded ? undefined : result.approvalRequestId);
   const record: RefundDecisionRecord = {
     schema: REFUND_DECISION_SCHEMA,
     at: (options.now ?? (() => new Date()))().toISOString(),
@@ -182,18 +210,19 @@ export async function guardedShopifyRefund(
     gate_ref: result.gateRef,
     actor: options.actor,
     environment: options.environment,
-    target: facts?.order_id ?? request.orderId,
-    order_ref: facts?.order_name ?? null,
-    amount_cents: Number.isSafeInteger(request.amountCents) ? request.amountCents : null,
-    currency: facts?.currency ?? null,
+    target: facts?.order_id ?? requestedOrderId,
+    order_ref: facts?.order_name ?? approval?.orderRef ?? null,
+    amount_cents: Number.isSafeInteger(requestedAmountCents) ? requestedAmountCents : null,
+    currency: facts?.currency ?? approval?.currency ?? null,
     outcome: outcomeOf(result.refunded, result.refunded ? "allow" : result.decision),
-    decision: result.refunded ? "allow" : result.decision,
+    decision: approval?.decision ?? (result.refunded ? "allow" : result.decision),
     deny_code: result.refunded ? null : (result.denyCode ?? null),
-    reason: result.refunded ? "within policy" : result.reason,
+    reason: approval?.reason ?? (result.refunded ? "within policy" : result.reason),
     audit_hash: result.auditHash || null,
     refund_id: result.refunded ? result.refund.id : null,
     order_status: facts?.order_status ?? null,
     days_since_delivery: facts?.days_since_delivery ?? null,
+    approval_request_id: approvalRequestId ?? null,
   };
   try {
     await options.onDecision(record);
@@ -256,6 +285,28 @@ async function decideShopifyRefund(
 
   if (ev.decision !== "allow") {
     const decision: RefundBlockReason = ev.decision === "hold" || ev.decision === "escalate" ? ev.decision : "deny";
+    let approvalWarning: string | undefined;
+    const approvalRequestId = (decision === "hold" || decision === "escalate") ? ev.approvalRequestId : undefined;
+    if (approvalRequestId !== undefined) {
+      // Freeze the refund under its approval, so resuming can only issue this one.
+      try {
+        await options.ledger.recordPendingApproval({
+          approval_request_id: approvalRequestId,
+          gate_ref: gateRef,
+          actor_id: options.actor,
+          environment: options.environment,
+          order_id: orderGid,
+          order_ref: facts.order_name,
+          amount_cents: amountCents,
+          snapshot: { ...snapshot },
+          digest,
+          ...(request.reason ? { reason: request.reason } : {}),
+          created_at: now().toISOString(),
+        });
+      } catch (err) {
+        approvalWarning = `the approval request could not be saved, so it cannot be resumed here: ${errorText(err)}`;
+      }
+    }
     return {
       refunded: false,
       decision,
@@ -264,6 +315,8 @@ async function decideShopifyRefund(
       gateRef,
       ...(ev.auditHash ? { auditHash: ev.auditHash } : {}),
       ...(ev.escalationId !== undefined ? { escalationId: ev.escalationId } : {}),
+      ...(approvalRequestId !== undefined ? { approvalRequestId } : {}),
+      ...(approvalWarning !== undefined ? { approvalWarning } : {}),
       digest,
       facts,
     };
@@ -323,13 +376,7 @@ async function decideShopifyRefund(
   } catch (err) {
     return abort("error", `could not re-read the order: ${errorText(err)}`);
   }
-  if (
-    current === null ||
-    current.order_status !== facts.order_status ||
-    current.parent_transaction?.id !== parent.id ||
-    current.currency !== facts.currency ||
-    current.refundable_cents < amountCents
-  ) {
+  if (!stillSupports(current, { order_status: facts.order_status, currency: facts.currency, parent_id: parent.id }, amountCents)) {
     return abort("order_changed", "the order changed after the refund was authorized");
   }
 
@@ -384,4 +431,198 @@ export async function managerApprovalStatus(
 ): Promise<{ status: string; resolvedBy: string | null; resolvedAt: string | null }> {
   const { escalation } = await atlasent.getHitlEscalation(escalationId);
   return { status: escalation.status, resolvedBy: escalation.resolved_by, resolvedAt: escalation.resolved_at };
+}
+
+export interface ResumeRequest {
+  approvalRequestId: string;
+  /** Who asked to resume (e.g. the staff member who clicked "Check approval"). Recorded, never authorizes. */
+  resumedBy?: string;
+}
+
+/**
+ * Resume an escalated refund after a person decided it in the AtlaSent console.
+ *
+ * Single-shot (call it again later while the approval is pending):
+ *   - pending → `hold`, nothing changes;
+ *   - declined, expired, revoked, ... → `deny` (`APPROVAL_<STATUS>`), closed;
+ *   - approved → re-read the order (it must still carry the frozen refund),
+ *     claim the ONE permit, check it is bound to this refund's digest, verify
+ *     (consumed), record it, re-read again, then refundCreate.
+ *
+ * Only a refund this gate escalated and froze can be resumed, and only
+ * exactly as it was evaluated. Fail-closed throughout; a stop after the
+ * permit is recorded cancels the ledger entry, as in the gate.
+ */
+export async function resumeApprovedShopifyRefund(
+  shopify: ShopifyAdmin,
+  atlasent: AtlaSentClient,
+  approvals: ApprovalsApi,
+  request: ResumeRequest,
+  options: RefundGuardOptions,
+): Promise<RefundResult> {
+  const now = options.now ?? (() => new Date());
+  const id = request.approvalRequestId;
+  let pending: PendingApproval | undefined;
+  try {
+    pending = await options.ledger.getPendingApproval(id);
+  } catch (err) {
+    return { refunded: false, decision: "error", reason: `could not read the pending approval: ${errorText(err)}`, gateRef: "" };
+  }
+  if (pending === undefined) {
+    return { refunded: false, decision: "invalid_request", reason: "this gate did not escalate that approval request, so it cannot resume it", gateRef: "" };
+  }
+  const p = pending;
+  const gateRef = p.gate_ref;
+  if (p.resolved !== undefined) {
+    return { refunded: false, decision: "invalid_request", reason: `this approval was already resolved (${p.resolved.outcome})`, gateRef, approvalRequestId: id };
+  }
+  if ((p.snapshot as { shop?: unknown }).shop !== options.shop) {
+    return { refunded: false, decision: "invalid_request", reason: "that approval request belongs to a different shop", gateRef: "" };
+  }
+  const resumedBy = request.resumedBy ? ` (resumed by ${request.resumedBy})` : "";
+  const finish = async (result: RefundResult, decision: string, reason: string) =>
+    emitDecision(result, p.order_id, p.amount_cents, options, {
+      id,
+      decision,
+      reason: reason + resumedBy,
+      orderRef: p.order_ref ?? null,
+      currency: typeof p.snapshot.currency === "string" ? p.snapshot.currency : null,
+    });
+  const close = async (outcome: NonNullable<PendingApproval["resolved"]>["outcome"], detail: string) => {
+    try {
+      await options.ledger.resolvePendingApproval(id, { outcome, at: now().toISOString(), detail });
+    } catch {
+      // The decision itself stands; a stale pending row can only be resumed into the same checks again.
+    }
+  };
+
+  let status;
+  try {
+    status = await approvals.getStatus(id);
+  } catch (err) {
+    return { refunded: false, decision: "error", reason: `could not read the approval: ${errorText(err)}`, gateRef, approvalRequestId: id };
+  }
+  if (!status.found) {
+    await close("stopped", "approval request not found");
+    return finish({ refunded: false, decision: "error", reason: "the runtime has no such approval request", gateRef, approvalRequestId: id }, "approval_not_found", "approval request not found");
+  }
+  if (status.status === "pending") {
+    return { refunded: false, decision: "hold", reason: "still waiting for a manager's decision", gateRef, approvalRequestId: id };
+  }
+  if (!CLAIMABLE_APPROVAL_STATUSES.has(status.status)) {
+    const code = `APPROVAL_${status.status.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`;
+    await close("not_approved", status.status);
+    return finish(
+      { refunded: false, decision: "deny", denyCode: code, reason: `the approval was ${status.status.replace(/_/g, " ")}; nothing was refunded`, gateRef, approvalRequestId: id },
+      "approval_not_granted",
+      `approval ${status.status}`,
+    );
+  }
+
+  // Approved. Before claiming the one permit, the order must still carry exactly the frozen refund.
+  const snap = p.snapshot as unknown as RefundSnapshot;
+  const stop = async (decision: RefundBlockReason, reason: string, facts?: RefundFacts | null) => {
+    await close("stopped", reason);
+    return finish({ refunded: false, decision, reason, gateRef, approvalRequestId: id, digest: p.digest, ...(facts ? { facts } : {}) }, "approval_stopped", reason);
+  };
+  let facts: RefundFacts | null;
+  try {
+    facts = await readFacts(shopify, p.order_id, now());
+  } catch (err) {
+    return { refunded: false, decision: "error", reason: `could not read the order: ${errorText(err)}`, gateRef, approvalRequestId: id };
+  }
+  const same =
+    facts !== null &&
+    facts.parent_transaction !== null &&
+    computeRefundDigest({
+      shop: snap.shop,
+      order_id: facts.order_id,
+      amount_cents: p.amount_cents,
+      currency: facts.currency,
+      parent_transaction_id: facts.parent_transaction.id,
+      gateway: facts.parent_transaction.gateway,
+    }) === p.digest;
+  if (!same || facts === null || facts.refundable_cents < p.amount_cents) {
+    return stop("order_changed", "the order changed after the refund was escalated; the approval does not cover it", facts);
+  }
+
+  const claim = await approvals.claimPermit(id).catch((err: unknown) => ({ claimed: false as const, failure: errorText(err) }));
+  if (!claim.claimed) return stop("verify_failed", `the approved permit could not be claimed: ${claim.failure}`, facts);
+  if (claim.executionHashExpected !== undefined && claim.executionHashExpected.toLowerCase() !== p.digest) {
+    return stop("verify_failed", "the approved permit is bound to a different refund", facts);
+  }
+
+  let verified: VerifyPermitResponse;
+  try {
+    verified = await atlasent.verifyPermit({
+      permitId: claim.permitToken,
+      agent: p.actor_id,
+      action: FINANCE_PAYMENT_AUTHORIZE,
+      environment: p.environment,
+      execution_hash: p.digest,
+    });
+  } catch (err) {
+    return stop("error", `verifyPermit failed: ${errorText(err)}`, facts);
+  }
+  if (verified.verified !== true || verified.consumed !== true) {
+    return stop("verify_failed", verified.verified !== true ? `permit did not verify: outcome=${verified.outcome}` : "permit verified but was not reported consumed", facts);
+  }
+
+  try {
+    await options.ledger.recordAuthorized({
+      gate_ref: gateRef,
+      permit_sha256: createHash("sha256").update(claim.permitToken).digest("hex"),
+      audit_hash: "",
+      order_id: p.order_id,
+      amount_cents: p.amount_cents,
+      actor_id: p.actor_id,
+      authorized_at: now().toISOString(),
+    });
+  } catch (err) {
+    return stop("error", `could not record the permit: ${errorText(err)}`, facts);
+  }
+  const abort = async (decision: RefundBlockReason, reason: string) => {
+    try {
+      await options.ledger.recordAborted(gateRef, decision);
+    } catch (err) {
+      reason += `; the ledger entry could not be cancelled: ${errorText(err)}`;
+    }
+    return stop(decision, reason, facts);
+  };
+
+  let current: RefundFacts | null;
+  try {
+    current = await readFacts(shopify, p.order_id, now());
+  } catch (err) {
+    return abort("error", `could not re-read the order: ${errorText(err)}`);
+  }
+  if (!stillSupports(current, { order_status: facts.order_status, currency: facts.currency, parent_id: snap.parent_transaction_id }, p.amount_cents)) {
+    return abort("order_changed", "the order changed after the refund was approved");
+  }
+
+  let refund: CreatedRefund;
+  try {
+    refund = await shopify.createRefund({
+      orderId: p.order_id,
+      note: refundNote(gateRef, `${p.reason ? `${p.reason}; ` : ""}approved by a manager`),
+      notify: false,
+      transactions: [
+        { orderId: p.order_id, parentId: snap.parent_transaction_id, kind: "REFUND", gateway: snap.gateway, amount: centsToMoney(p.amount_cents) },
+      ],
+    });
+  } catch (err) {
+    return abort("error", `refundCreate failed: ${errorText(err)}`);
+  }
+  let ledgerWarning: string | undefined;
+  try {
+    await options.ledger.recordExecuted(gateRef, refund.id);
+  } catch (err) {
+    ledgerWarning = `refund ${refund.id} ran but the ledger did not record it: ${errorText(err)}`;
+  }
+  await close("refunded", refund.id);
+  return finish(
+    { refunded: true, refund, amountCents: p.amount_cents, gateRef, auditHash: "", digest: p.digest, facts, ...(ledgerWarning ? { ledgerWarning } : {}) },
+    "allow_after_approval",
+    "approved by a manager",
+  );
 }

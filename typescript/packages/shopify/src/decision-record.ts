@@ -36,6 +36,8 @@ export interface RefundDecisionRecord {
   refund_id: string | null;
   order_status: string | null;
   days_since_delivery: number | null;
+  /** The approval request behind an escalation, or behind a refund a manager approved. Absent in records written before approvals. */
+  approval_request_id?: string | null;
 }
 
 export function outcomeOf(refunded: boolean, decision: string): RefundOutcome {

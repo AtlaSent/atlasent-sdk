@@ -7,7 +7,7 @@ manager, and every refund is checked against the permits the gate issued.
 
 `private: true`. This package is a demo and is not published to npm.
 
-> **Status:** 98 unit tests over fakes of Shopify and the AtlaSent runtime.
+> **Status:** 116 unit tests over fakes of Shopify and the AtlaSent runtime.
 > **Nothing here has been run against a live Shopify store or a live
 > AtlaSent org yet.** The Shopify field names, mutations, token exchange and
 > extension API follow Shopify's documented shapes as best known; check them
@@ -19,6 +19,7 @@ manager, and every refund is checked against the permits the gate issued.
 | | What | Where |
 |---|---|---|
 | **A** | The gate: read the order → evaluate → verify → re-read → `refundCreate` | `src/guard.ts`, CLI `src/cli.ts` |
+| **A+** | Resume an escalated refund once a manager decides it | `resumeApprovedShopifyRefund` in `src/guard.ts`, `src/approvals.ts` |
 | **B** | "Refund via AtlaSent" button on the Shopify order page, and its backend | `app/extensions/atlasent-refund/`, `src/server.ts` |
 | **C** | Alarm: every `refunds/create` webhook is matched to a permit, or flagged | `src/webhook.ts`, `src/ledger.ts` |
 | **D** | AI support agent whose only payment tool is the gate | `src/agent.ts`, CLI `src/agent-cli.ts` |
@@ -70,11 +71,45 @@ The SDK's `permitId` is the permit token itself. The gate never writes it
 anywhere: the ledger stores its SHA-256, and the Shopify refund note and
 every response carry a random `gateRef` instead.
 
-Escalations return `escalationId`, and `managerApprovalStatus()` reads where
-the review stands. How an approved escalation becomes an allowed refund
-depends on the org's approval setup. That path has not been built or tested
-here. Re-requesting after approval is the expected flow, but confirm it on
-your org first.
+## When a refund goes to a manager
+
+Refunds of $50 and up escalate. The runtime opens an approval request, and
+the gate saves the refund exactly as it was evaluated (its snapshot and
+digest) under that request's id, returned as `approvalRequestId`. A manager
+decides it in the AtlaSent console. Then `resumeApprovedShopifyRefund`
+checks the decision; the admin button shows **Check approval**, which calls
+`POST /api/refunds/resume`, and the CLI has `resume --approval <id>`. It is
+single-shot, so check again while the decision is pending:
+
+| Approval status | What happens |
+|---|---|
+| `pending` | `hold`; nothing changes |
+| `approved` | the steps below |
+| declined, expired, revoked, ... | `deny` with `APPROVAL_<STATUS>`; closed, nothing refunded |
+
+On approval, every step must pass, or nothing is refunded:
+
+1. re-read the order and recompute the digest; it must equal the frozen one,
+   with enough left to refund;
+2. claim the one permit the runtime minted for the approval
+   (`POST /v1-approvals/{id}/claim-permit`), and check it is bound to that
+   digest;
+3. verify it, as the staff member who asked for the refund, and require
+   `consumed`;
+4. record it in the ledger, re-read again, then `refundCreate`. The note
+   carries the escalated attempt's gate reference, so the alarm accounts for
+   the refund.
+
+This code cannot approve anything. It reads a person's decision and claims
+the permit that decision produced. Only a refund this gate escalated can be
+resumed, only once, and only on the shop it was escalated on. The pending
+approval lives in the ledger, so use `JsonFileLedger` (or a real store) if
+the backend restarts between the request and the decision.
+
+The SDK surfaces the runtime's `approval_request_id` as
+`EvaluateResponse.approvalRequestId` (added with this demo; see the SDK
+CHANGELOG). `managerApprovalStatus()` still reads the older HITL escalation
+by `escalationId`.
 
 ## The alarm (C) and why staff permissions matter
 
@@ -181,6 +216,7 @@ exchanged again; no refresh token is stored.
 | Route | Auth | Does |
 |---|---|---|
 | `POST /api/refunds` | session token, verified for signature, audience, expiry and shop | runs the gate as `shopify-staff:<shop>/<user>` |
+| `POST /api/refunds/resume` | same | resumes an escalation by `approvalRequestId`; 501 if approvals are not configured |
 | `POST /webhooks/refunds-create` | HMAC | runs the alarm |
 
 ### 6. D — the support agent
@@ -230,6 +266,19 @@ fail:
 - caching an expiring token past its expiry, and not requesting an expiring
   token.
 
+The resume path was checked against ten more, and each made it fail:
+
+- skipping the digest check before the claim;
+- skipping the claimed permit's binding check;
+- skipping `consumed` on resume;
+- treating any final status as approved;
+- not closing the approval after the refund;
+- skipping the shop check;
+- not cancelling the ledger entry on a stop;
+- verifying as the caller instead of the original actor;
+- not saving the escalation;
+- a resumed refund note without the gate reference.
+
 ## What has not been verified
 
 - Any call against a live Shopify store: the order query, `refundCreate`,
@@ -240,8 +289,13 @@ fail:
   versions use Preact and need a port.
 - Whether relative `fetch("/api/refunds")` from the extension resolves to the
   app backend on your setup. If it doesn't, use the absolute app URL.
-- Any call against a live AtlaSent org, and the manager-approval path after
-  an escalation.
+- Any call against a live AtlaSent org, including the approval endpoints
+  (`GET /v1-approvals/{id}`, `POST /v1-approvals/{id}/claim-permit`). The
+  resume path follows the protocol `atlasent-action` and the MCP server use,
+  against fakes only.
+- Whether the runtime opens an approval request for an escalate on your org.
+  If it returns no `approval_request_id`, there is nothing to resume.
+- The "Check approval" button in a real admin.
 - Multi-payment orders: refunds go against the first successful payment.
 - Whether `refundCreate` on your API version requires an idempotency key.
 - The `expiring: "1"` token-exchange parameter and `expires_in` handling,

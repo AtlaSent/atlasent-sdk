@@ -16,6 +16,8 @@ export {
   csvCell,
   formatMoney,
   OUTCOME_LABEL,
+  outcomeText,
+  approvedByManager,
   RULE_LABEL,
   type EvidenceReport,
   type EvidenceReportInput,
@@ -23,3 +25,4 @@ export {
   type MoneyTotal,
 } from "./report.js";
 export { runDemo, type DemoOptions, type DemoResult } from "./demo.js";
+export { createSimulatedRuntime, simulatedRuntime, type SimulatedRuntime } from "./sim.js";

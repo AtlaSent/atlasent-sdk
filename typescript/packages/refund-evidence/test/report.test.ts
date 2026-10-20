@@ -136,7 +136,7 @@ describe("hostile values", () => {
 describe("CSV", () => {
   it("one header, one row per decision and per refund outside the gate", () => {
     const lines = build([decision(), decision({ gate_ref: "g-2" })], [alarm(), alarm({ verdict: "authorized", refund_id: "re_2" })]).csv.trim().split("\n");
-    expect(lines[0]).toBe("type,at,system,order_or_payment,order_ref,amount,currency,outcome,rule,reason,requested_by,audit_reference,gate_reference,refund_id");
+    expect(lines[0]).toBe("type,at,system,order_or_payment,order_ref,amount,currency,outcome,rule,reason,requested_by,audit_reference,gate_reference,refund_id,approval_request_id");
     expect(lines).toHaveLength(4);
     expect(lines[1]).toContain("decision,2026-10-15T10:00:00.000Z,shopify,gid://shopify/Order/1001,#PPS-1001,18.99,USD,Refunded,Within policy");
     expect(lines[3]).toMatch(/^refund_outside_gate,/);
@@ -159,5 +159,30 @@ describe("formatMoney", () => {
     expect(formatMoney(5, "USD")).toBe("$0.05");
     expect(formatMoney(null, "USD")).toBe("unknown");
     expect(formatMoney(1000, "EUR")).toBe("EUR 10.00");
+  });
+});
+
+describe("manager approvals", () => {
+  const approved = decision({ decision: "allow_after_approval", audit_hash: null, approval_request_id: "apr-7", reason: "approved by a manager" });
+  const declined = decision({ outcome: "denied", decision: "approval_not_granted", deny_code: "APPROVAL_DENIED", audit_hash: null, refund_id: null, approval_request_id: "apr-8" });
+
+  it("labels a manager-approved refund and a declined approval, and points at the approval request", () => {
+    const r = buildEvidenceReport({ decisions: [approved, declined], alarms: [], storeName: "S", generatedAt: new Date("2026-10-20T00:00:00Z") });
+    expect(r.html).toContain("<td>Approved by a manager</td>");
+    expect(r.html).toContain("Manager did not approve (APPROVAL_DENIED)");
+    expect(r.html).toContain("<td>Declined by a manager</td>");
+    expect(r.html).toContain("approval apr-7");
+    expect(r.html).toContain("approval apr-8");
+    expect(r.html).not.toContain(">not evaluated<");
+    expect(r.summary).toMatchObject({ approvedByManager: 1, refunded: { count: 1 }, declined: { count: 1 } });
+    expect(r.html).toContain("1 of them approved by a manager");
+    expect(r.csv.split("\n")[1]).toMatch(/,apr-7$/);
+  });
+
+  it("accepts records with or without approval_request_id, and rejects a malformed one", () => {
+    const { approval_request_id: _omit, ...older } = approved;
+    const p = parseLog([approved, older, { ...approved, approval_request_id: 7 }].map((x) => JSON.stringify(x)).join("\n"));
+    expect(p.decisions).toHaveLength(2);
+    expect(p.rejectedLines).toEqual([3]);
   });
 });

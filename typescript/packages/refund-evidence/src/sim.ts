@@ -7,6 +7,8 @@
  *     `examples/fake-store-refunds/policy.json`, re-stated) and the permit
  *     binding, behind the real `AtlaSentClient`. Its audit references are
  *     placeholders. Set ATLASENT_API_KEY to use the real runtime instead.
+ *     Like the runtime, it opens an approval request for every escalation;
+ *     `decide` plays the manager deciding it in the AtlaSent console.
  *   - `SimShopify` / `SimStripe`: in-memory stores implementing the same
  *     interfaces the gates call, plus a way to refund AROUND the gate (staff
  *     in the Shopify admin, a teammate in the Stripe Dashboard) so the alarm
@@ -18,6 +20,7 @@ import { AtlaSentClient } from "@atlasent/sdk";
 import type { CreatedRefund, GetOrderOptions, RefundCreateInput, ShopifyAdmin, ShopifyOrder } from "../../shopify/src/admin.js";
 import type { RefundWebhookPayload } from "../../shopify/src/webhook.js";
 import type { CreateRefundInput, StripeApi, StripePaymentIntent, StripeRefund } from "../../stripe/src/stripe.js";
+import type { ApprovalsApi } from "../../shopify/src/approvals.js";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const DAY_MS = 86_400_000;
@@ -33,9 +36,23 @@ function demoPolicy(ctx: Record<string, unknown>): { decision: string; deny_code
   return { decision: "escalate", deny_code: "MANAGER_APPROVAL_REQUIRED", deny_reason: "Refunds of $50.00 or more need a store manager's approval." };
 }
 
+export interface SimulatedRuntime {
+  /** The real AtlaSentClient, over the stand-in. */
+  client: AtlaSentClient;
+  /** The approval-request reads and claims the gates' resume path makes. */
+  approvals: ApprovalsApi;
+  /** The manager's decision in the console: "approved" or "denied". */
+  decide(approvalRequestId: string, status: "approved" | "denied"): void;
+}
+
 /** The real AtlaSentClient over a local stand-in runtime. */
 export function simulatedRuntime(): AtlaSentClient {
+  return createSimulatedRuntime().client;
+}
+
+export function createSimulatedRuntime(): SimulatedRuntime {
   const permits = new Map<string, { bound: string; consumed: boolean }>();
+  const approvalRows = new Map<string, { status: string; bound: string; claimed: boolean }>();
   let seq = 0;
   const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
     const path = new URL(String(url)).pathname;
@@ -44,7 +61,12 @@ export function simulatedRuntime(): AtlaSentClient {
     if (path.endsWith("/v1-evaluate")) {
       const d = demoPolicy((body.context ?? {}) as Record<string, unknown>);
       const audit = `sim-audit-${sha256(JSON.stringify(body)).slice(0, 16)}`;
-      if (d.decision !== "allow") out = { ...d, audit_hash: audit };
+      if (d.decision === "escalate") {
+        const id = `sim-approval-${++seq}`;
+        const ep = body.execution_payload_hash;
+        approvalRows.set(id, { status: "pending", bound: typeof ep === "string" ? ep.toLowerCase() : "", claimed: false });
+        out = { ...d, audit_hash: audit, approval_request_id: id };
+      } else if (d.decision !== "allow") out = { ...d, audit_hash: audit };
       else {
         const ep = body.execution_payload_hash;
         const token = `pt.sim.${++seq}`;
@@ -61,7 +83,27 @@ export function simulatedRuntime(): AtlaSentClient {
     } else return new Response("{}", { status: 404 });
     return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
-  return new AtlaSentClient({ apiKey: "ask_test_simulated", fetch: fetchImpl, retryPolicy: { maxAttempts: 1 } });
+  const client = new AtlaSentClient({ apiKey: "ask_test_simulated", fetch: fetchImpl, retryPolicy: { maxAttempts: 1 } });
+  const approvals: ApprovalsApi = {
+    async getStatus(id) {
+      const row = approvalRows.get(id);
+      return row ? { found: true, status: row.status } : { found: false };
+    },
+    async claimPermit(id) {
+      const row = approvalRows.get(id);
+      if (!row || row.status !== "approved" || row.claimed) return { claimed: false, failure: "not_claimable" };
+      row.claimed = true;
+      const token = `pt.sim.${++seq}`;
+      permits.set(token, { bound: row.bound, consumed: false });
+      return { claimed: true, permitToken: token, executionHashExpected: row.bound };
+    },
+  };
+  const decide = (id: string, status: "approved" | "denied") => {
+    const row = approvalRows.get(id);
+    if (!row) throw new Error(`no approval request ${id}`);
+    row.status = status;
+  };
+  return { client, approvals, decide };
 }
 
 export interface SimOrderSpec {

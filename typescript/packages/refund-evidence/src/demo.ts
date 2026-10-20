@@ -9,7 +9,9 @@
  *   - the Shopify gate, as the "Refund via AtlaSent" admin button would;
  *   - the support agent's issue_refund tool (the code path the AI agent calls);
  *   - the Stripe gate, for payments taken directly through Stripe.
- * Then refunds two orders AROUND the gate (Shopify admin, Stripe Dashboard),
+ * A manager then approves the Shopify escalation (which the gate resumes and
+ * refunds, exactly as escalated) and declines the Stripe one. Two refunds are
+ * then made AROUND the gate (Shopify admin, Stripe Dashboard),
  * runs every refund the platforms report through the alarms, and writes:
  *   evidence-out/decisions.jsonl   the log
  *   evidence-out/report.html       the report a finance reader opens
@@ -22,17 +24,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { AtlaSentClient } from "@atlasent/sdk";
-import { guardedShopifyRefund } from "../../shopify/src/guard.js";
+import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "../../shopify/src/guard.js";
+import type { ApprovalsApi } from "../../shopify/src/approvals.js";
 import { InMemoryLedger as ShopifyLedger } from "../../shopify/src/ledger.js";
 import { auditRefundWebhook } from "../../shopify/src/webhook.js";
 import { runSupportTool, type SupportAgentDeps } from "../../shopify/src/agent.js";
-import { guardedStripeRefund } from "../../stripe/src/guard.js";
+import { guardedStripeRefund, resumeApprovedStripeRefund } from "../../stripe/src/guard.js";
 import { InMemoryLedger as StripeLedger } from "../../stripe/src/ledger.js";
 import { auditStripeRefund } from "../../stripe/src/webhook.js";
 import { staticDeliveryFacts } from "../../stripe/src/facts.js";
 import { REFUND_ALARM_SCHEMA, type RefundAlarmRecord, type RefundDecisionRecord } from "./records.js";
-import { buildEvidenceReport, formatMoney, OUTCOME_LABEL, type EvidenceReport } from "./report.js";
-import { SimShopify, SimStripe, simulatedRuntime } from "./sim.js";
+import { buildEvidenceReport, formatMoney, outcomeText, type EvidenceReport } from "./report.js";
+import { createSimulatedRuntime, SimShopify, SimStripe } from "./sim.js";
 
 const DAY_MS = 86_400_000;
 const SHOP = "pinecone-pet-supply.myshopify.com";
@@ -44,6 +47,12 @@ export interface DemoOptions {
   environment: string;
   now: () => Date;
   log?: (line: string) => void;
+  /**
+   * Plays the manager deciding escalations in the AtlaSent console. Only the
+   * local stand-in has one; against the real runtime a person decides, and the
+   * demo leaves the escalations waiting.
+   */
+  manager?: { approvals: ApprovalsApi; decide(approvalRequestId: string, status: "approved" | "denied"): void };
 }
 
 export interface DemoResult {
@@ -61,7 +70,7 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
   const alarms: RefundAlarmRecord[] = [];
   const onDecision = (r: RefundDecisionRecord) => {
     decisions.push(r);
-    say(`  ${r.system.padEnd(7)} ${(r.order_ref ?? r.target).padEnd(12)} ${formatMoney(r.amount_cents, r.currency).padStart(8)}  ${OUTCOME_LABEL[r.outcome]}${r.deny_code ? ` (${r.deny_code})` : ""}`);
+    say(`  ${r.system.padEnd(7)} ${(r.order_ref ?? r.target).padEnd(12)} ${formatMoney(r.amount_cents, r.currency).padStart(8)}  ${outcomeText(r)}${r.deny_code ? ` (${r.deny_code})` : ""}`);
   };
 
   const shopify = new SimShopify(
@@ -75,13 +84,15 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
     now(),
   );
   const shopifyLedger = new ShopifyLedger();
+  const shopifyOptions = (actor: string) => ({ actor, environment: opts.environment, ledger: shopifyLedger, shop: SHOP, now, onDecision });
   const shopifyGate = (actor: string) => (req: { orderId: string; amountCents: number; reason?: string }) =>
-    guardedShopifyRefund(shopify, opts.atlasent, req, { actor, environment: opts.environment, ledger: shopifyLedger, shop: SHOP, now, onDecision });
+    guardedShopifyRefund(shopify, opts.atlasent, req, shopifyOptions(actor));
 
   say("Shopify admin button (staff member Dana):");
-  const staff = shopifyGate(`shopify-staff:${SHOP}/dana`);
+  const dana = `shopify-staff:${SHOP}/dana`;
+  const staff = shopifyGate(dana);
   await staff({ orderId: "1001", amountCents: 1899, reason: "chew toy arrived torn" });
-  await staff({ orderId: "1002", amountCents: 7200, reason: "wrong size cat tree" });
+  const shopifyEscalation = await staff({ orderId: "1002", amountCents: 7200, reason: "wrong size cat tree" });
   await staff({ orderId: "1003", amountCents: 1200, reason: "still in transit" });
   await staff({ orderId: "1004", amountCents: 2500, reason: "asked 45 days after delivery" });
 
@@ -118,13 +129,30 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
     onDecision,
   };
   await guardedStripeRefund(stripe, opts.atlasent, { paymentIntentId: "pi_2001", amountCents: 2900, reason: "never arrived, carrier confirmed loss" }, stripeOptions);
-  await guardedStripeRefund(stripe, opts.atlasent, { paymentIntentId: "pi_2002", amountCents: 8500, reason: "changed mind" }, stripeOptions);
+  const stripeEscalation = await guardedStripeRefund(stripe, opts.atlasent, { paymentIntentId: "pi_2002", amountCents: 8500, reason: "changed mind" }, stripeOptions);
+
+  const shopifyApproval = shopifyEscalation.refunded ? undefined : shopifyEscalation.approvalRequestId;
+  const stripeApproval = stripeEscalation.refunded ? undefined : stripeEscalation.approvalRequestId;
+  if (opts.manager) {
+    say("Manager decisions in the AtlaSent console, then the gates resume:");
+    if (shopifyApproval) {
+      opts.manager.decide(shopifyApproval, "approved");
+      await resumeApprovedShopifyRefund(shopify, opts.atlasent, opts.manager.approvals, { approvalRequestId: shopifyApproval, resumedBy: dana }, shopifyOptions(dana));
+    }
+    if (stripeApproval) {
+      opts.manager.decide(stripeApproval, "denied");
+      await resumeApprovedStripeRefund(stripe, opts.atlasent, opts.manager.approvals, { approvalRequestId: stripeApproval, resumedBy: "support-tool:dana" }, stripeOptions);
+    }
+  } else {
+    say("Escalations wait for a person in the AtlaSent console; resume each with `npm run refund -- resume --approval <id>`:");
+    for (const id of [shopifyApproval, stripeApproval]) say(`  ${id ?? "(the runtime returned no approval request id)"}`);
+  }
 
   say("Refunds made around the gate:");
-  shopify.adminRefund("gid://shopify/Order/1002", "72.00", "customer asked nicely");
-  say("  shopify #PPS-1002 $72.00 refunded by a staff member in the Shopify admin");
+  shopify.adminRefund("gid://shopify/Order/1004", "25.00", "customer asked nicely");
+  say("  shopify #PPS-1004 $25.00 refunded by a staff member in the Shopify admin, after the policy declined it");
   stripe.dashboardRefund("pi_2002", 8500);
-  say("  stripe  pi_2002   $85.00 refunded by a teammate in the Stripe Dashboard");
+  say("  stripe  pi_2002   $85.00 refunded by a teammate in the Stripe Dashboard, after the manager declined it");
 
   for (const payload of shopify.webhooks) {
     const v = await auditRefundWebhook(payload, shopifyLedger);
@@ -176,9 +204,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.error("ATLASENT_ENVIRONMENT is required with ATLASENT_API_KEY");
     process.exit(2);
   }
-  const atlasent = live
-    ? new AtlaSentClient({ apiKey, ...(process.env.ATLASENT_BASE_URL ? { baseUrl: process.env.ATLASENT_BASE_URL } : {}) })
-    : simulatedRuntime();
+  const sim = live ? undefined : createSimulatedRuntime();
+  const atlasent = sim ? sim.client : new AtlaSentClient({ apiKey: apiKey as string, ...(process.env.ATLASENT_BASE_URL ? { baseUrl: process.env.ATLASENT_BASE_URL } : {}) });
   console.log(live ? "AtlaSent decisions: LIVE runtime. Stores: simulated.\n" : "AtlaSent decisions: LOCAL STAND-IN (simulated). Stores: simulated.\n");
   const outDir = process.env.EVIDENCE_OUT ?? "evidence-out";
   const result = await runDemo({
@@ -187,6 +214,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     environment: process.env.ATLASENT_ENVIRONMENT ?? "test",
     now: () => new Date(),
     log: (l) => console.log(l),
+    ...(sim ? { manager: sim } : {}),
   });
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "decisions.jsonl"), [...result.decisions, ...result.alarms].map((r) => JSON.stringify(r)).join("\n") + "\n");

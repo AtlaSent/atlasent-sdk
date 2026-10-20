@@ -39,6 +39,8 @@ export interface EvidenceSummary {
   stopped: MoneyTotal;
   outsideGate: MoneyTotal;
   alarmAccountedFor: number;
+  /** Refunds issued after a manager approved them (also counted in `refunded`). */
+  approvedByManager: number;
   decisions: number;
 }
 
@@ -106,13 +108,34 @@ export const RULE_LABEL: Record<string, string> = {
   RETURN_WINDOW_EXPIRED: "More than 30 days after delivery",
   RETURN_WINDOW_UNKNOWN: "Delivery date unknown",
   INVALID_REFUND_AMOUNT: "Invalid amount",
+  allow_after_approval: "Approved by a manager",
+  approval_stopped: "Approved, but could not complete safely",
+  approval_not_found: "Approval request not found",
 };
 
-const ruleOf = (d: RefundDecisionRecord) => (d.outcome === "refunded" ? "Within policy" : (d.deny_code ?? d.decision));
+/** The outcome as a reader says it: a manager's "no" is not the policy's. */
+export function outcomeText(d: Pick<RefundDecisionRecord, "outcome" | "deny_code">): string {
+  if (d.outcome === "denied" && d.deny_code?.startsWith("APPROVAL_")) return "Declined by a manager";
+  return OUTCOME_LABEL[d.outcome];
+}
+
+/** A refund issued after a manager approved its escalation. */
+export const approvedByManager = (d: RefundDecisionRecord) => d.outcome === "refunded" && d.decision === "allow_after_approval";
+
+const ruleOf = (d: RefundDecisionRecord) =>
+  approvedByManager(d) ? "allow_after_approval" : d.outcome === "refunded" ? "Within policy" : (d.deny_code ?? d.decision);
 const ruleText = (d: RefundDecisionRecord) => {
   const code = ruleOf(d);
+  if (code.startsWith("APPROVAL_")) return `Manager did not approve (${code})`;
   const label = RULE_LABEL[code];
+  if (code === "allow_after_approval") return label as string;
   return label ? `${label} (${code})` : code;
+};
+/** Resumed decisions are checked against the approval request, not a fresh evaluation. */
+const auditRef = (d: RefundDecisionRecord) => {
+  if (d.audit_hash) return d.audit_hash;
+  const resumed = approvedByManager(d) || d.decision.startsWith("approval_");
+  return resumed && d.approval_request_id ? `approval ${d.approval_request_id}` : "not evaluated";
 };
 
 export function buildEvidenceReport(input: EvidenceReportInput): EvidenceReport {
@@ -129,6 +152,7 @@ export function buildEvidenceReport(input: EvidenceReportInput): EvidenceReport 
     stopped: total(by(["stopped"])),
     outsideGate: total(outsideRows),
     alarmAccountedFor: alarms.filter((a) => a.verdict === "authorized").length,
+    approvedByManager: decisions.filter(approvedByManager).length,
     decisions: decisions.length,
   };
 
@@ -145,7 +169,7 @@ export function buildEvidenceReport(input: EvidenceReportInput): EvidenceReport 
 
   const decisionRows = decisions
     .map(
-      (d) => `<tr class="o-${e(d.outcome)}"><td>${e(d.at.replace("T", " ").slice(0, 16))}</td><td>${e(SYSTEM_LABEL[d.system])}</td><td>${e(d.order_ref ?? d.target)}</td><td class="num">${e(formatMoney(d.amount_cents, d.currency))}</td><td>${e(OUTCOME_LABEL[d.outcome])}</td><td>${e(ruleText(d))}</td><td>${e(d.actor)}</td><td class="mono">${e(d.audit_hash ?? "not evaluated")}</td><td class="mono">${e(d.gate_ref)}</td></tr>`,
+      (d) => `<tr class="o-${e(d.outcome)}"><td>${e(d.at.replace("T", " ").slice(0, 16))}</td><td>${e(SYSTEM_LABEL[d.system])}</td><td>${e(d.order_ref ?? d.target)}</td><td class="num">${e(formatMoney(d.amount_cents, d.currency))}</td><td>${e(outcomeText(d))}</td><td>${e(ruleText(d))}</td><td>${e(d.actor)}</td><td class="mono">${e(auditRef(d))}</td><td class="mono">${e(d.gate_ref)}</td></tr>`,
     )
     .join("\n");
 
@@ -182,9 +206,9 @@ tr.o-denied td:nth-child(5),tr.o-refused td:nth-child(5),tr.o-stopped td:nth-chi
 ${banner}
 ${rejected}
 <div class="tiles">
-${tile("Refunded", summary.refunded, "Within policy; permit verified before the money moved")}
-${tile("Sent to a manager", summary.escalated, "Over the automatic limit; not refunded by the gate", "", true)}
-${tile("Declined", summary.declined, "Outside policy or invalid; nothing refunded", "", true)}
+${tile("Refunded", summary.refunded, `Within policy${summary.approvedByManager > 0 ? `, ${summary.approvedByManager} of them approved by a manager` : ""}; permit verified before the money moved`)}
+${tile("Sent to a manager", summary.escalated, "Over the automatic limit; the manager's decision, once made, is its own row below", "", true)}
+${tile("Declined", summary.declined, "Outside policy, declined by a manager, or invalid; nothing refunded", "", true)}
 ${tile("Stopped", summary.stopped, "Could not complete safely; nothing refunded", "", true)}
 ${tile("Refunds made outside the gate", summary.outsideGate, "Made in an admin or dashboard, or with another key", summary.outsideGate.count > 0 ? "alert" : "")}
 </div>
@@ -200,18 +224,19 @@ ${decisionRows || '<tr><td colspan="9">No decisions in this period.</td></tr>'}
 <div class="how">
 <p>This report is built from the refund gates' decision log. It is not itself a signed record.</p>
 <p>AtlaSent records every evaluation in its tamper-evident, signed audit chain. The audit reference column is the reference AtlaSent returned for each decision. To check the report, request AtlaSent's signed audit export for the same period, verify it with the offline verifier, and cross-check the decisions here against it. A row marked "not evaluated" was refused before it reached AtlaSent, for example an amount larger than the order allows.</p>
+<p>A row marked "approval &lt;id&gt;" is a manager's decision on an earlier escalation. Its permit was minted by AtlaSent when the manager approved, bound to the exact refund that was escalated, and verified before the money moved; check it against the approval request with that id.</p>
 <p>The gate reference is written on each refund in Shopify (the refund note) or Stripe (the refund metadata), so any refund can be traced back to its decision.</p>
 </div>
 </body></html>
 `;
 
-  const header = ["type", "at", "system", "order_or_payment", "order_ref", "amount", "currency", "outcome", "rule", "reason", "requested_by", "audit_reference", "gate_reference", "refund_id"];
+  const header = ["type", "at", "system", "order_or_payment", "order_ref", "amount", "currency", "outcome", "rule", "reason", "requested_by", "audit_reference", "gate_reference", "refund_id", "approval_request_id"];
   const lines = [header.join(",")];
   for (const d of decisions) {
     lines.push(
       [
         "decision", d.at, d.system, d.target, d.order_ref, d.amount_cents === null ? null : (d.amount_cents / 100).toFixed(2), d.currency,
-        OUTCOME_LABEL[d.outcome], ruleOf(d), d.reason, d.actor, d.audit_hash, d.gate_ref, d.refund_id,
+        outcomeText(d), ruleOf(d), d.reason, d.actor, d.audit_hash, d.gate_ref, d.refund_id, d.approval_request_id ?? null,
       ].map(csvCell).join(","),
     );
   }
@@ -219,7 +244,7 @@ ${decisionRows || '<tr><td colspan="9">No decisions in this period.</td></tr>'}
     lines.push(
       [
         "refund_outside_gate", a.at, a.system, a.target, null, a.amount_cents === null ? null : (a.amount_cents / 100).toFixed(2), a.currency,
-        "Made outside the gate", null, a.reason, null, null, a.gate_ref, a.refund_id,
+        "Made outside the gate", null, a.reason, null, null, a.gate_ref, a.refund_id, null,
       ].map(csvCell).join(","),
     );
   }

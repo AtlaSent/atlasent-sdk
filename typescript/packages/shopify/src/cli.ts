@@ -3,6 +3,7 @@
  *
  *   npm run refund -- facts  --order 1234567890
  *   npm run refund -- refund --order 1234567890 --amount 18.99 --reason "arrived torn"
+ *   npm run refund -- resume --approval <approval_request_id>   (after a manager decided it)
  *
  * Env: SHOPIFY_SHOP, SHOPIFY_ADMIN_TOKEN, ATLASENT_API_KEY, ATLASENT_ENVIRONMENT,
  * optional ATLASENT_BASE_URL, ATLASENT_ACTOR, LEDGER_PATH.
@@ -13,7 +14,8 @@ import { parseArgs } from "node:util";
 import { AtlaSentClient } from "@atlasent/sdk";
 import { createAdminClient, normalizeShopDomain } from "./admin.js";
 import { centsToMoney, deriveRefundFacts, moneyToCents } from "./facts.js";
-import { guardedShopifyRefund } from "./guard.js";
+import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "./guard.js";
+import { createApprovalsClient } from "./approvals.js";
 import { JsonFileLedger } from "./ledger.js";
 
 function env(name: string): string {
@@ -28,18 +30,39 @@ function env(name: string): string {
 async function main(): Promise<number> {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
-    options: { order: { type: "string" }, amount: { type: "string" }, reason: { type: "string" } },
+    options: { order: { type: "string" }, amount: { type: "string" }, reason: { type: "string" }, approval: { type: "string" } },
   });
   const command = positionals[0];
-  if ((command !== "facts" && command !== "refund") || !values.order) {
-    console.error("usage: refund (facts|refund) --order <id> [--amount 18.99] [--reason text]");
+  const usage = "usage: refund (facts|refund) --order <id> [--amount 18.99] [--reason text]\n       refund resume --approval <approval_request_id>";
+  if (!(command === "resume" ? values.approval : (command === "facts" || command === "refund") && values.order)) {
+    console.error(usage);
     return 2;
   }
   const shop = normalizeShopDomain(env("SHOPIFY_SHOP"));
   const shopify = createAdminClient({ shop, accessToken: env("SHOPIFY_ADMIN_TOKEN") });
 
+  if (command === "resume") {
+    const apiKey = env("ATLASENT_API_KEY");
+    const baseUrl = process.env.ATLASENT_BASE_URL;
+    const result = await resumeApprovedShopifyRefund(
+      shopify,
+      new AtlaSentClient({ apiKey, ...(baseUrl ? { baseUrl } : {}) }),
+      createApprovalsClient({ apiKey, ...(baseUrl ? { baseUrl } : {}) }),
+      { approvalRequestId: values.approval as string, resumedBy: `shopify-cli:${process.env.USER ?? "operator"}` },
+      {
+        actor: process.env.ATLASENT_ACTOR ?? `shopify-cli:${process.env.USER ?? "operator"}`,
+        environment: env("ATLASENT_ENVIRONMENT"),
+        ledger: new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"),
+        shop,
+      },
+    );
+    console.log(JSON.stringify(result, null, 2));
+    return result.refunded ? 0 : 1;
+  }
+  const orderId = values.order as string;
+
   if (command === "facts") {
-    const order = await shopify.getOrder(values.order);
+    const order = await shopify.getOrder(orderId);
     if (!order) {
       console.error("order not found");
       return 1;
@@ -60,7 +83,7 @@ async function main(): Promise<number> {
   const result = await guardedShopifyRefund(
     shopify,
     atlasent,
-    { orderId: values.order, amountCents: moneyToCents(values.amount), ...(values.reason ? { reason: values.reason } : {}) },
+    { orderId, amountCents: moneyToCents(values.amount), ...(values.reason ? { reason: values.reason } : {}) },
     {
       actor: process.env.ATLASENT_ACTOR ?? `shopify-cli:${process.env.USER ?? "operator"}`,
       environment: env("ATLASENT_ENVIRONMENT"),

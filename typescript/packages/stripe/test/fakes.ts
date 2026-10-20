@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { AtlaSentClient } from "@atlasent/sdk";
 import type { CreateRefundInput, StripeApi, StripePaymentIntent, StripeRefund } from "../src/stripe.js";
 import type { DeliveryFacts } from "../src/facts.js";
+import type { ApprovalClaim, ApprovalsApi, ApprovalStatus } from "../src/approvals.js";
 
 export const NOW = new Date("2026-10-20T12:00:00Z");
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -45,6 +46,8 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
   const evaluateBodies: Record<string, unknown>[] = [];
   const verifyBodies: Record<string, unknown>[] = [];
   const permits = new Map<string, { bound: string; consumed: boolean }>();
+  /** Approval requests the runtime created for escalations. A test plays the person deciding them. */
+  const approvalRows = new Map<string, { status: string; bound: string; claimed: boolean }>();
   let seq = 0;
 
   function evaluate(body: Record<string, unknown>) {
@@ -53,7 +56,15 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
     if (opts.forceDecision) return { decision: opts.forceDecision, deny_reason: "forced" };
     const d = demoPolicy((body.context ?? {}) as Record<string, unknown>);
     if (d.decision !== "allow") {
-      return { ...d, audit_hash: `audit-${++seq}`, ...(d.decision === "escalate" ? { escalation_id: `esc-${seq}` } : {}) };
+      const n = ++seq;
+      let approval = {};
+      if (d.decision === "escalate") {
+        const id = `apr-${n}`;
+        const ep = body.execution_payload_hash;
+        approvalRows.set(id, { status: "pending", bound: typeof ep === "string" ? ep.toLowerCase() : "", claimed: false });
+        approval = { escalation_id: `esc-${n}`, approval_request_id: id };
+      }
+      return { ...d, audit_hash: `audit-${n}`, ...approval };
     }
     const ep = body.execution_payload_hash;
     const bound = typeof ep === "string" && /^[0-9a-f]{64}$/i.test(ep) ? ep.toLowerCase() : "sha256:" + sha256(JSON.stringify(body));
@@ -89,7 +100,34 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
   }) as typeof fetch;
 
   const client = new AtlaSentClient({ apiKey: "ask_test_fake", fetch: fetchImpl, retryPolicy: { maxAttempts: 1 } });
-  return { client, evaluateBodies, verifyBodies, permits };
+
+  const claims: string[] = [];
+  /** Options to make the claim misbehave, for fail-closed tests. */
+  const claimFaults: { boundTo?: string; failure?: string } = {};
+  const approvals: ApprovalsApi = {
+    async getStatus(id): Promise<ApprovalStatus> {
+      const row = approvalRows.get(id);
+      return row ? { found: true, status: row.status } : { found: false };
+    },
+    async claimPermit(id): Promise<ApprovalClaim> {
+      claims.push(id);
+      const row = approvalRows.get(id);
+      if (claimFaults.failure) return { claimed: false, failure: claimFaults.failure };
+      if (!row || row.status !== "approved" || row.claimed) return { claimed: false, failure: "not_claimable" };
+      row.claimed = true;
+      const token = `pt.v3.approved-${++seq}`;
+      const bound = claimFaults.boundTo ?? row.bound;
+      permits.set(token, { bound, consumed: false });
+      return { claimed: true, permitToken: token, executionHashExpected: bound };
+    },
+  };
+  /** A person deciding the approval in the AtlaSent console. */
+  const decide = (id: string, status: string) => {
+    const row = approvalRows.get(id);
+    if (!row) throw new Error(`no approval ${id}`);
+    row.status = status;
+  };
+  return { client, evaluateBodies, verifyBodies, permits, approvals, decide, claims, claimFaults, approvalRows };
 }
 
 const DAY_MS = 86_400_000;

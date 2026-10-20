@@ -15,7 +15,9 @@ import { AtlaSentClient } from "@atlasent/sdk";
 import { createAdminClient, normalizeShopDomain, type ShopifyAdmin } from "./admin.js";
 import { describeResult } from "./describe.js";
 import { moneyToCents } from "./facts.js";
-import { guardedShopifyRefund } from "./guard.js";
+import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "./guard.js";
+import { createApprovalsClient, type ApprovalsApi } from "./approvals.js";
+import type { RefundDecisionRecord } from "./decision-record.js";
 import { JsonFileLedger, type PermitLedger } from "./ledger.js";
 import { SessionTokenError, verifySessionToken } from "./session-token.js";
 import { auditRefundWebhook, verifyShopifyWebhookHmac, type RefundAuditVerdict, type RefundWebhookPayload } from "./webhook.js";
@@ -31,6 +33,10 @@ export interface GateServerDeps {
   /** Only these shops may use the gate. */
   allowedShops: string[];
   onUnauthorizedRefund?: (verdict: RefundAuditVerdict, shop: string) => void | Promise<void>;
+  /** Reads manager decisions on escalated refunds (POST /api/refunds/resume). */
+  approvals?: ApprovalsApi;
+  /** Evidence log: one record per refund decision. */
+  onDecision?: (record: RefundDecisionRecord) => void | Promise<void>;
   now?: () => Date;
 }
 
@@ -60,7 +66,8 @@ function send(res: ServerResponse, status: number, body: unknown): void {
 export function createGateHandler(deps: GateServerDeps): RequestListener {
   const allowed = new Set(deps.allowedShops.map(normalizeShopDomain));
 
-  async function handleRefund(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  /** Verifies the session token and shop; on failure sends the response and returns null. */
+  function authenticate(req: IncomingMessage, res: ServerResponse): { shop: string; userId?: string; token: string } | null {
     const auth = req.headers.authorization ?? "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     let shop: string;
@@ -74,9 +81,58 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
       shop = s.shop;
       userId = s.userId;
     } catch (err) {
-      return send(res, 401, { error: err instanceof SessionTokenError ? err.message : "unauthorized" });
+      send(res, 401, { error: err instanceof SessionTokenError ? err.message : "unauthorized" });
+      return null;
     }
-    if (!allowed.has(shop)) return send(res, 403, { error: "shop not allowed" });
+    if (!allowed.has(shop)) {
+      send(res, 403, { error: "shop not allowed" });
+      return null;
+    }
+    return { shop, token, ...(userId !== undefined ? { userId } : {}) };
+  }
+
+  const gateOptions = (shop: string, userId: string | undefined) => ({
+    actor: `shopify-staff:${shop}/${userId ?? "unknown"}`,
+    environment: deps.environment,
+    ledger: deps.ledger,
+    shop,
+    ...(deps.now ? { now: deps.now } : {}),
+    ...(deps.onDecision ? { onDecision: deps.onDecision } : {}),
+  });
+
+  async function handleResume(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const who = authenticate(req, res);
+    if (who === null) return;
+    if (deps.approvals === undefined) return send(res, 501, { error: "manager approvals are not configured on this server" });
+    let body: { approvalRequestId?: unknown };
+    try {
+      body = JSON.parse((await readBody(req)).toString("utf8"));
+    } catch {
+      return send(res, 400, { error: "invalid JSON" });
+    }
+    if (typeof body.approvalRequestId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(body.approvalRequestId)) {
+      return send(res, 400, { error: "approvalRequestId is required" });
+    }
+    let admin: ShopifyAdmin;
+    try {
+      admin = await deps.adminFor(who.shop, who.token);
+    } catch {
+      return send(res, 502, { error: "could not get Shopify Admin API access" });
+    }
+    const result = await resumeApprovedShopifyRefund(
+      admin,
+      deps.atlasent,
+      deps.approvals,
+      { approvalRequestId: body.approvalRequestId, resumedBy: `shopify-staff:${who.shop}/${who.userId ?? "unknown"}` },
+      gateOptions(who.shop, who.userId),
+    );
+    return send(res, 200, describeResult(result));
+  }
+
+  async function handleRefund(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const who = authenticate(req, res);
+    if (who === null) return;
+    const { shop, userId, token } = who;
 
     let body: { orderId?: unknown; amount?: unknown; reason?: unknown };
     try {
@@ -108,13 +164,7 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
         amountCents,
         ...(typeof body.reason === "string" && body.reason.length > 0 ? { reason: body.reason.slice(0, 200) } : {}),
       },
-      {
-        actor: `shopify-staff:${shop}/${userId ?? "unknown"}`,
-        environment: deps.environment,
-        ledger: deps.ledger,
-        shop,
-        ...(deps.now ? { now: deps.now } : {}),
-      },
+      gateOptions(shop, userId),
     );
     return send(res, 200, describeResult(result));
   }
@@ -157,7 +207,7 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
     const url = new URL(req.url ?? "/", "http://localhost");
     const route = `${req.method} ${url.pathname}`;
     let work: Promise<void>;
-    if (req.method === "OPTIONS" && url.pathname === "/api/refunds") {
+    if (req.method === "OPTIONS" && (url.pathname === "/api/refunds" || url.pathname === "/api/refunds/resume")) {
       res.writeHead(204, {
         "access-control-allow-origin": "*",
         "access-control-allow-methods": "POST, OPTIONS",
@@ -168,6 +218,7 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
       return;
     }
     if (route === "POST /api/refunds") work = handleRefund(req, res);
+    else if (route === "POST /api/refunds/resume") work = handleResume(req, res);
     else if (route === "POST /webhooks/refunds-create") work = handleWebhook(req, res);
     else if (route === "GET /healthz") work = Promise.resolve(send(res, 200, { ok: true }));
     else work = Promise.resolve(send(res, 404, { error: "not found" }));
@@ -264,6 +315,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       atlasent,
       adminFor,
       allowedShops: [shop],
+      approvals: createApprovalsClient({
+        apiKey: requireEnv("ATLASENT_API_KEY"),
+        ...(process.env.ATLASENT_BASE_URL ? { baseUrl: process.env.ATLASENT_BASE_URL } : {}),
+      }),
       onUnauthorizedRefund: (v, s) => {
         // Demo alert sink. Wire this to Slack, PagerDuty or email in a real deployment.
         console.error(JSON.stringify({ alert: "refund_without_atlasent_permit", shop: s, ...v }));

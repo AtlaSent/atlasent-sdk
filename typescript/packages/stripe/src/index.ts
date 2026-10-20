@@ -21,6 +21,7 @@ export {
 } from "./facts.js";
 export {
   guardedStripeRefund,
+  resumeApprovedStripeRefund,
   computeStripeRefundDigest,
   policyContext,
   FINANCE_PAYMENT_AUTHORIZE,
@@ -31,8 +32,19 @@ export {
   type StripeRefundSuccess,
   type StripeRefundDenial,
   type StripeRefundSnapshot,
+  type StripeResumeRequest,
 } from "./guard.js";
-export { InMemoryLedger, JsonFileLedger, type PermitLedger, type LedgerEntry } from "./ledger.js";
+export {
+  createApprovalsClient,
+  assertApprovalRequestId,
+  ApprovalsApiError,
+  CLAIMABLE_APPROVAL_STATUSES,
+  DEFAULT_APPROVALS_BASE_URL,
+  type ApprovalsApi,
+  type ApprovalStatus,
+  type ApprovalClaim,
+} from "./approvals.js";
+export { InMemoryLedger, JsonFileLedger, type PermitLedger, type LedgerEntry, type PendingApproval } from "./ledger.js";
 export { verifyStripeSignature, auditStripeRefund, refundFromEvent, type StripeRefundAuditVerdict } from "./webhook.js";
 export { createStripeWebhookHandler, type StripeWebhookDeps } from "./webhook-server.js";
 export { REFUND_DECISION_SCHEMA, outcomeOf, type RefundDecisionRecord, type RefundOutcome } from "./decision-record.js";
