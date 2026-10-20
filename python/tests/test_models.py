@@ -130,6 +130,13 @@ class TestEvaluateResult:
         assert result.human_approval_required is True
         assert result.human_approval_status == "pending"
 
+    def test_approval_request_id_parsed_from_response(self):
+        result = EvaluateResult.model_validate(
+            {"decision": "escalate", "approval_request_id": "apr_123"}
+        )
+        assert result.approval_request_id == "apr_123"
+        assert EvaluateResult.model_validate({"decision": "allow", "permit_token": "pt"}).approval_request_id is None
+
     def test_human_approval_fields_none_when_absent(self):
         """Backward compat: a runtime response predating the lifecycle
         fields leaves both attributes None, never a fabricated default."""

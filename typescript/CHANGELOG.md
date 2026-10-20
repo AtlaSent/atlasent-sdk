@@ -8,6 +8,19 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: `approvalRequestId` on evaluate responses (additive, contract-conforming)
+
+`/v1-evaluate` returns `approval_request_id` on hold and escalate decisions
+whenever it creates an approval request (every escalate, and approval-gated
+holds), but `evaluate()` dropped it, so a caller could not find the approval
+to wait on. `EvaluateResponse.approvalRequestId` now carries it; it is absent
+when the response has none. A person resolves the request in the AtlaSent
+console; the caller polls `GET /v1-approvals/{id}` and claims the single
+permit with `POST /v1-approvals/{id}/claim-permit` (the protocol
+atlasent-action and the MCP server already use). Added to
+`contract/schemas/evaluate-response.schema.json` and `contract/openapi.yaml`
+first. Distinct from `escalationId`, the HITL escalation.
+
 ### Fixed: per-permit methods address the `v1-permits` function
 
 Under the hosted functions root the first path segment is the function name,

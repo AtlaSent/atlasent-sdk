@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added: `EvaluateResult.approval_request_id` (additive, contract-conforming)
+
+Parsed from `/v1-evaluate`'s `approval_request_id`, present on hold and
+escalate decisions when the runtime created an approval request; `None`
+otherwise. Same field the TypeScript SDK now exposes as `approvalRequestId`,
+added to the contract schema and OpenAPI first.
+
 ### Added: `atlasent.gmail`, a send-time gate for the Gmail API (additive)
 
 The Python counterpart of `@atlasent/gmail` (atlasent-sdk#592), for agents

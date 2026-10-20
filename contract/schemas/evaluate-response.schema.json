@@ -157,6 +157,10 @@
       "type": "string",
       "description": "Present iff decision == 'hold'. ID of the HITL escalation auto-created by the control plane. Poll GET /v1/escalations/{id} for resolution."
     },
+    "approval_request_id": {
+      "type": "string",
+      "description": "Present on hold and escalate decisions when the runtime created an approval request (atlasent-api v1-evaluate: every escalate, and approval-gated holds). A person resolves it in the AtlaSent console; poll GET /v1-approvals/{id} and, once approved, claim the single permit with POST /v1-approvals/{id}/claim-permit. Distinct from escalation_id (the HITL escalation). Absent when no approval request was created."
+    },
     "human_approval_required": {
       "type": "boolean",
       "description": "Two-stage authorization lifecycle (atlasent-api #1617). Whether this evaluation requires a verified human approval, independent of whether that requirement is currently satisfied — see `human_approval_status`. Absent on responses from a runtime predating this mechanism; SDKs MUST treat absence as unknown, never as false."

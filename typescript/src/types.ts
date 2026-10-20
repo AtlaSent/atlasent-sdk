@@ -671,6 +671,14 @@ export interface EvaluateResponse {
    */
   escalationId?: string;
   /**
+   * ID of the approval request the runtime created for a `hold` or
+   * `escalate` decision. A person resolves it in the AtlaSent console; poll
+   * `GET /v1-approvals/{id}` and, once approved, claim the single permit with
+   * `POST /v1-approvals/{id}/claim-permit`. Absent when no approval request
+   * was created. Distinct from {@link escalationId}.
+   */
+  approvalRequestId?: string;
+  /**
    * Two-stage authorization lifecycle (#1617): whether this evaluation
    * REQUIRES a verified human approval, independent of whether that
    * requirement is currently satisfied — see {@link humanApprovalStatus}
