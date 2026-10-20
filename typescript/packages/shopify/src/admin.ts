@@ -111,8 +111,18 @@ export function toOrderGid(orderId: string): string {
   throw new ShopifyAdminError(`not a Shopify order id: ${JSON.stringify(orderId)}`);
 }
 
+/** Longest input accepted; a myshopify.com domain is far shorter. */
+const MAX_SHOP_INPUT = 255;
+
 export function normalizeShopDomain(shop: string): string {
-  const s = shop.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  if (shop.length > MAX_SHOP_INPUT) throw new ShopifyAdminError("shop domain too long");
+  let s = shop.trim().toLowerCase();
+  if (s.startsWith("https://")) s = s.slice(8);
+  else if (s.startsWith("http://")) s = s.slice(7);
+  // Strip trailing slashes without a backtracking regex (CodeQL js/polynomial-redos).
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  s = s.slice(0, end);
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(s)) {
     throw new ShopifyAdminError(`not a myshopify.com domain: ${JSON.stringify(shop)}`);
   }
