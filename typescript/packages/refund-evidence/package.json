@@ -13,7 +13,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "demo": "tsx src/demo.ts",
-    "report": "tsx src/report-cli.ts"
+    "report": "tsx src/report-cli.ts",
+    "preflight": "tsx src/preflight.ts"
   },
   "repository": {
     "type": "git",

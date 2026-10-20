@@ -26,3 +26,16 @@ export {
 } from "./report.js";
 export { runDemo, type DemoOptions, type DemoResult } from "./demo.js";
 export { createSimulatedRuntime, simulatedRuntime, type SimulatedRuntime } from "./sim.js";
+export {
+  checkAtlaSent,
+  checkShopify,
+  checkStripe,
+  formatChecks,
+  POLICY_PROBES,
+  ESCALATION_PROBE,
+  REQUIRED_ATLASENT_SCOPES,
+  REQUIRED_SHOPIFY_SCOPES,
+  type Check,
+  type CheckStatus,
+  type PolicyProbe,
+} from "./preflight.js";

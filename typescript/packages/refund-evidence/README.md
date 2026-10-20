@@ -1,6 +1,6 @@
 # @atlasent/refund-evidence — evidence report and three-system demo
 
-This package does two things for the refund gate demos:
+This package does three things for the refund gate demos:
 
 - **The evidence report** a finance reader opens: every refund decision in a
   period, the rule that decided it, and every refund made around the gate. It
@@ -9,6 +9,9 @@ This package does two things for the refund gate demos:
   Shopify gate, the support agent's refund tool and the Stripe gate. A
   manager then approves one escalation and declines the other. Two refunds
   are made around the gate, and the demo produces the report.
+- **A pre-flight check**, `npm run preflight`, for the first live run: are the
+  Shopify dev store, the Stripe test key and the AtlaSent test org set up the
+  way the gates need?
 
 `private: true`. This package is a demo and is not published to npm.
 
@@ -58,6 +61,35 @@ The agent path calls the agent's `issue_refund` tool directly, which is the
 same code the Claude support agent runs. The model itself is not called. To
 talk to the real agent, use `npm run agent` in `@atlasent/shopify`.
 
+## Before the first live run
+
+```sh
+export ATLASENT_API_KEY=... ATLASENT_ENVIRONMENT=test
+export SHOPIFY_SHOP=pinecone-demo.myshopify.com SHOPIFY_ADMIN_TOKEN=...   # optional
+export STRIPE_SECRET_KEY=rk_test_...                                       # optional
+npm run preflight                                    # 1. read-only
+npm run preflight -- --probe-policy                  # 2. AtlaSent decides 3 sample refunds
+npm run preflight -- --probe-policy --probe-escalation   # 3. and a $72 one
+```
+
+Each item reports PASS, FAIL or `--` (not checked), and the exit code is 1
+on any failure.
+
+| System | Checked | Not checkable from here |
+|---|---|---|
+| AtlaSent | key accepted; key is a `test` key; scopes `evaluate:write` + `verify:execute`; expiry | whether the key may claim an approved permit |
+| AtlaSent, `--probe-policy` | allow under $50; deny not delivered; deny past 30 days. Each failure names the likely cause: no bundle, or an action class that routes everything to approval | |
+| AtlaSent, `--probe-escalation` | $72 escalates **and** the runtime returns an approval request id, without which nothing can be resumed | |
+| Shopify | token accepted; Partner development store; `read_orders`/`write_orders` | whether staff can still refund in the admin |
+| Stripe | test-mode key (a live key is refused before any call); restricted, not full secret; can read PaymentIntents | refund write access; whether any other key or role can refund |
+
+**What it changes.** Step 1 changes nothing. Steps 2 and 3 are real
+evaluations, so each writes an audit entry. The allowed probe mints a permit
+that is never used and expires. Step 3 opens an approval request a manager
+will see: decline it. No step creates a refund or verifies a permit, and no
+credential is printed. The key and org ids it shows are the ones
+`/v1-api-key-self` returns for operator dashboards.
+
 ## Use the report with real gates
 
 Both gates take an `onDecision` callback. It is called once per decision,
@@ -100,7 +132,7 @@ dropped.
 npm ci && npm run typecheck && npm test
 ```
 
-The 20 tests cover:
+The 36 tests cover:
 
 - the summary, the period filter and per-currency totals;
 - the simulated banner, present only when it applies;
@@ -108,10 +140,11 @@ The 20 tests cover:
 - log parsing, with rejected lines reported;
 - manager-approved and manager-declined rows, their labels and approval
   references, and records written before approvals existed;
+- the pre-flight checks, each pass and each failure, over fakes;
 - the whole demo end to end, including that no permit token reaches the log
   or the report.
 
-The suite was checked against twelve specific defects, and each one made it
+The suite was checked against twenty specific defects, and each one made it
 fail:
 
 - dropping `<` escaping;
@@ -125,7 +158,15 @@ fail:
 - leaving `APPROVAL_*` codes unlabelled;
 - showing "not evaluated" for a resumed decision;
 - accepting a non-string approval request id;
-- the demo's manager approving nothing.
+- the demo's manager approving nothing;
+- pre-flight accepting a live AtlaSent key;
+- pre-flight not checking scopes;
+- pre-flight ignoring the deny code;
+- pre-flight passing an escalation with no approval request id;
+- pre-flight accepting a live Stripe key;
+- pre-flight not flagging a full secret key;
+- pre-flight accepting a non-development store;
+- pre-flight reporting ready despite a failure.
 
 One defect was tried and did **not** make it fail: the stand-in letting a
 permit be claimed for an approval that was not approved. The gates check the
