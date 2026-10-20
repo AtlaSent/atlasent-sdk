@@ -1,0 +1,66 @@
+name: Stripe CI
+
+# @atlasent/stripe (refund gate and refund.created webhook alarm).
+# typescript-ci.yml covers only the root package's test/**. The package links
+# the core SDK through `file:../../`, so core changes trigger this too and core
+# is built first.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "typescript/packages/stripe/**"
+      - "typescript/src/**"
+      - "typescript/package.json"
+      - "typescript/package-lock.json"
+      - ".github/workflows/stripe-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "typescript/packages/stripe/**"
+      - "typescript/src/**"
+      - "typescript/package.json"
+      - "typescript/package-lock.json"
+      - ".github/workflows/stripe-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ts-stripe:
+    name: "TS stripe / Node ${{ matrix.node-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20.x", "22.x"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: |
+            typescript/package-lock.json
+            typescript/packages/stripe/package-lock.json
+
+      - name: Build the core SDK the package links to
+        working-directory: typescript
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install dependencies
+        working-directory: typescript/packages/stripe
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: typescript/packages/stripe
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: typescript/packages/stripe
+        run: npm test
