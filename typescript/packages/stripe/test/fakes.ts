@@ -17,7 +17,6 @@ import type { CreateRefundInput, StripeApi, StripePaymentIntent, StripeRefund } 
 import type { DeliveryFacts } from "../src/facts.js";
 
 export const NOW = new Date("2026-10-20T12:00:00Z");
-const DAY = 86_400_000;
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 export interface RuntimeOptions {

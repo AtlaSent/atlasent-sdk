@@ -6,7 +6,9 @@
   "license": "Apache-2.0",
   "type": "module",
   "main": "./src/index.ts",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -19,7 +21,6 @@
     "directory": "typescript/packages/refund-evidence"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.136.0",
     "@atlasent/sdk": "file:../../",
     "@types/node": "^25.6.0",
     "tsx": "^4.20.0",

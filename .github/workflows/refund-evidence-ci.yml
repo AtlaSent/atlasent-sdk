@@ -11,7 +11,9 @@ on:
     paths:
       - "typescript/packages/refund-evidence/**"
       - "typescript/packages/shopify/src/**"
+      - "typescript/packages/shopify/package-lock.json"
       - "typescript/packages/stripe/src/**"
+      - "typescript/packages/stripe/package-lock.json"
       - "typescript/src/**"
       - "typescript/package.json"
       - "typescript/package-lock.json"
@@ -21,7 +23,9 @@ on:
     paths:
       - "typescript/packages/refund-evidence/**"
       - "typescript/packages/shopify/src/**"
+      - "typescript/packages/shopify/package-lock.json"
       - "typescript/packages/stripe/src/**"
+      - "typescript/packages/stripe/package-lock.json"
       - "typescript/src/**"
       - "typescript/package.json"
       - "typescript/package-lock.json"
@@ -50,12 +54,22 @@ jobs:
           cache-dependency-path: |
             typescript/package-lock.json
             typescript/packages/refund-evidence/package-lock.json
+            typescript/packages/shopify/package-lock.json
+            typescript/packages/stripe/package-lock.json
 
       - name: Build the core SDK the package links to
         working-directory: typescript
         run: |
           npm ci
           npm run build
+
+      # The demo imports the Shopify and Stripe gate sources, whose own type
+      # imports (e.g. @anthropic-ai/sdk in the agent) resolve from their
+      # packages' node_modules.
+      - name: Install the gate packages the demo imports
+        run: |
+          (cd typescript/packages/shopify && npm ci)
+          (cd typescript/packages/stripe && npm ci)
 
       - name: Install dependencies
         working-directory: typescript/packages/refund-evidence
