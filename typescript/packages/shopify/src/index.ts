@@ -5,6 +5,7 @@ export {
   ShopifyAdminError,
   DEFAULT_ADMIN_API_VERSION,
   type ShopifyAdmin,
+  type GetOrderOptions,
   type ShopifyOrder,
   type ShopifyFulfillment,
   type ShopifyTransaction,

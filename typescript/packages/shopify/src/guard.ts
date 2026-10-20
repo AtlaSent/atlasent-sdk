@@ -261,12 +261,23 @@ export async function guardedShopifyRefund(
     return { refunded: false, decision: "error", reason: `could not record the permit: ${errorText(err)}`, ...evidence };
   }
 
+  // From here on, every stop must cancel the ledger entry, or its gateRef
+  // (returned to the caller) could vouch for a refund made around the gate.
+  const abort = async (decision: RefundBlockReason, reason: string): Promise<RefundDenial> => {
+    try {
+      await options.ledger.recordAborted(gateRef, decision);
+    } catch (err) {
+      reason += `; the ledger entry could not be cancelled: ${errorText(err)}`;
+    }
+    return { refunded: false, decision, reason, ...evidence };
+  };
+
   // Time passed during evaluate/verify; the order must still carry this refund.
   let current: RefundFacts | null;
   try {
     current = await readFacts(shopify, orderGid, now());
   } catch (err) {
-    return { refunded: false, decision: "error", reason: `could not re-read the order: ${errorText(err)}`, ...evidence };
+    return abort("error", `could not re-read the order: ${errorText(err)}`);
   }
   if (
     current === null ||
@@ -275,7 +286,7 @@ export async function guardedShopifyRefund(
     current.currency !== facts.currency ||
     current.refundable_cents < amountCents
   ) {
-    return { refunded: false, decision: "order_changed", reason: "the order changed after the refund was authorized", ...evidence };
+    return abort("order_changed", "the order changed after the refund was authorized");
   }
 
   const input: RefundCreateInput = {
@@ -298,7 +309,9 @@ export async function guardedShopifyRefund(
   try {
     refund = await shopify.createRefund(input);
   } catch (err) {
-    return { refunded: false, decision: "error", reason: `refundCreate failed: ${errorText(err)}`, ...evidence };
+    // If Shopify did create the refund (e.g. a timeout after it committed),
+    // the cancelled entry makes the alarm flag it: the safe direction.
+    return abort("error", `refundCreate failed: ${errorText(err)}`);
   }
 
   let ledgerWarning: string | undefined;

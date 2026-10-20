@@ -27,6 +27,7 @@ export interface SupportAgentDeps {
   anthropic: Pick<Anthropic, "beta">;
   /** Authenticated by the store, never taken from the conversation. */
   customerEmail: string;
+  /** Must return the order WITH its email (`getOrder(id, { includeEmail: true })`); without one, every order is refused. */
   lookupOrder: (orderId: string) => Promise<ShopifyOrder | null>;
   /** guardedShopifyRefund bound to this agent's actor, ledger and shop. */
   refund: (request: RefundRequest) => Promise<RefundResult>;
@@ -78,7 +79,8 @@ const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
 ];
 
-const sameEmail = (a: string | null, b: string) => a !== null && a.trim().toLowerCase() === b.trim().toLowerCase();
+const sameEmail = (a: string | null | undefined, b: string) =>
+  typeof a === "string" && a.trim().length > 0 && a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** Runs one tool. Exported for tests. */
 export async function runSupportTool(

@@ -40,7 +40,7 @@ function deps(claude: Pick<Anthropic, "beta">, customerEmail = "robin@example.co
     anthropic: claude,
     customerEmail,
     now: () => NOW,
-    lookupOrder: (id) => shopify.getOrder(id.startsWith("gid://") ? id : `gid://shopify/Order/${id}`),
+    lookupOrder: (id) => shopify.getOrder(id.startsWith("gid://") ? id : `gid://shopify/Order/${id}`, { includeEmail: true }),
     refund: (req) =>
       guardedShopifyRefund(shopify, runtime.client, req, {
         actor: "agent:pinecone-support",
@@ -126,5 +126,13 @@ describe("runSupportTool", () => {
     expect((await runSupportTool("issue_refund", { order_id: "1001", amount: "lots" }, d, [])).isError).toBe(true);
     expect((await runSupportTool("issue_refund", { order_id: "" }, d, [])).isError).toBe(true);
     expect((await runSupportTool("delete_store", { order_id: "1001" }, d, [])).isError).toBe(true);
+  });
+
+  it("an order read without its email is refused (ownership cannot be checked)", async () => {
+    const d = deps(scriptedClaude([]).client);
+    const noEmail = { ...d, lookupOrder: (id: string) => d.shopify.getOrder(`gid://shopify/Order/${id}`) };
+    const out = await runSupportTool("issue_refund", { order_id: "1001", amount: "5.00", reason: "x" }, noEmail, []);
+    expect(out.isError).toBe(true);
+    expect(d.shopify.refunds).toHaveLength(0);
   });
 });

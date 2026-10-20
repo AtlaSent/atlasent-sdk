@@ -46,7 +46,7 @@ for (;;) {
     {
       anthropic: new Anthropic(),
       customerEmail,
-      lookupOrder: (id) => shopify.getOrder(id),
+      lookupOrder: (id) => shopify.getOrder(id, { includeEmail: true }),
       refund: (req) => guardedShopifyRefund(shopify, atlasent, req, { actor: "agent:pinecone-support", environment, ledger, shop }),
     },
     history,

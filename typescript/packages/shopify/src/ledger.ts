@@ -28,11 +28,15 @@ export interface LedgerEntry {
   refund_id?: string;
   /** Set when a webhook delivery has been matched to this entry. */
   matched_refund_id?: string;
+  /** Set when the gate stopped after recording, so the entry can never vouch for a refund. */
+  aborted_reason?: string;
 }
 
 export interface PermitLedger {
   recordAuthorized(entry: LedgerEntry): Promise<void>;
   recordExecuted(gateRef: string, refundId: string): Promise<void>;
+  /** The refund was recorded but not issued by the gate. */
+  recordAborted(gateRef: string, reason: string): Promise<void>;
   get(gateRef: string): Promise<LedgerEntry | undefined>;
   /** Marks the entry as accounting for `refundId`. False if already used by another refund. */
   claim(gateRef: string, refundId: string): Promise<boolean>;
@@ -51,6 +55,13 @@ export class InMemoryLedger implements PermitLedger {
     const e = this.entries.get(gateRef);
     if (!e) throw new Error(`no ledger entry ${gateRef}`);
     e.refund_id = refundId;
+    this.persist();
+  }
+
+  async recordAborted(gateRef: string, reason: string): Promise<void> {
+    const e = this.entries.get(gateRef);
+    if (!e) throw new Error(`no ledger entry ${gateRef}`);
+    e.aborted_reason = reason;
     this.persist();
   }
 

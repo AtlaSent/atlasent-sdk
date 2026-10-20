@@ -72,4 +72,25 @@ describe("auditRefundWebhook", () => {
     const v = await auditRefundWebhook(payload({ id: 999 }), ledger);
     expect(v).toMatchObject({ verdict: "unauthorized", reason: expect.stringMatching(/already accounts/) });
   });
+
+  it("a PENDING refund transaction (asynchronous gateway) still matches", async () => {
+    const ledger = new InMemoryLedger();
+    await ledger.recordAuthorized(entry());
+    const v = await auditRefundWebhook(payload({ transactions: [{ kind: "refund", status: "pending", amount: "18.99" }] }), ledger);
+    expect(v.verdict).toBe("authorized");
+  });
+
+  it("a FAILED refund transaction does not count toward the amount", async () => {
+    const ledger = new InMemoryLedger();
+    await ledger.recordAuthorized(entry());
+    const v = await auditRefundWebhook(payload({ transactions: [{ kind: "refund", status: "failure", amount: "18.99" }] }), ledger);
+    expect(v.verdict).toBe("unauthorized");
+  });
+
+  it("an entry the gate cancelled vouches for nothing", async () => {
+    const ledger = new InMemoryLedger();
+    await ledger.recordAuthorized(entry());
+    await ledger.recordAborted("ref-1", "order_changed");
+    expect(await auditRefundWebhook(payload(), ledger)).toMatchObject({ verdict: "unauthorized", reason: expect.stringMatching(/stopped/) });
+  });
 });

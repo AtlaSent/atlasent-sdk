@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { computeRefundDigest, FINANCE_PAYMENT_AUTHORIZE, guardedShopifyRefund, type RefundGuardOptions } from "../src/guard.js";
-import { InMemoryLedger, type LedgerEntry } from "../src/ledger.js";
+import { InMemoryLedger, refundNote, type LedgerEntry } from "../src/ledger.js";
+import { auditRefundWebhook } from "../src/webhook.js";
 import { demoOrders, FakeShopify, fakeRuntime, makeOrder, NOW, type RuntimeOptions } from "./fakes.js";
 
 const SHOP = "pinecone-pet-supply.myshopify.com";
@@ -180,5 +181,53 @@ describe("fails closed", () => {
     const r = await s.refund("1001", 1899);
     expect(r.refunded).toBe(true);
     expect(r.refunded && r.ledgerWarning).toMatch(/ledger did not record/);
+  });
+});
+
+describe("protected customer data", () => {
+  it("the gate never reads the customer email", async () => {
+    const s = setup();
+    expect((await s.refund("1001", 1899)).refunded).toBe(true);
+    expect(s.shopify.reads).toBeGreaterThan(0);
+    expect(s.shopify.emailReads).toBe(0);
+  });
+});
+
+describe("a stop after the permit is recorded cancels the ledger entry", () => {
+  const copiedNote = (gateRef: string) => ({
+    id: 4242,
+    order_id: 1001,
+    note: refundNote(gateRef),
+    transactions: [{ kind: "refund", status: "success", amount: "18.99" }],
+  });
+
+  it("refundCreate failure: a staff refund copying the gateRef is still flagged", async () => {
+    const s = setup();
+    s.shopify.failRefund = true;
+    const r = await s.refund("1001", 1899);
+    expect(r.refunded).toBe(false);
+    expect((await s.ledger.get(r.gateRef))?.aborted_reason).toBe("error");
+    const v = await auditRefundWebhook(copiedNote(r.gateRef), s.ledger);
+    expect(v).toMatchObject({ verdict: "unauthorized", reason: expect.stringMatching(/stopped this refund/) });
+  });
+
+  it("order changed: the entry is cancelled too", async () => {
+    const s = setup();
+    s.shopify.onRead = (n, fake) => {
+      if (n === 1) fake.orders.get("gid://shopify/Order/1001")!.cancelledAt = NOW.toISOString();
+    };
+    const r = await s.refund("1001", 1899);
+    expect(r).toMatchObject({ refunded: false, decision: "order_changed" });
+    expect((await auditRefundWebhook(copiedNote(r.gateRef), s.ledger)).verdict).toBe("unauthorized");
+  });
+
+  it("a ledger that cannot cancel says so in the reason", async () => {
+    const s = setup();
+    s.shopify.failRefund = true;
+    s.ledger.recordAborted = async () => {
+      throw new Error("disk full");
+    };
+    const r = await s.refund("1001", 1899);
+    expect(!r.refunded && r.reason).toMatch(/could not be cancelled/);
   });
 });

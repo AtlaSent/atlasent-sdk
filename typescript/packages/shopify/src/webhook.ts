@@ -41,7 +41,9 @@ const numericId = (id: string | number) => String(id).replace(/^gid:\/\/shopify\
 function refundedCents(payload: RefundWebhookPayload): number | null {
   try {
     return (payload.transactions ?? [])
-      .filter((t) => t.kind?.toLowerCase() === "refund" && t.status?.toLowerCase() === "success")
+      // PENDING counts: on asynchronous gateways refunds/create arrives before
+      // settlement, and no second delivery follows when it settles.
+      .filter((t) => t.kind?.toLowerCase() === "refund" && ["success", "pending"].includes(t.status?.toLowerCase() ?? ""))
       .reduce((n, t) => n + moneyToCents(String(t.amount)), 0);
   } catch {
     return null;
@@ -65,6 +67,9 @@ export async function auditRefundWebhook(payload: RefundWebhookPayload, ledger: 
   if (gateRef === undefined) return unauthorized("the refund note carries no AtlaSent gate reference");
   const entry = await ledger.get(gateRef);
   if (entry === undefined) return unauthorized("the gate reference in the note is not in the permit ledger", gateRef);
+  if (entry.aborted_reason !== undefined) {
+    return unauthorized(`the gate stopped this refund before issuing it (${entry.aborted_reason})`, gateRef);
+  }
   if (numericId(entry.order_id) !== orderId) return unauthorized("the permit was for a different order", gateRef);
   if (amountCents === null || amountCents !== entry.amount_cents) {
     return unauthorized(`the permit was for ${entry.amount_cents} cents, the refund was ${amountCents ?? "unreadable"}`, gateRef);

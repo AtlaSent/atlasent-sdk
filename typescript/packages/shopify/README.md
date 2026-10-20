@@ -7,7 +7,7 @@ manager, and every refund is checked against the permits the gate issued.
 
 `private: true`. This package is a demo and is not published to npm.
 
-> **Status:** 80 unit tests over fakes of Shopify and the AtlaSent runtime.
+> **Status:** 96 unit tests over fakes of Shopify and the AtlaSent runtime.
 > **Nothing here has been run against a live Shopify store or a live
 > AtlaSent org yet.** The Shopify field names, mutations, token exchange and
 > extension API follow Shopify's documented shapes as best known; check them
@@ -90,6 +90,12 @@ alarm **detects**, it does not prevent:
   - the order and amount match;
   - no other refund has already used that ledger entry.
 
+  If the gate recorded a permit and then stopped (the order changed, or
+  `refundCreate` failed), it cancels the ledger entry. The `gateRef` it
+  returned can then never vouch for a refund made some other way.
+  Refund transactions count when `SUCCESS` or `PENDING`, because
+  asynchronous gateways send `refunds/create` before settlement.
+
   Anything else is `unauthorized` and goes to `onUnauthorizedRefund`, which
   the demo logs. In a real deployment, wire it to Slack, PagerDuty or email.
   A staff member copying a note onto another refund is flagged too.
@@ -115,6 +121,11 @@ test account that a restricted staff member cannot refund.
    a single-store token has changed more than once.
 4. Scopes: `read_orders` and `write_orders` for refunds. The seed script also
    needs fulfillment write scopes (e.g. `write_merchant_managed_fulfillment_orders`).
+5. The gate never reads customer email, so it needs no protected-customer-data
+   approval. The support agent (D) does read email, to check order ownership,
+   and Shopify gates that field separately. Without the approval, Shopify
+   returns an error for the agent's order reads and the agent refuses every
+   order. That is the safe failure, but get the approval if you run D.
 
 ### 2. AtlaSent org
 
@@ -162,7 +173,10 @@ Expose port 3000 at the app's `application_url` (for example with the
 Shopify CLI tunnel), then `shopify app deploy`.
 
 The backend handles the routes below. Admin API access comes from Shopify
-token exchange, or from `SHOPIFY_ADMIN_TOKEN` if set:
+token exchange, or from `SHOPIFY_ADMIN_TOKEN` if set. Token exchange requests
+an expiring offline token and is cached only until shortly before it expires.
+Each request carries a fresh session token, so an expired token is simply
+exchanged again; no refresh token is stored.
 
 | Route | Auth | Does |
 |---|---|---|
@@ -189,7 +203,7 @@ npm ci && npm run typecheck && npm test
 
 The suite drives the real `AtlaSentClient` against a fake runtime that
 applies the demo policy and permit binding, and uses an in-memory fake
-Shopify. It was checked against ten specific defects, and each one made it
+Shopify. It was checked against sixteen specific defects, and each one made it
 fail:
 
 - skipping the `consumed` check;
@@ -201,7 +215,13 @@ fail:
 - the agent ignoring order ownership;
 - counting `DELIVERED` without a date as delivered;
 - skipping the shop allowlist;
-- skipping the refundable pre-check.
+- skipping the refundable pre-check;
+- not cancelling the ledger entry after a stop, and the webhook ignoring a
+  cancelled entry;
+- not counting `PENDING` refund transactions;
+- reading the customer email on every order read;
+- caching an expiring token past its expiry, and not requesting an expiring
+  token.
 
 ## What has not been verified
 
@@ -217,3 +237,5 @@ fail:
   an escalation.
 - Multi-payment orders: refunds go against the first successful payment.
 - Whether `refundCreate` on your API version requires an idempotency key.
+- The `expiring: "1"` token-exchange parameter and `expires_in` handling,
+  against Shopify's current access-token docs.

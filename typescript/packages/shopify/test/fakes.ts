@@ -14,7 +14,7 @@
 
 import { createHash } from "node:crypto";
 import { AtlaSentClient } from "@atlasent/sdk";
-import type { CreatedRefund, RefundCreateInput, ShopifyAdmin, ShopifyOrder } from "../src/admin.js";
+import type { CreatedRefund, GetOrderOptions, RefundCreateInput, ShopifyAdmin, ShopifyOrder } from "../src/admin.js";
 
 export const NOW = new Date("2026-10-20T12:00:00Z");
 const DAY = 86_400_000;
@@ -146,11 +146,16 @@ export class FakeShopify implements ShopifyAdmin {
     for (const o of orders) this.orders.set(o.id, o);
   }
 
-  async getOrder(orderId: string): Promise<ShopifyOrder | null> {
+  emailReads = 0;
+
+  async getOrder(orderId: string, options?: GetOrderOptions): Promise<ShopifyOrder | null> {
     if (this.failGet) throw new Error("Shopify Admin API HTTP 503");
     const o = this.orders.get(orderId) ?? null;
     this.reads++;
     const snapshot = o ? (JSON.parse(JSON.stringify(o)) as ShopifyOrder) : null;
+    // Like the real query: email is only present when asked for.
+    if (snapshot && options?.includeEmail === true) this.emailReads++;
+    else if (snapshot) delete snapshot.email;
     this.onRead?.(this.reads, this);
     return snapshot;
   }

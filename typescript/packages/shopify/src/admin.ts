@@ -33,7 +33,8 @@ export interface ShopifyTransaction {
 export interface ShopifyOrder {
   id: string;
   name: string;
-  email: string | null;
+  /** Only read when asked for (`includeEmail`): it is protected customer data. */
+  email?: string | null;
   currencyCode: string;
   cancelledAt: string | null;
   fulfillments: ShopifyFulfillment[];
@@ -61,9 +62,18 @@ export interface CreatedRefund {
   totalRefunded: ShopifyMoney | null;
 }
 
+export interface GetOrderOptions {
+  /**
+   * Also read the customer email. Email is protected customer data: an app
+   * without that approval gets a GraphQL error for the whole read, so only
+   * the support agent's ownership check asks for it. The gate never does.
+   */
+  includeEmail?: boolean;
+}
+
 /** What the guard needs from Shopify. Tests substitute a fake. */
 export interface ShopifyAdmin {
-  getOrder(orderId: string): Promise<ShopifyOrder | null>;
+  getOrder(orderId: string, options?: GetOrderOptions): Promise<ShopifyOrder | null>;
   createRefund(input: RefundCreateInput): Promise<CreatedRefund>;
 }
 
@@ -71,11 +81,10 @@ export class ShopifyAdminError extends Error {
   override name = "ShopifyAdminError";
 }
 
-const ORDER_QUERY = `query AtlaSentRefundFacts($id: ID!) {
+const orderQuery = (includeEmail: boolean) => `query AtlaSentRefundFacts($id: ID!) {
   order(id: $id) {
     id
-    name
-    email
+    name${includeEmail ? "\n    email" : ""}
     currencyCode
     cancelledAt
     fulfillments(first: 50) { id status displayStatus deliveredAt }
@@ -150,8 +159,8 @@ export function createAdminClient(opts: AdminClientOptions): ShopifyAdmin {
   }
 
   return {
-    async getOrder(orderId) {
-      const data = await graphql<{ order: ShopifyOrder | null }>(ORDER_QUERY, { id: toOrderGid(orderId) });
+    async getOrder(orderId, options) {
+      const data = await graphql<{ order: ShopifyOrder | null }>(orderQuery(options?.includeEmail === true), { id: toOrderGid(orderId) });
       return data.order;
     },
     async createRefund(input) {
