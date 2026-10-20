@@ -11,7 +11,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "refund": "tsx src/cli.ts",
-    "webhook": "tsx src/webhook-server.ts"
+    "webhook": "tsx src/webhook-server.ts",
+    "seed-test-payments": "tsx src/seed.ts"
   },
   "repository": {
     "type": "git",

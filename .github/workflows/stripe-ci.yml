@@ -64,3 +64,7 @@ jobs:
       - name: Test
         working-directory: typescript/packages/stripe
         run: npm test
+
+      - name: Seed script dry run
+        working-directory: typescript/packages/stripe
+        run: npm run seed-test-payments -- --dry-run

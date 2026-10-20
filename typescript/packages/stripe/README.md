@@ -8,7 +8,7 @@ gate issued.
 
 `private: true`. This package is a demo and is not published to npm.
 
-> **Status:** 78 unit tests over fakes of Stripe and the AtlaSent runtime.
+> **Status:** 83 unit tests over fakes of Stripe and the AtlaSent runtime.
 > **Nothing here has been run against a live Stripe account or a live
 > AtlaSent org yet.** See [What has not been verified](#what-has-not-been-verified).
 >
@@ -145,6 +145,43 @@ The CLI refuses live-mode keys (`sk_live_`, `rk_live_`). Forward webhooks
 locally with `stripe listen --forward-to localhost:3001/webhooks/stripe`, and
 subscribe a deployed endpoint to `refund.created`. The AtlaSent org needs the
 same bundle and key scopes as the Shopify demo.
+
+## First live run, step by step (test mode)
+
+You need three keys, kept apart on purpose:
+
+| Key | Used by | Needs |
+|---|---|---|
+| `STRIPE_SETUP_KEY`, a test secret key `sk_test_...` | the seed script only | creating PaymentIntents |
+| `STRIPE_SECRET_KEY`, a **restricted** test key `rk_test_...` | the gate | read PaymentIntents and Charges, write Refunds |
+| `ATLASENT_API_KEY`, a test key | the gate | `evaluate:write`, `verify:execute` |
+
+1. **Load the policy** onto the AtlaSent test org's `finance.payment.authorize`
+   bundle (atlasent-api `examples/fake-store-refunds/policy.json`), active for
+   your `ATLASENT_ENVIRONMENT`.
+2. **Pre-flight**, from `@atlasent/refund-evidence`:
+   `npm run preflight -- --probe-policy --probe-escalation`. Decline the $72
+   probe's approval request in the console.
+3. **Seed five test payments:**
+   `STRIPE_SETUP_KEY=sk_test_... STRIPE_SEED_CONFIRM=test-mode npm run seed-test-payments`.
+   It writes `stripe-demo/delivery.json` (the stand-in order system) and
+   prints one refund command per scenario. `--dry-run` shows the plan
+   without calling Stripe. A re-run on the same day returns the same
+   payments (idempotency keys); set `STRIPE_SEED_RUN_ID` for a fresh set.
+4. **Run the five refunds** with the gate's restricted key:
+   - $18.99 refunds;
+   - $72 and $85 escalate, and each prints an `approvalRequestId`;
+   - not-delivered and past-30-days are denied.
+5. **Decide in the AtlaSent console:** approve the $72 request, decline the
+   $85 one. Then run `npm run refund -- resume --approval <id>` for each. The
+   $72 refunds; the $85 is closed as `APPROVAL_DENIED`.
+6. **Bypass:** refund the $85 payment in the Stripe Dashboard. With
+   `npm run webhook` running behind `stripe listen --forward-to
+   localhost:3001/webhooks/stripe`, the alarm flags it, while the two gated
+   refunds match their permits.
+
+Record what each step actually returned. Any step that differs from the list
+above is a finding, not a demo to re-run until it passes.
 
 ## Evidence log
 
