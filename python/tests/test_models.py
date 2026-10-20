@@ -135,7 +135,10 @@ class TestEvaluateResult:
             {"decision": "escalate", "approval_request_id": "apr_123"}
         )
         assert result.approval_request_id == "apr_123"
-        assert EvaluateResult.model_validate({"decision": "allow", "permit_token": "pt"}).approval_request_id is None
+        absent = EvaluateResult.model_validate(
+            {"decision": "allow", "permit_token": "pt"}
+        )
+        assert absent.approval_request_id is None
 
     def test_human_approval_fields_none_when_absent(self):
         """Backward compat: a runtime response predating the lifecycle
