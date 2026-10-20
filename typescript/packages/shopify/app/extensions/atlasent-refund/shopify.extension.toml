@@ -1,0 +1,11 @@
+# "Refund via AtlaSent" on the order details page (More actions menu).
+api_version = "2025-07"
+
+[[extensions]]
+name = "Refund via AtlaSent"
+handle = "atlasent-refund"
+type = "ui_extension"
+
+  [[extensions.targeting]]
+  module = "./src/ActionExtension.jsx"
+  target = "admin.order-details.action.render"
