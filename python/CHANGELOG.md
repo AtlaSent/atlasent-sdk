@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Added: `atlasent.gmail`, a send-time gate for the Gmail API (additive)
+
+The Python counterpart of `@atlasent/gmail` (atlasent-sdk#592), for agents
+built on Python frameworks. `guarded_gmail_send` and `guarded_gmail_send_draft`
+gate `users().messages().send` / `users().drafts().send` on a
+`googleapiclient` Gmail service as `communication.external.send`. Gmail is
+called only after evaluate allowed the send and verify confirmed **and
+consumed** the permit.
+
+- The guard snapshots `userId`, the base64url `raw` message and `threadId`,
+  hashes them, and sends the digest as top-level `execution_payload_hash`
+  (signed into the permit and re-presented at verify) and `resource_id`
+  (folded into the `action_hash` a human approval signs). An approval or a
+  permit for one message cannot send another, and Gmail receives a request
+  built from the snapshot, not the caller's mapping.
+- `request_gmail_send_approval` / `request_gmail_send_draft_approval` return
+  the runtime's `signing_hint` for exactly that message (ADR-055 two-step).
+  `context.approvals` is 1 only when an `approval_artifact` is attached.
+- Drafts are read with `format="raw"` to bind them and read again just before
+  sending; a change in between refuses the send (`content_changed`).
+- Refused before evaluate (`invalid_request`): no `userId`, no `raw`, a media
+  upload, `drafts().send` with replacement content, and a client with an
+  evaluate cache (it would replay a permit minted for another message).
+- `compute_gmail_send_digest` and `compute_external_send_target_id` produce
+  the same values as the TypeScript functions; both suites pin shared vectors.
+- No new dependency: the Gmail service is duck-typed, and the module never
+  touches Google credentials. Sync only. Never exercised against a live Gmail
+  account.
+
+
 ### Added: `AtlaSentDenied.signing_hint` (additive)
 
 Parity with the TypeScript SDK's `EvaluateResponse.signingHint`

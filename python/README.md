@@ -187,6 +187,44 @@ pre-`protect()` `gate()` + `GateResult` idiom. See
 [`examples/fastapi_integration.py`](./examples/fastapi_integration.py)
 and [`examples/flask_integration.py`](./examples/flask_integration.py).
 
+### Gmail send guard
+
+`atlasent.gmail` gates `users().messages().send` and `users().drafts().send`
+on a `googleapiclient` Gmail service (`communication.external.send`). Gmail is
+called only after AtlaSent allowed the send and verified and consumed the
+permit. The permit and any human approval are bound to the exact message:
+`userId`, the base64url `raw` RFC 2822 message and `threadId`. The approval is
+two steps (ADR-055):
+
+```python
+from atlasent import AtlaSentClient
+from atlasent.gmail import GmailExternalSendFacts, guarded_gmail_send, request_gmail_send_approval
+
+atlasent = AtlaSentClient(api_key="ask_live_...")  # no evaluate cache
+request = {"userId": "me", "body": {"raw": encoded_mime_message}}
+facts = GmailExternalSendFacts(recipient="newcustomer@example.com", recipient_known=False, sensitive_attachment=False)
+
+approval = request_gmail_send_approval(atlasent, request, facts, agent="agent:outreach")
+# A person reviews the message and signs approval.signing_hint.bind.action_hash
+# into an approval_artifact.v1.
+result = guarded_gmail_send(gmail, atlasent, request, facts, agent="agent:outreach",
+                            approval_artifact=signed_artifact)
+if not result.sent:
+    print("blocked:", result.decision, result.reason)
+```
+
+Gmail is sent a request built from that snapshot, never your mapping, so
+changing the mapping during authorization changes nothing that is sent.
+For a draft, the guard reads it (`format="raw"`) to bind it and again just
+before `drafts().send`. A draft edited in between is not sent
+(`content_changed`). A media upload, a request without `raw`, `drafts().send`
+with replacement content, and a client with an evaluate cache are refused.
+The message digest is identical to `@atlasent/gmail`'s.
+
+Not covered: the classification facts are your assertions (the guard does not
+parse MIME), and an agent holding a `gmail.send` credential or a raw Gmail tool
+can send without the guard. No test here uses a live Gmail account.
+
 ## configure()
 
 ```python
