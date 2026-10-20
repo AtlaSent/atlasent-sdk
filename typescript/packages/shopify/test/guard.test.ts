@@ -231,3 +231,48 @@ describe("a stop after the permit is recorded cancels the ledger entry", () => {
     expect(!r.refunded && r.reason).toMatch(/could not be cancelled/);
   });
 });
+
+describe("onDecision (evidence log)", () => {
+  it("records every decision, refunded or not, with Shopify-derived facts", async () => {
+    const records: import("../src/decision-record.js").RefundDecisionRecord[] = [];
+    const runtime = fakeRuntime();
+    const shopify = new FakeShopify(demoOrders());
+    const options = { actor: "shopify-staff:test/1", environment: "test", ledger: new InMemoryLedger(), shop: SHOP, now: () => NOW, onDecision: (r: (typeof records)[number]) => void records.push(r) };
+    const ok = await guardedShopifyRefund(shopify, runtime.client, { orderId: "1001", amountCents: 1899 }, options);
+    await guardedShopifyRefund(shopify, runtime.client, { orderId: "1002", amountCents: 7200 }, options);
+    await guardedShopifyRefund(shopify, runtime.client, { orderId: "1003", amountCents: 1200 }, options);
+    await guardedShopifyRefund(shopify, runtime.client, { orderId: "1001", amountCents: 0.5 }, options);
+    expect(records.map((r) => [r.outcome, r.deny_code])).toEqual([
+      ["refunded", null],
+      ["escalated", "MANAGER_APPROVAL_REQUIRED"],
+      ["denied", "ORDER_NOT_DELIVERED"],
+      ["refused", null],
+    ]);
+    expect(records[0]).toMatchObject({
+      schema: "atlasent.refund_decision.v1",
+      system: "shopify",
+      gate_ref: ok.gateRef,
+      target: "gid://shopify/Order/1001",
+      order_ref: "#PPS-1001",
+      amount_cents: 1899,
+      currency: "USD",
+      order_status: "delivered",
+      days_since_delivery: 5,
+      refund_id: ok.refunded ? ok.refund.id : "x",
+    });
+    expect(records[0]!.audit_hash).toMatch(/^audit-/);
+    expect(records[3]!.amount_cents).toBeNull();
+    expect(JSON.stringify(records)).not.toContain("pt.v3");
+  });
+
+  it("a failing log never changes the outcome, and says so", async () => {
+    const s = setup();
+    const r = await guardedShopifyRefund(s.shopify, s.runtime.client, { orderId: "1001", amountCents: 1899 }, {
+      actor: "a", environment: "test", ledger: s.ledger, shop: SHOP, now: () => NOW,
+      onDecision: () => { throw new Error("disk full"); },
+    });
+    expect(r.refunded).toBe(true);
+    expect(r.logWarning).toMatch(/not logged: disk full/);
+    expect(s.shopify.refunds).toHaveLength(1);
+  });
+});

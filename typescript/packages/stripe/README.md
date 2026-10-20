@@ -8,7 +8,7 @@ gate issued.
 
 `private: true`. This package is a demo and is not published to npm.
 
-> **Status:** 58 unit tests over fakes of Stripe and the AtlaSent runtime.
+> **Status:** 59 unit tests over fakes of Stripe and the AtlaSent runtime.
 > **Nothing here has been run against a live Stripe account or a live
 > AtlaSent org yet.** See [What has not been verified](#what-has-not-been-verified).
 >
@@ -111,6 +111,13 @@ The CLI refuses live-mode keys (`sk_live_`, `rk_live_`). Forward webhooks
 locally with `stripe listen --forward-to localhost:3001/webhooks/stripe`, and
 subscribe a deployed endpoint to `refund.created`. The AtlaSent org needs the
 same bundle and key scopes as the Shopify demo.
+
+## Evidence log
+
+Pass `onDecision` to the gate to receive one `atlasent.refund_decision.v1`
+record per decision, refunded or not. If the callback fails, the result
+carries `logWarning`; the outcome never changes. The report and the
+three-system demo that read these records are in `@atlasent/refund-evidence`.
 
 ## Tests
 

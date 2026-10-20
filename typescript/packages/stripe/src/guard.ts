@@ -27,6 +27,7 @@ import type { AtlaSentClient, EvaluateResponse, VerifyPermitResponse } from "@at
 import { assertPaymentIntentId, type StripeApi, type StripeRefund } from "./stripe.js";
 import { centsToMoney, deriveStripeRefundFacts, SUPPORTED_CURRENCY, type DeliveryFactsSource, type StripeRefundFacts } from "./facts.js";
 import type { PermitLedger } from "./ledger.js";
+import { outcomeOf, REFUND_DECISION_SCHEMA, type RefundDecisionRecord } from "./decision-record.js";
 
 /** ACT-0024 canonical action: releasing a payment, refund or payout. */
 export const FINANCE_PAYMENT_AUTHORIZE = "finance.payment.authorize" as const;
@@ -58,6 +59,8 @@ export interface StripeRefundGuardOptions {
   /** PaymentIntent metadata key holding the order reference. Default `order_id`. */
   orderRefKey?: string;
   now?: () => Date;
+  /** Called once per decision, refunded or not, e.g. to append to the evidence log. Its failure never changes the result. */
+  onDecision?: (record: RefundDecisionRecord) => void | Promise<void>;
 }
 
 export interface StripeRefundSnapshot {
@@ -88,6 +91,7 @@ export interface StripeRefundDenial {
   escalationId?: string;
   digest?: string;
   facts?: StripeRefundFacts;
+  logWarning?: string;
 }
 
 export interface StripeRefundSuccess {
@@ -99,6 +103,7 @@ export interface StripeRefundSuccess {
   digest: string;
   facts: StripeRefundFacts;
   ledgerWarning?: string;
+  logWarning?: string;
 }
 
 export type StripeRefundResult = StripeRefundSuccess | StripeRefundDenial;
@@ -162,6 +167,43 @@ async function readFacts(
 }
 
 export async function guardedStripeRefund(
+  stripe: StripeApi,
+  atlasent: AtlaSentClient,
+  request: StripeRefundRequest,
+  options: StripeRefundGuardOptions,
+): Promise<StripeRefundResult> {
+  const result = await decideStripeRefund(stripe, atlasent, request, options);
+  if (options.onDecision === undefined) return result;
+  const facts = result.facts;
+  const record: RefundDecisionRecord = {
+    schema: REFUND_DECISION_SCHEMA,
+    at: (options.now ?? (() => new Date()))().toISOString(),
+    system: "stripe",
+    gate_ref: result.gateRef,
+    actor: options.actor,
+    environment: options.environment,
+    target: facts?.payment_intent ?? request.paymentIntentId,
+    order_ref: facts?.order_ref ?? null,
+    amount_cents: Number.isSafeInteger(request.amountCents) ? request.amountCents : null,
+    currency: facts?.currency ?? null,
+    outcome: outcomeOf(result.refunded, result.refunded ? "allow" : result.decision),
+    decision: result.refunded ? "allow" : result.decision,
+    deny_code: result.refunded ? null : (result.denyCode ?? null),
+    reason: result.refunded ? "within policy" : result.reason,
+    audit_hash: result.auditHash || null,
+    refund_id: result.refunded ? result.refund.id : null,
+    order_status: facts?.order_status ?? null,
+    days_since_delivery: facts?.days_since_delivery ?? null,
+  };
+  try {
+    await options.onDecision(record);
+    return result;
+  } catch (err) {
+    return { ...result, logWarning: `the decision was not logged: ${errorText(err)}` };
+  }
+}
+
+async function decideStripeRefund(
   stripe: StripeApi,
   atlasent: AtlaSentClient,
   request: StripeRefundRequest,

@@ -198,3 +198,24 @@ describe("fails closed", () => {
     expect(await auditStripeRefund(copied, s.ledger)).toMatchObject({ verdict: "unauthorized", reason: expect.stringMatching(/stopped/) });
   });
 });
+
+describe("onDecision (evidence log)", () => {
+  it("records every decision with Stripe and order-system facts", async () => {
+    const records: import("../src/decision-record.js").RefundDecisionRecord[] = [];
+    const s = setup();
+    const data = demoPayments();
+    const options = { actor: "support-tool:dana", environment: "test", ledger: s.ledger, delivery: staticDeliveryFacts(data.delivery), account: "acct_demo", now: () => NOW, onDecision: (r: (typeof records)[number]) => void records.push(r) };
+    const ok = await guardedStripeRefund(s.stripe, s.runtime.client, { paymentIntentId: "pi_1001", amountCents: 1899 }, options);
+    await guardedStripeRefund(s.stripe, s.runtime.client, { paymentIntentId: "pi_1004", amountCents: 2500 }, options);
+    expect(records.map((r) => r.outcome)).toEqual(["refunded", "denied"]);
+    expect(records[0]).toMatchObject({
+      system: "stripe",
+      gate_ref: ok.gateRef,
+      target: "pi_1001",
+      order_ref: "PPS-1001",
+      amount_cents: 1899,
+      refund_id: ok.refunded ? ok.refund.id : "x",
+    });
+    expect(records[1]).toMatchObject({ deny_code: "RETURN_WINDOW_EXPIRED", days_since_delivery: 45 });
+  });
+});

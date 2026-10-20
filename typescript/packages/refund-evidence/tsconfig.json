@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@atlasent/sdk": ["../../src/index.ts"],
+      "@anthropic-ai/sdk": ["./node_modules/@anthropic-ai/sdk"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

@@ -30,6 +30,7 @@ import type { AtlaSentClient, EvaluateResponse, VerifyPermitResponse } from "@at
 import { toOrderGid, type CreatedRefund, type RefundCreateInput, type ShopifyAdmin, type ShopifyOrder } from "./admin.js";
 import { centsToMoney, deriveRefundFacts, SUPPORTED_CURRENCY, type RefundFacts } from "./facts.js";
 import { refundNote, type PermitLedger } from "./ledger.js";
+import { outcomeOf, REFUND_DECISION_SCHEMA, type RefundDecisionRecord } from "./decision-record.js";
 
 /** ACT-0024 canonical action: releasing a payment, refund or payout. */
 export const FINANCE_PAYMENT_AUTHORIZE = "finance.payment.authorize" as const;
@@ -55,6 +56,8 @@ export interface RefundGuardOptions {
   /** Shop domain, folded into the digest so a permit cannot cross stores. */
   shop: string;
   now?: () => Date;
+  /** Called once per decision, refunded or not, e.g. to append to the evidence log. Its failure never changes the result. */
+  onDecision?: (record: RefundDecisionRecord) => void | Promise<void>;
 }
 
 /** The exact refund that will be sent, frozen before evaluate. */
@@ -88,6 +91,8 @@ export interface RefundDenial {
   escalationId?: string;
   digest?: string;
   facts?: RefundFacts;
+  /** Set when `onDecision` failed. */
+  logWarning?: string;
 }
 
 export interface RefundSuccess {
@@ -100,6 +105,8 @@ export interface RefundSuccess {
   facts: RefundFacts;
   /** Set when the refund ran but the ledger could not record its refund id. */
   ledgerWarning?: string;
+  /** Set when `onDecision` failed. */
+  logWarning?: string;
 }
 
 export type RefundResult = RefundSuccess | RefundDenial;
@@ -160,6 +167,43 @@ async function readFacts(shopify: ShopifyAdmin, orderGid: string, now: Date): Pr
 }
 
 export async function guardedShopifyRefund(
+  shopify: ShopifyAdmin,
+  atlasent: AtlaSentClient,
+  request: RefundRequest,
+  options: RefundGuardOptions,
+): Promise<RefundResult> {
+  const result = await decideShopifyRefund(shopify, atlasent, request, options);
+  if (options.onDecision === undefined) return result;
+  const facts = result.facts;
+  const record: RefundDecisionRecord = {
+    schema: REFUND_DECISION_SCHEMA,
+    at: (options.now ?? (() => new Date()))().toISOString(),
+    system: "shopify",
+    gate_ref: result.gateRef,
+    actor: options.actor,
+    environment: options.environment,
+    target: facts?.order_id ?? request.orderId,
+    order_ref: facts?.order_name ?? null,
+    amount_cents: Number.isSafeInteger(request.amountCents) ? request.amountCents : null,
+    currency: facts?.currency ?? null,
+    outcome: outcomeOf(result.refunded, result.refunded ? "allow" : result.decision),
+    decision: result.refunded ? "allow" : result.decision,
+    deny_code: result.refunded ? null : (result.denyCode ?? null),
+    reason: result.refunded ? "within policy" : result.reason,
+    audit_hash: result.auditHash || null,
+    refund_id: result.refunded ? result.refund.id : null,
+    order_status: facts?.order_status ?? null,
+    days_since_delivery: facts?.days_since_delivery ?? null,
+  };
+  try {
+    await options.onDecision(record);
+    return result;
+  } catch (err) {
+    return { ...result, logWarning: `the decision was not logged: ${errorText(err)}` };
+  }
+}
+
+async function decideShopifyRefund(
   shopify: ShopifyAdmin,
   atlasent: AtlaSentClient,
   request: RefundRequest,

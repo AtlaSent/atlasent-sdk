@@ -7,7 +7,7 @@ manager, and every refund is checked against the permits the gate issued.
 
 `private: true`. This package is a demo and is not published to npm.
 
-> **Status:** 96 unit tests over fakes of Shopify and the AtlaSent runtime.
+> **Status:** 98 unit tests over fakes of Shopify and the AtlaSent runtime.
 > **Nothing here has been run against a live Shopify store or a live
 > AtlaSent org yet.** The Shopify field names, mutations, token exchange and
 > extension API follow Shopify's documented shapes as best known; check them
@@ -194,6 +194,13 @@ enabled (`fallbacks: "default"`). It has two tools, `lookup_order` and
 `issue_refund`, and both refuse orders that don't belong to
 `CUSTOMER_EMAIL`. In a real store that email comes from the customer login,
 never from the chat. The model can ask for any refund; the gate decides.
+
+## Evidence log
+
+Pass `onDecision` to the gate to receive one `atlasent.refund_decision.v1`
+record per decision, refunded or not. If the callback fails, the result
+carries `logWarning`; the outcome never changes. The report and the
+three-system demo that read these records are in `@atlasent/refund-evidence`.
 
 ## Tests
 

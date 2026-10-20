@@ -1,0 +1,74 @@
+name: Refund evidence CI
+
+# @atlasent/refund-evidence (evidence report + one-command demo). The demo
+# imports the Shopify and Stripe gate sources directly, so changes there
+# trigger this too. The package links the core SDK through `file:../../`, so
+# core is built first.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "typescript/packages/refund-evidence/**"
+      - "typescript/packages/shopify/src/**"
+      - "typescript/packages/stripe/src/**"
+      - "typescript/src/**"
+      - "typescript/package.json"
+      - "typescript/package-lock.json"
+      - ".github/workflows/refund-evidence-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "typescript/packages/refund-evidence/**"
+      - "typescript/packages/shopify/src/**"
+      - "typescript/packages/stripe/src/**"
+      - "typescript/src/**"
+      - "typescript/package.json"
+      - "typescript/package-lock.json"
+      - ".github/workflows/refund-evidence-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ts-refund-evidence:
+    name: "TS refund-evidence / Node ${{ matrix.node-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20.x", "22.x"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: |
+            typescript/package-lock.json
+            typescript/packages/refund-evidence/package-lock.json
+
+      - name: Build the core SDK the package links to
+        working-directory: typescript
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install dependencies
+        working-directory: typescript/packages/refund-evidence
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: typescript/packages/refund-evidence
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: typescript/packages/refund-evidence
+        run: npm test
+
+      - name: Demo runs end to end
+        working-directory: typescript/packages/refund-evidence
+        run: EVIDENCE_OUT="$RUNNER_TEMP/evidence-out" npm run demo
