@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Makes writing the lock token fail, as a full disk would, while the lock
 // file itself is created.
-const failTokenWrite = vi.hoisted(() => ({ on: false, close: false, renameLock: false, readAside: false }));
+const failTokenWrite = vi.hoisted(() => ({
+  on: false,
+  close: false,
+  renameLock: false,
+  readAside: false,
+  /** After the lock is renamed aside, another process creates a new lock with this token. */
+  takeOverWith: undefined as string | undefined,
+}));
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
   return {
@@ -35,7 +42,11 @@ vi.mock("node:fs", async (importOriginal) => {
         failTokenWrite.renameLock = false;
         throw Object.assign(new Error("EIO: i/o error, rename"), { code: "EIO" });
       }
-      return fs.renameSync(from, to);
+      fs.renameSync(from, to);
+      if (failTokenWrite.takeOverWith !== undefined && String(from).endsWith(".lock")) {
+        fs.writeFileSync(String(from), failTokenWrite.takeOverWith, { flag: "wx" });
+        failTokenWrite.takeOverWith = undefined;
+      }
     },
   };
 });
@@ -49,6 +60,7 @@ afterEach(() => {
   failTokenWrite.close = false;
   failTokenWrite.renameLock = false;
   failTokenWrite.readAside = false;
+  failTokenWrite.takeOverWith = undefined;
   if (dir) rmSync(dir, { recursive: true, force: true });
   dir = "";
 });
@@ -108,5 +120,16 @@ describe("a release that fails", () => {
     expect(isLockTracked(lockPath)).toBe(true);
     expect(removeLockIfHeldBy(lockPath, token)).toBe(true);
     expect(isLockTracked(lockPath)).toBe(false);
+  });
+
+  it("stops tracking when the token is unreadable and a new holder took the path meanwhile", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ledger-lock-init-"));
+    const lockPath = join(dir, "refund-ledger.json.lock");
+    const token = await acquireFileLock(lockPath, join(dir, "refund-ledger.json"), { timeoutMs: 100 });
+    failTokenWrite.readAside = true;
+    failTokenWrite.takeOverWith = "999 new-holder";
+    expect(removeLockIfHeldBy(lockPath, token)).toBe(false);
+    expect(readFileSync(lockPath, "utf8")).toBe("999 new-holder");
+    expect(isLockTracked(lockPath)).toBe(false); // the exit hook must not touch the new holder's lock
   });
 });
