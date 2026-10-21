@@ -103,6 +103,11 @@ export class InMemoryLedger implements PermitLedger {
   async claim(gateRef: string, refundId: string): Promise<boolean> {
     const e = this.entries.get(gateRef);
     if (!e) return false;
+    // Re-checked here, not only by the caller: with a shared file ledger the
+    // gate can cancel the entry, or record its own refund, between the
+    // webhook's read and this claim (which runs under the lock).
+    if (e.aborted_reason !== undefined) return false;
+    if (e.refund_id !== undefined && e.refund_id !== refundId) return false;
     if (e.matched_refund_id !== undefined) return e.matched_refund_id === refundId;
     e.matched_refund_id = refundId;
     this.persist();

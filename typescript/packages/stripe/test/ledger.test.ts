@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
+import type { PermitLedger } from "../src/ledger.js";
 import { acquireFileLock, assertLockHeld, InMemoryLedger, JsonFileLedger, LedgerLockError, removeLockIfHeldBy, type LedgerEntry } from "../src/ledger.js";
 import type { StripeRefund } from "../src/stripe.js";
 import { auditStripeRefund } from "../src/webhook.js";
@@ -194,4 +195,41 @@ describe("JsonFileLedger lock ownership", () => {
     const data = JSON.parse(readFileSync(path, "utf8")) as { entries: LedgerEntry[] };
     expect(new Set(data.entries.map((e) => e.gate_ref)).size).toBe(200);
   }, 120_000);
+});
+
+describe("claim re-checks the entry under the lock", () => {
+  it("a refund the gate cancelled between the webhook's read and its claim is not authorized", async () => {
+    const path = ledgerPath();
+    const server = new JsonFileLedger(path);
+    const cli = new JsonFileLedger(path); // the gate, in another process
+    await cli.recordAuthorized(entry());
+    // The webhook reads the entry, then the gate cancels it before the claim takes the lock.
+    const racing: PermitLedger = {
+      get: async (ref) => {
+        const e = await server.get(ref);
+        await cli.recordAborted(ref, "request error after Stripe created the refund");
+        return e;
+      },
+      claim: (ref, id) => server.claim(ref, id),
+      recordAuthorized: (e) => server.recordAuthorized(e),
+      recordExecuted: (r, id) => server.recordExecuted(r, id),
+      recordAborted: (r, why) => server.recordAborted(r, why),
+      recordPendingApproval: (p) => server.recordPendingApproval(p),
+      getPendingApproval: (id) => server.getPendingApproval(id),
+      resolvePendingApproval: (id, r) => server.resolvePendingApproval(id, r),
+    };
+    const verdict = await auditStripeRefund(refund(), racing);
+    expect(verdict.verdict).toBe("unauthorized");
+    expect(verdict.verdict === "unauthorized" && verdict.reason).toMatch(/gate stopped this refund/);
+    expect((await server.get("ref-1"))?.matched_refund_id).toBeUndefined();
+  });
+
+  it("an entry already completed with a different refund id cannot be claimed by another refund", async () => {
+    const path = ledgerPath();
+    const ledger = new JsonFileLedger(path);
+    await ledger.recordAuthorized(entry());
+    await ledger.recordExecuted("ref-1", "re_gated");
+    expect(await ledger.claim("ref-1", "re_other")).toBe(false);
+    expect(await ledger.claim("ref-1", "re_gated")).toBe(true);
+  });
 });
