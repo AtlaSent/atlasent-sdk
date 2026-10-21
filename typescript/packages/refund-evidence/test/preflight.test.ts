@@ -40,7 +40,7 @@ describe("checkAtlaSent", () => {
     expect(status(checks, "API key accepted")).toBe("pass");
     expect(status(checks, "Test key")).toBe("pass");
     expect(status(checks, "Key scopes")).toBe("pass");
-    expect(status(checks, "Approval claim")).toBe("not_checked");
+    expect(status(checks, "Approval resume scope")).toBe("fail");
     expect(status(checks, "Refund policy")).toBe("not_checked");
     expect(calls).toHaveLength(0);
   });
@@ -49,6 +49,22 @@ describe("checkAtlaSent", () => {
     const checks = await checkAtlaSent(client({ environment: "live", scopes: ["evaluate:write"] }).c, { environment: "test", probes: [], actor: "p" });
     expect(status(checks, "Test key")).toBe("fail");
     expect(checks.find((x) => x.name === "Key scopes")?.detail).toBe("missing verify:execute");
+  });
+
+  it("passes the resume check with approvals:read or the read-only view umbrella, and names the same-key rule", async () => {
+    for (const extra of ["approvals:read", "view"]) {
+      const checks = await checkAtlaSent(client({ scopes: ["evaluate:write", "verify:execute", extra] }).c, { environment: "test", probes: [], actor: "p" });
+      const resume = checks.find((x) => x.name === "Approval resume scope");
+      expect(resume?.status, extra).toBe("pass");
+      expect(resume?.detail).toMatch(/same key/);
+    }
+    const without = await checkAtlaSent(client().c, { environment: "test", probes: [], actor: "p" });
+    expect(without.find((x) => x.name === "Approval resume scope")?.detail).toMatch(/^missing approvals:read/);
+    // A bare or mutation-verb approvals scope is not the read scope.
+    for (const wrong of ["approvals", "approvals:resolve"]) {
+      const checks = await checkAtlaSent(client({ scopes: ["evaluate:write", "verify:execute", wrong] }).c, { environment: "test", probes: [], actor: "p" });
+      expect(status(checks, "Approval resume scope"), wrong).toBe("fail");
+    }
   });
 
   it("does not accept bare scope names", async () => {

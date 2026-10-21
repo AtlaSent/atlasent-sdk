@@ -59,18 +59,28 @@ export function createApprovalsClient(opts: { apiKey: string; baseUrl?: string; 
     return { status: res.status, json: json && typeof json === "object" ? (json as Record<string, unknown>) : null };
   }
 
+  /** "HTTP 403" alone sends people hunting; name the scope the runtime asked for. */
+  function httpFailure(status: number, json: Record<string, unknown> | null): string {
+    if (status === 403 && json?.error === "insufficient_scope") return "HTTP 403: this API key lacks approvals:read, which resuming an escalated refund needs";
+    if (status === 403 && typeof json?.message === "string" && /originating API key/.test(json.message)) {
+      return "HTTP 403: only the API key that asked for the refund may claim its permit";
+    }
+    return `HTTP ${status}`;
+  }
+
   return {
     async getStatus(id) {
       const { status, json } = await call("GET", `/v1-approvals/${encodeURIComponent(assertApprovalRequestId(id))}`);
       if (status === 404) return { found: false };
       if (status !== 200 || json === null || typeof json.status !== "string") {
-        throw new ApprovalsApiError(`approval status read failed: HTTP ${status}`);
+        throw new ApprovalsApiError(`approval status read failed: ${httpFailure(status, json)}`);
       }
       const re = json.re_evaluation_decision;
       return { found: true, status: json.status, ...(typeof re === "string" ? { reEvaluationDecision: re } : {}) };
     },
     async claimPermit(id) {
       const { status, json } = await call("POST", `/v1-approvals/${encodeURIComponent(assertApprovalRequestId(id))}/claim-permit`);
+      if (status === 403) return { claimed: false, failure: httpFailure(status, json) };
       if (status !== 200) return { claimed: false, failure: typeof json?.error === "string" ? json.error : `HTTP ${status}` };
       const token = json?.permit_token;
       if (json?.claimed !== true || typeof token !== "string" || token.length === 0) return { claimed: false, failure: "not_claimed" };

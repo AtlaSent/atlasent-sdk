@@ -39,6 +39,8 @@ export interface Check {
 
 /** The scopes every gate key needs (`resource:action` form, the only form a key can hold). */
 export const REQUIRED_ATLASENT_SCOPES = ["evaluate:write", "verify:execute"] as const;
+/** Needed only to resume an escalated refund (approval status poll and permit claim). */
+export const APPROVALS_READ_SCOPE = "approvals:read";
 export const REQUIRED_SHOPIFY_SCOPES = ["read_orders", "write_orders"] as const;
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -101,7 +103,17 @@ export async function checkAtlaSent(
   if (self.expiresAt !== null && Date.parse(self.expiresAt) < Date.now() + 86_400_000) {
     add("Key expiry", "fail", `the key expires at ${self.expiresAt}, within a day`);
   }
-  add("Approval claim permission", "not_checked", "no read-only way to check that this key may claim an approved permit; the first real approval shows it");
+  // Resuming an escalated refund polls GET /v1-approvals/{id} and claims at
+  // POST .../claim-permit; both require approvals:read (or the read-only
+  // `view` umbrella) and answer 403 insufficient_scope without it.
+  const canReadApprovals = self.scopes.includes(APPROVALS_READ_SCOPE) || self.scopes.includes("view");
+  add(
+    "Approval resume scope",
+    canReadApprovals ? "pass" : "fail",
+    canReadApprovals
+      ? `${APPROVALS_READ_SCOPE}; resume escalated refunds with this same key, since only the key that asked may claim the permit`
+      : `missing ${APPROVALS_READ_SCOPE}: refunds still gate, but an escalated refund cannot be resumed after a manager approves it`,
+  );
 
   if (opts.probes.length === 0) {
     add("Refund policy", "not_checked", "run with --probe-policy to have AtlaSent decide sample refunds against the org's finance.payment.authorize bundle");
