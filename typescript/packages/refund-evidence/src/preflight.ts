@@ -26,6 +26,7 @@
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
+import { DEFAULT_APPROVALS_BASE_URL } from "../../stripe/src/approvals.js";
 import { AtlaSentClient, type ApiKeySelfResponse, type EvaluateRequest, type EvaluateResponse } from "@atlasent/sdk";
 
 export type CheckStatus = "pass" | "fail" | "not_checked";
@@ -45,8 +46,11 @@ export const REQUIRED_SHOPIFY_SCOPES = ["read_orders", "write_orders"] as const;
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** What preflight needs to know about the key. `expiresAt` undefined means the runtime did not say. */
+export type KeyInfo = Pick<ApiKeySelfResponse, "keyId" | "orgId" | "environment" | "scopes"> & { expiresAt?: string | null };
+
 export interface AtlaSentProbeClient {
-  keySelf(): Promise<ApiKeySelfResponse>;
+  keySelf(): Promise<KeyInfo>;
   evaluate(input: EvaluateRequest): Promise<EvaluateResponse>;
 }
 
@@ -88,7 +92,7 @@ export async function checkAtlaSent(
   const checks: Check[] = [];
   const add = (name: string, status: CheckStatus, detail: string) => checks.push({ system: "atlasent", name, status, detail });
 
-  let self: ApiKeySelfResponse;
+  let self: KeyInfo;
   try {
     self = await client.keySelf();
   } catch (err) {
@@ -100,7 +104,9 @@ export async function checkAtlaSent(
   else add("Test key", "fail", `the key's environment is ${JSON.stringify(self.environment)}; use a test key for the first live run`);
   const missing = REQUIRED_ATLASENT_SCOPES.filter((s) => !self.scopes.includes(s));
   add("Key scopes", missing.length === 0 ? "pass" : "fail", missing.length === 0 ? REQUIRED_ATLASENT_SCOPES.join(", ") : `missing ${missing.join(", ")}`);
-  if (self.expiresAt !== null && Date.parse(self.expiresAt) < Date.now() + 86_400_000) {
+  if (self.expiresAt === undefined) {
+    add("Key expiry", "not_checked", "the runtime's key check does not report expiry; see the key in the console");
+  } else if (self.expiresAt !== null && Date.parse(self.expiresAt) < Date.now() + 86_400_000) {
     add("Key expiry", "fail", `the key expires at ${self.expiresAt}, within a day`);
   }
   // Resuming an escalated refund polls GET /v1-approvals/{id} and claims at
@@ -204,6 +210,36 @@ export async function checkShopify(
   return checks;
 }
 
+/**
+ * GET /v1-api-keys/check: the runtime's side-effect-free "does this key
+ * authenticate" read, answering { valid, org_id, key_id, environment, scopes }.
+ * Used instead of the SDK's keySelf(), whose /v1-api-key-self route is not
+ * deployed on the runtime (checked against atlasent-api main and staging,
+ * 2026-10-21).
+ */
+export async function fetchKeyCheck(doFetch: typeof fetch, opts: { apiKey: string; baseUrl: string; timeoutMs?: number }): Promise<KeyInfo> {
+  let end = opts.baseUrl.length;
+  while (end > 0 && opts.baseUrl.charCodeAt(end - 1) === 47) end--;
+  const res = await doFetch(`${opts.baseUrl.slice(0, end)}/v1-api-keys/check`, {
+    method: "GET",
+    headers: { authorization: `Bearer ${opts.apiKey}` },
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+  });
+  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (res.status !== 200 || json === null || typeof json !== "object") {
+    const code = json && typeof json.error === "string" ? ` ${json.error}` : "";
+    throw new Error(`key check answered HTTP ${res.status}${code}`);
+  }
+  const { valid, org_id, key_id, environment, scopes } = json;
+  if (valid !== true || typeof org_id !== "string" || typeof key_id !== "string" || typeof environment !== "string") {
+    throw new Error("key check answered without a valid key id, org and environment");
+  }
+  if (!Array.isArray(scopes) || !scopes.every((x): x is string => typeof x === "string")) {
+    throw new Error("key check did not list the key's scopes; is this an API key?");
+  }
+  return { keyId: key_id, orgId: org_id, environment: environment as KeyInfo["environment"], scopes };
+}
+
 export async function checkStripe(doFetch: typeof fetch, opts: { secretKey: string; baseUrl?: string }): Promise<Check[]> {
   const checks: Check[] = [];
   const add = (name: string, status: CheckStatus, detail: string) => checks.push({ system: "stripe", name, status, detail });
@@ -262,7 +298,9 @@ async function main(): Promise<number> {
     console.log(`Probing the policy: ${probes.length} real evaluation(s), each writing an audit entry. No permit is used and no refund is made.\n`);
   }
   const atlasent = new AtlaSentClient({ apiKey, ...(process.env.ATLASENT_BASE_URL ? { baseUrl: process.env.ATLASENT_BASE_URL } : {}) });
-  const checks = await checkAtlaSent(atlasent, { environment, probes, actor: `preflight:${process.env.USER ?? "operator"}` });
+  const baseUrl = process.env.ATLASENT_BASE_URL ?? DEFAULT_APPROVALS_BASE_URL;
+  const probeClient: AtlaSentProbeClient = { keySelf: () => fetchKeyCheck(fetch, { apiKey, baseUrl }), evaluate: (req) => atlasent.evaluate(req) };
+  const checks = await checkAtlaSent(probeClient, { environment, probes, actor: `preflight:${process.env.USER ?? "operator"}` });
 
   const shop = process.env.SHOPIFY_SHOP;
   const token = process.env.SHOPIFY_ADMIN_TOKEN;

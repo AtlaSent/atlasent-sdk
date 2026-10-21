@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ApiKeySelfResponse, EvaluateRequest, EvaluateResponse } from "@atlasent/sdk";
-import { checkAtlaSent, checkShopify, checkStripe, ESCALATION_PROBE, formatChecks, POLICY_PROBES, type AtlaSentProbeClient, type Check } from "../src/preflight.js";
+import { checkAtlaSent, checkShopify, checkStripe, ESCALATION_PROBE, fetchKeyCheck, formatChecks, POLICY_PROBES, type AtlaSentProbeClient, type Check } from "../src/preflight.js";
 import { createSimulatedRuntime } from "../src/sim.js";
 
 const self = (over: Partial<ApiKeySelfResponse> = {}): ApiKeySelfResponse => ({
@@ -207,5 +207,42 @@ describe("formatChecks", () => {
     const out = formatChecks(checks);
     expect(out).toMatch(/1 failure\(s\)/);
     expect(out).not.toContain("SECRETVALUE");
+  });
+});
+
+describe("fetchKeyCheck", () => {
+  const respond = (status: number, body: unknown) => {
+    const urls: string[] = [];
+    const f = (async (url: string, init: RequestInit) => {
+      urls.push(`${init.method} ${url} ${(init.headers as Record<string, string>).authorization}`);
+      return new Response(JSON.stringify(body), { status });
+    }) as unknown as typeof fetch;
+    return { f, urls };
+  };
+  const body = { valid: true, org_id: "org-1", key_id: "key-1", environment: "test", scopes: ["evaluate:write", "verify:execute"] };
+
+  it("reads the runtime's /v1-api-keys/check answer", async () => {
+    const r = respond(200, body);
+    expect(await fetchKeyCheck(r.f, { apiKey: "ask_test_x", baseUrl: "https://rt.example/functions/v1/" })).toEqual({
+      keyId: "key-1",
+      orgId: "org-1",
+      environment: "test",
+      scopes: ["evaluate:write", "verify:execute"],
+    });
+    expect(r.urls).toEqual(["GET https://rt.example/functions/v1/v1-api-keys/check Bearer ask_test_x"]);
+  });
+
+  it("refuses a failed, invalid or scope-less answer", async () => {
+    await expect(fetchKeyCheck(respond(401, { error: "invalid_api_key" }).f, { apiKey: "k", baseUrl: "https://rt" })).rejects.toThrow("HTTP 401 invalid_api_key");
+    await expect(fetchKeyCheck(respond(200, { ...body, valid: false }).f, { apiKey: "k", baseUrl: "https://rt" })).rejects.toThrow(/valid key/);
+    await expect(fetchKeyCheck(respond(200, { ...body, key_id: null }).f, { apiKey: "k", baseUrl: "https://rt" })).rejects.toThrow(/valid key/);
+    await expect(fetchKeyCheck(respond(200, { ...body, scopes: null }).f, { apiKey: "k", baseUrl: "https://rt" })).rejects.toThrow(/scopes/);
+    await expect(fetchKeyCheck(respond(200, { ...body, scopes: [1] }).f, { apiKey: "k", baseUrl: "https://rt" })).rejects.toThrow(/scopes/);
+  });
+
+  it("an unreported expiry is said to be not checked, never passed", async () => {
+    const c: AtlaSentProbeClient = { keySelf: async () => ({ keyId: "k", orgId: "o", environment: "test", scopes: [] }), evaluate: async () => Promise.reject(new Error("no")) };
+    const checks = await checkAtlaSent(c, { environment: "test", probes: [], actor: "p" });
+    expect(status(checks, "Key expiry")).toBe("not_checked");
   });
 });
