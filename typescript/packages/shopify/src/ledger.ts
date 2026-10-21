@@ -216,14 +216,20 @@ export function removeLockIfHeldBy(lockPath: string, token: string): boolean {
   } catch {
     moved = undefined;
   }
+  let restored = false;
   if (moved !== token) {
     try {
       linkSync(aside, lockPath);
+      restored = true;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      // Another process took the path meanwhile; what we moved is discarded.
     }
   }
-  untrack();
+  // Stay tracked only when ownership is unknown (token unreadable) AND the
+  // lock went back in place. If a new holder took the path instead, tracking
+  // the old token would let the exit hook move that holder's lock aside.
+  if (!(moved === undefined && restored)) untrack();
   unlinkSync(aside);
   return moved === token;
 }
