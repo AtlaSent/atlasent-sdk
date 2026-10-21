@@ -581,6 +581,9 @@ components:
         approval_request_id:
           type: string
           description: "Present on hold and escalate decisions when the runtime created an approval request (atlasent-api v1-evaluate: every escalate, and approval-gated holds). A person resolves it in the AtlaSent console; poll GET /v1-approvals/{id} and, once approved, claim the single permit with POST /v1-approvals/{id}/claim-permit. Distinct from escalation_id (the HITL escalation). Absent when no approval request was created."
+        execution_payload_hash_accepted:
+          type: boolean
+          description: "Whether the runtime bound the permit to the caller's own top-level execution_payload_hash (atlasent-api#3355). false = the digest was DROPPED (e.g. a sha256: prefix, or nested under context) and the permit is bound to the runtime's own proof hash, so re-presenting the caller digest at verify yields PAYLOAD_MISMATCH. Absent when the runtime did not report it; SDKs MUST NOT treat absence as true."
         human_approval_required:
           type: boolean
           description: "Two-stage authorization lifecycle (atlasent-api #1617). Whether this evaluation requires a verified human approval, independent of whether that requirement is currently satisfied — see `human_approval_status`. Absent on responses from a runtime predating this mechanism; SDKs MUST treat absence as unknown, never as false."

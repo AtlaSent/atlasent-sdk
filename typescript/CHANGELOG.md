@@ -8,6 +8,26 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: full pt.v4 claim decode, typed verify error codes, `execution_payload_hash_accepted` (additive)
+
+- `verifyPermitV4()` now decodes every claim key the runtime signs (4, 6, 7
+  and -1 to -35): delegation lineage, execution binding, exceptional
+  authority, AWS/Azure locus, operation intent, change brief, H8 identity,
+  agent runtime identity and the Entra slice. Before this it decoded only -1
+  to -7 and skipped the rest. `PermitClaimsV4` gains the matching optional
+  fields. Absent means "not bound".
+- Cross-language parity vectors (`contract/vectors/permit-v4/vectors.json`)
+  are generated from atlasent-api's own `signPermitV4`. The TS and Python
+  decoders must both reproduce the runtime's claim bag exactly.
+- `VERIFY_ERROR_CODES`, `LEGACY_VERIFY_ERROR_CODES`,
+  `TRANSIENT_VERIFY_ERROR_CODES`, `isVerifyErrorCode()` and the
+  `VerifyErrorCode` type, mirroring atlasent-api's verify error-code catalog.
+  `verifyPermit()` now returns `verifyErrorCode` and `verifyReason`; both are
+  optional and the code is an open string.
+- `evaluate()` and `evaluatePreflight()` surface
+  `execution_payload_hash_accepted`. `false` means your digest was dropped and
+  verify will return `PAYLOAD_MISMATCH`.
+
 ### Added: `approvalRequestId` on evaluate responses (additive, contract-conforming)
 
 `/v1-evaluate` returns `approval_request_id` on hold and escalate decisions
