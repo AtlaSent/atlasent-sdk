@@ -30,6 +30,10 @@ BASE = json.loads((ROOT / "contract/vectors/permit-v4/vectors.json").read_text()
 # RFC 8032 test-1 seed (same key as vectors.json) and RFC 8032 test-2 seed.
 SEED_A = bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
 SEED_B = bytes.fromhex("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb")
+# RFC 8032 test-3 seed, and a fourth fixed test seed: key material for the
+# REVOKED entries, so revocation never touches SEED_A / SEED_B's live keys.
+SEED_C = bytes.fromhex("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7")
+SEED_D = bytes.fromhex("833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42")
 
 
 def b64u(b: bytes) -> str:
@@ -132,13 +136,18 @@ KEY_SET = {
     "keys": [
         jwk("permit-2026-a", SEED_A),
         jwk("permit-2026-b", SEED_B),
-        jwk("permit-2025-old", SEED_A, revoked=True),
+        jwk("permit-2025-old", SEED_C, revoked=True),
+        # A live entry re-publishing the revoked permit-2025-old material.
+        jwk("permit-alias-of-old", SEED_C),
         jwk("audit-a", SEED_A, role="R3_audit"),
         jwk("permit-future", SEED_A, valid_from="2099-01-01T00:00:00Z"),
         jwk("permit-open-ended", SEED_A, valid_from=None, valid_until=None),
         # Revoked through the trust-root revocation ledger only (its own
         # entry still says revoked: false), as atlasent-revocations.json does.
-        jwk("permit-ledger-revoked", SEED_A),
+        jwk("permit-ledger-revoked", SEED_D),
+        # The same kid published twice: ambiguous, so never selected.
+        jwk("permit-dup", SEED_A),
+        jwk("permit-dup", SEED_B),
     ],
     "revoked_keys": [
         {"kid": "permit-ledger-revoked", "revoked_at": "2026-10-01T00:00:00Z", "role": "R2_permit"}
@@ -193,9 +202,27 @@ cases = [
     },
     {
         "name": "revoked_kid",
-        "token": sign(hdr_kid(b"permit-2025-old"), payload, SEED_A),
+        "token": sign(hdr_kid(b"permit-2025-old"), payload, SEED_C),
         "key": "key_set",
         "expect": "key_revoked",
+    },
+    {
+        "name": "live_alias_of_revoked_key_material",
+        "token": sign(hdr_kid(b"permit-alias-of-old"), payload, SEED_C),
+        "key": "key_set",
+        "expect": "key_revoked",
+    },
+    {
+        "name": "alg_uint32_alias_of_minus_8",
+        "token": sign(bytes([0xA1, 0x01, 0x1A, 0xFF, 0xFF, 0xFF, 0xF8]), payload, SEED_A),
+        "key": "pinned",
+        "expect": "wrong_protected_header",
+    },
+    {
+        "name": "duplicate_kid_is_ambiguous",
+        "token": sign(hdr_kid(b"permit-dup"), payload, SEED_B),
+        "key": "key_set",
+        "expect": "unknown_kid",
     },
     {
         "name": "kid_of_non_permit_role",
@@ -218,7 +245,7 @@ cases = [
     },
     {
         "name": "kid_revoked_in_ledger_only",
-        "token": sign(hdr_kid(b"permit-ledger-revoked"), payload, SEED_A),
+        "token": sign(hdr_kid(b"permit-ledger-revoked"), payload, SEED_D),
         "key": "key_set",
         "expect": "key_revoked",
     },

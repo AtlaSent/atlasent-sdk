@@ -186,7 +186,9 @@ class CborReader {
     if (add === 24) return this.readByte();
     if (add === 25) return (this.readByte() << 8) | this.readByte();
     if (add === 26) {
-      return ((this.readByte() << 24) >>> 0 | (this.readByte() << 16) | (this.readByte() << 8) | this.readByte());
+      // `>>> 0` on the WHOLE expression: `|` yields a signed int32, so
+      // without it 0xfffffff8 read back as -8 (an alg/label alias).
+      return ((this.readByte() << 24) | (this.readByte() << 16) | (this.readByte() << 8) | this.readByte()) >>> 0;
     }
     throw new Error('cbor: unsupported additional value ' + add);
   }
@@ -453,10 +455,21 @@ function isPermitKey(k: PermitVerificationKey): boolean {
   );
 }
 
-function isRevoked(set: PermitVerificationKeySet, k: PermitVerificationKey): boolean {
+function isRevokedKid(set: PermitVerificationKeySet, k: PermitVerificationKey): boolean {
   if (k.revoked === true) return true;
   if (Array.isArray(set.revoked_kids) && set.revoked_kids.includes(k.kid)) return true;
   return Array.isArray(set.revoked_keys) && set.revoked_keys.some((r) => r?.kid === k.kid);
+}
+
+/**
+ * Revoked when the entry's kid is revoked OR any revoked entry in the set
+ * carries the same key material (`x`): otherwise the holder of a revoked
+ * private key could sign under a live alias kid.
+ */
+function isRevoked(set: PermitVerificationKeySet, k: PermitVerificationKey): boolean {
+  if (isRevokedKid(set, k)) return true;
+  const all = Array.isArray(set?.keys) ? set.keys : [];
+  return all.some((o) => o?.x === k.x && typeof o.kid === 'string' && isRevokedKid(set, o));
 }
 
 function selectKey(
@@ -469,8 +482,16 @@ function selectKey(
   let entry: PermitVerificationKey | undefined;
   const wanted = kid ?? defaultKid ?? null;
   if (wanted !== null) {
-    entry = keys.find((k) => k.kid === wanted);
-    if (!entry) throw new PermitV4VerifyError('unknown_kid', `no permit key with kid ${JSON.stringify(wanted)}`);
+    const matches = keys.filter((k) => k.kid === wanted);
+    if (matches.length !== 1) {
+      throw new PermitV4VerifyError(
+        'unknown_kid',
+        matches.length === 0
+          ? `no permit key with kid ${JSON.stringify(wanted)}`
+          : `kid ${JSON.stringify(wanted)} is ambiguous in the key set`,
+      );
+    }
+    entry = matches[0]!;
   } else {
     const live = keys.filter((k) => !isRevoked(set, k));
     if (live.length !== 1) {

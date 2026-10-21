@@ -361,12 +361,23 @@ def _select_key(
         if d is not None and _is_permit_key(d)
     ]
 
+    def revoked_kid(k: dict[str, Any]) -> bool:
+        return k.get("revoked") is True or k.get("kid") in ledger_revoked
+
+    # Revoked key material: any entry sharing a revoked entry's ``x`` is
+    # revoked too, so a revoked private key cannot sign under a live alias.
+    all_entries = [d for d in (_as_dict(k) for k in raw_keys) if d is not None]
+    revoked_material = {
+        d["x"] for d in all_entries if isinstance(d.get("x"), str) and revoked_kid(d)
+    }
+
     def revoked(k: dict[str, Any]) -> bool:
-        return k.get("revoked") is True or k["kid"] in ledger_revoked
+        return revoked_kid(k) or k["x"] in revoked_material
 
     wanted = kid if kid is not None else default_kid
     if wanted is not None:
-        entry = next((k for k in keys if k["kid"] == wanted), None)
+        matches = [k for k in keys if k["kid"] == wanted]
+        entry = matches[0] if len(matches) == 1 else None
         if entry is None:
             raise PermitV4VerifyError(
                 REASON_UNKNOWN_KID, f"no permit key with kid {wanted!r}"
