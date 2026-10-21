@@ -91,11 +91,15 @@ export function isVerifyErrorCode(code: unknown): code is VerifyErrorCode {
 /**
  * Codes whose catalog retry advice is `transient`: a verifier or store fault,
  * not a judgement about the permit. Retrying the SAME permit may succeed.
+ * `INVALID_SIGNATURE` is here because the runtime uses it both for a bad
+ * signature and for a verifier key that is not configured; the code cannot
+ * tell them apart, so a retry succeeds only after a configuration fix.
  * Every other code means this permit will not verify as presented.
  * (Plain arrays, not Sets, so the module stays side-effect free and tree-shakes
  * out of bundles that never import it.)
  */
 export const TRANSIENT_VERIFY_ERROR_CODES = [
+  "INVALID_SIGNATURE",
   "EXECUTION_PRINCIPAL_BINDING_UNAVAILABLE",
   "CDO_LOOKUP_FAILED",
   "MATERIAL_EXECUTION_FIELDS_POLICY_LOOKUP_FAILED",
