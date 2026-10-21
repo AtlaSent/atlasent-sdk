@@ -16,7 +16,8 @@
  * bearer token): only its SHA-256, and the reference is a random UUID.
  */
 
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { closeSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 
 export interface LedgerEntry {
   /** Random per-refund reference, written into the Stripe refund's metadata and used as its idempotency key. */
@@ -129,21 +130,143 @@ export class InMemoryLedger implements PermitLedger {
   protected persist(): void {}
 }
 
-/** Same semantics, kept in a JSON file. Single-process demo storage, not a database. */
+/** The ledger file's lock could not be taken; the operation did not happen. */
+export class LedgerLockError extends Error {
+  constructor(path: string, waitedMs: number) {
+    super(`could not lock the permit ledger ${path} within ${waitedMs} ms`);
+    this.name = "LedgerLockError";
+  }
+}
+
+export interface JsonFileLedgerOptions {
+  /** How long to wait for another process's lock before failing. Default 5000 ms. */
+  lockTimeoutMs?: number;
+  /** A lock file older than this is left over from a crashed process and is removed. Default 30000 ms. */
+  staleLockMs?: number;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Same semantics, kept in a JSON file that several processes share: the CLI
+ * records refunds while the webhook server (another process) audits them.
+ *
+ * - Every operation re-reads the file, so nothing relies on a snapshot taken
+ *   at startup.
+ * - Every write holds an exclusive lock file (`<path>.lock`, created with
+ *   O_EXCL) across read-modify-write, and replaces the ledger with a unique
+ *   temp file plus rename, so a reader never sees a partial file and two
+ *   writers never lose each other's entries.
+ * - If the lock cannot be taken, the operation throws LedgerLockError and
+ *   changes nothing. The gate then stops before refunding, and the webhook
+ *   reports the refund as unauthorized: a lock failure never authorizes.
+ *
+ * Demo storage on one machine, not a database.
+ */
 export class JsonFileLedger extends InMemoryLedger {
-  constructor(private readonly path: string) {
+  private readonly lockTimeoutMs: number;
+  private readonly staleLockMs: number;
+
+  constructor(
+    private readonly path: string,
+    options: JsonFileLedgerOptions = {},
+  ) {
     super();
-    if (existsSync(path)) {
-      const data = JSON.parse(readFileSync(path, "utf8")) as LedgerEntry[] | { entries: LedgerEntry[]; pending?: PendingApproval[] };
-      // An array is the file format before pending approvals existed.
-      const rows = Array.isArray(data) ? data : data.entries;
-      for (const r of rows) this.entries.set(r.gate_ref, r);
-      if (!Array.isArray(data)) for (const p of data.pending ?? []) this.pending.set(p.approval_request_id, p);
+    this.lockTimeoutMs = options.lockTimeoutMs ?? 5000;
+    this.staleLockMs = options.staleLockMs ?? 30_000;
+    this.load();
+  }
+
+  /** Replaces the in-memory state with the file's current contents. */
+  private load(): void {
+    this.entries.clear();
+    this.pending.clear();
+    let text: string;
+    try {
+      text = readFileSync(this.path, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw err;
+    }
+    const data = JSON.parse(text) as LedgerEntry[] | { entries: LedgerEntry[]; pending?: PendingApproval[] };
+    // An array is the file format before pending approvals existed.
+    const rows = Array.isArray(data) ? data : data.entries;
+    for (const r of rows) this.entries.set(r.gate_ref, r);
+    if (!Array.isArray(data)) for (const p of data.pending ?? []) this.pending.set(p.approval_request_id, p);
+  }
+
+  private async acquire(): Promise<string> {
+    const lock = `${this.path}.lock`;
+    const started = Date.now();
+    for (;;) {
+      try {
+        const fd = openSync(lock, "wx");
+        writeFileSync(fd, `${process.pid}\n`);
+        closeSync(fd);
+        return lock;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      }
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > this.staleLockMs) {
+          unlinkSync(lock);
+          continue;
+        }
+      } catch {
+        continue; // released between the open and the stat
+      }
+      if (Date.now() - started >= this.lockTimeoutMs) throw new LedgerLockError(this.path, Date.now() - started);
+      await sleep(10 + Math.floor(Math.random() * 15));
     }
   }
 
+  /** Lock, reload, run one operation (which persists), unlock. */
+  private async locked<T>(op: () => Promise<T>): Promise<T> {
+    const lock = await this.acquire();
+    try {
+      this.load();
+      return await op();
+    } finally {
+      try {
+        unlinkSync(lock);
+      } catch {
+        // already gone (removed as stale); nothing to release
+      }
+    }
+  }
+
+  override recordAuthorized(entry: LedgerEntry): Promise<void> {
+    return this.locked(() => super.recordAuthorized(entry));
+  }
+  override recordExecuted(gateRef: string, refundId: string): Promise<void> {
+    return this.locked(() => super.recordExecuted(gateRef, refundId));
+  }
+  override recordAborted(gateRef: string, reason: string): Promise<void> {
+    return this.locked(() => super.recordAborted(gateRef, reason));
+  }
+  override claim(gateRef: string, refundId: string): Promise<boolean> {
+    return this.locked(() => super.claim(gateRef, refundId));
+  }
+  override recordPendingApproval(p: PendingApproval): Promise<void> {
+    return this.locked(() => super.recordPendingApproval(p));
+  }
+  override resolvePendingApproval(id: string, resolved: NonNullable<PendingApproval["resolved"]>): Promise<void> {
+    return this.locked(() => super.resolvePendingApproval(id, resolved));
+  }
+
+  // Reads take no lock: writes replace the file by rename, so a read sees a
+  // whole old or whole new ledger, never a partial one.
+  override async get(gateRef: string): Promise<LedgerEntry | undefined> {
+    this.load();
+    return super.get(gateRef);
+  }
+  override async getPendingApproval(id: string): Promise<PendingApproval | undefined> {
+    this.load();
+    return super.getPendingApproval(id);
+  }
+
   protected override persist(): void {
-    const tmp = `${this.path}.tmp`;
+    const tmp = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     writeFileSync(tmp, JSON.stringify({ entries: [...this.entries.values()], pending: [...this.pending.values()] }, null, 2));
     renameSync(tmp, this.path);
   }

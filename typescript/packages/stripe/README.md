@@ -112,6 +112,10 @@ Dashboard or with another API key. It does not stop them:
 - A refund that is not `failed` or `canceled` must carry a gate reference
   that is in the ledger, not cancelled, and for the same PaymentIntent and
   amount. One refund per entry.
+- The CLI and the webhook server can share one `LEDGER_PATH`: every
+  operation re-reads the file, and every write holds `<LEDGER_PATH>.lock`
+  and replaces the file atomically. If the ledger cannot be read or locked,
+  the refund is reported as unauthorized, never as authorized.
 - Anything else goes to `onUnauthorizedRefund`.
 
 Prevention is about who holds refund rights:
