@@ -49,6 +49,7 @@ REASON_UNKNOWN_KID = "unknown_kid"
 REASON_KEY_REVOKED = "key_revoked"
 REASON_KEY_NOT_VALID_FOR_PERMIT = "key_not_valid_for_permit"
 REASON_KID_REQUIRED = "kid_required"
+REASON_KEY_SET_EXPIRED = "key_set_expired"
 
 
 class PermitV4VerifyError(Exception):
@@ -351,9 +352,63 @@ def _key_set_parts(key_set: Any) -> tuple[list[Any], set[str]]:
     return (raw_keys if isinstance(raw_keys, list) else []), revoked
 
 
+def _material(x: Any) -> str | None:
+    """Canonical key material: decoded bytes as hex (padding/alphabet-proof)."""
+    if not isinstance(x, str):
+        return None
+    v = x.rstrip("=").replace("+", "-").replace("/", "_")
+    try:
+        return base64.urlsafe_b64decode(v + "=" * (-len(v) % 4)).hex()
+    except Exception:
+        return None
+
+
+def _in_window(k: dict[str, Any], iat: int) -> bool:
+    """True when the permit's iat lies in the key's window (a null bound is open)."""
+    try:
+        if k.get("valid_from") is not None and iat < _parse_iso(k["valid_from"]):
+            return False
+        if k.get("valid_until") is not None and iat > _parse_iso(k["valid_until"]):
+            return False
+    except ValueError:
+        return False
+    return True
+
+
+def _assert_key_set_fresh(key_set: Any) -> None:
+    """Refuse a key set whose own ``valid_until`` (or ``expires_at``) has passed.
+
+    A ``TrustRootSnapshot`` (or a trust-root document) carries its expiry;
+    stale keys and stale revocation state must not keep authorizing permits.
+    """
+    import time as _time
+
+    if isinstance(key_set, Mapping):
+        until = key_set.get("valid_until")
+        exp_ms = key_set.get("expires_at")
+    else:
+        until = getattr(key_set, "valid_until", None)
+        exp_ms = getattr(key_set, "expires_at", None)
+    now = _time.time()
+    if exp_ms is not None and not (
+        isinstance(exp_ms, (int, float)) and exp_ms / 1000 > now
+    ):
+        raise PermitV4VerifyError(REASON_KEY_SET_EXPIRED, "the key set has expired")
+    if until is not None:
+        try:
+            ok = _parse_iso(until) > now
+        except ValueError:
+            ok = False
+        if not ok:
+            raise PermitV4VerifyError(
+                REASON_KEY_SET_EXPIRED, "the key set has expired (valid_until)"
+            )
+
+
 def _select_key(
     key_set: Any, kid: str | None, iat: int, default_kid: str | None
 ) -> dict[str, Any]:
+    _assert_key_set_fresh(key_set)
     raw_keys, ledger_revoked = _key_set_parts(key_set)
     keys = [
         d
@@ -364,15 +419,17 @@ def _select_key(
     def revoked_kid(k: dict[str, Any]) -> bool:
         return k.get("revoked") is True or k.get("kid") in ledger_revoked
 
-    # Revoked key material: any entry sharing a revoked entry's ``x`` is
-    # revoked too, so a revoked private key cannot sign under a live alias.
+    # Revoked key material, compared as decoded bytes: any entry sharing a
+    # revoked entry's key is revoked too, so a revoked private key cannot sign
+    # under a live alias (however its x is padded or encoded).
     all_entries = [d for d in (_as_dict(k) for k in raw_keys) if d is not None]
     revoked_material = {
-        d["x"] for d in all_entries if isinstance(d.get("x"), str) and revoked_kid(d)
+        m for d in all_entries if revoked_kid(d) and (m := _material(d.get("x")))
     }
 
     def revoked(k: dict[str, Any]) -> bool:
-        return revoked_kid(k) or k["x"] in revoked_material
+        m = _material(k.get("x"))
+        return revoked_kid(k) or m is None or m in revoked_material
 
     wanted = kid if kid is not None else default_kid
     if wanted is not None:
@@ -383,33 +440,25 @@ def _select_key(
                 REASON_UNKNOWN_KID, f"no permit key with kid {wanted!r}"
             )
     else:
-        live = [k for k in keys if not revoked(k)]
-        if len(live) != 1:
+        # Exactly one key that is unrevoked AND valid for this permit's iat,
+        # so a staged next key or a retired one does not block the fallback.
+        usable = [k for k in keys if not revoked(k) and _in_window(k, iat)]
+        if len(usable) != 1:
             raise PermitV4VerifyError(
                 REASON_KID_REQUIRED,
                 "token carries no kid and the key set has "
-                f"{len(live)} usable permit keys",
+                f"{len(usable)} permit keys valid for it",
             )
-        entry = live[0]
+        entry = usable[0]
     if revoked(entry):
         raise PermitV4VerifyError(
             REASON_KEY_REVOKED, f"permit key {entry['kid']} is revoked"
         )
-    try:
-        # A null bound is an open-ended side of the window (trust-root shape).
-        if entry.get("valid_from") is not None and iat < _parse_iso(
-            entry["valid_from"]
-        ):
-            raise ValueError("before valid_from")
-        if entry.get("valid_until") is not None and iat > _parse_iso(
-            entry["valid_until"]
-        ):
-            raise ValueError("after valid_until")
-    except ValueError as exc:
+    if not _in_window(entry, iat):
         raise PermitV4VerifyError(
             REASON_KEY_NOT_VALID_FOR_PERMIT,
             f"permit issued outside the validity window of key {entry['kid']}",
-        ) from exc
+        )
     return entry
 
 

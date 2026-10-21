@@ -19,8 +19,10 @@ interface KidFile {
   pinned_key_b64: string;
   key_set: PermitVerificationKeySet;
   single_set: PermitVerificationKeySet;
+  rotation_set: PermitVerificationKeySet;
+  expired_set: PermitVerificationKeySet;
   expected_claims: Record<string, unknown>;
-  cases: Array<{ name: string; token: string; key: "pinned" | "key_set" | "single_set"; expect: string; kid?: string }>;
+  cases: Array<{ name: string; token: string; key: "pinned" | "key_set" | "single_set" | "rotation_set" | "expired_set"; expect: string; kid?: string }>;
 }
 
 const file = JSON.parse(
@@ -28,7 +30,7 @@ const file = JSON.parse(
 ) as KidFile;
 
 const keyFor = (k: KidFile["cases"][number]["key"]) =>
-  k === "pinned" ? file.pinned_key_b64 : k === "key_set" ? file.key_set : file.single_set;
+  k === "pinned" ? file.pinned_key_b64 : file[k];
 
 describe("kid-aware pt.v4 verification vectors", () => {
   for (const c of file.cases) {

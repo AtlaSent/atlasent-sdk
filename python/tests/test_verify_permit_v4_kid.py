@@ -29,6 +29,8 @@ def _key(name: str):
         "pinned": _F["pinned_key_b64"],
         "key_set": _F["key_set"],
         "single_set": _F["single_set"],
+        "rotation_set": _F["rotation_set"],
+        "expired_set": _F["expired_set"],
     }[name]
 
 

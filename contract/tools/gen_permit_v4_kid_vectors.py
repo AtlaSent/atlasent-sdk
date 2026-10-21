@@ -136,7 +136,9 @@ KEY_SET = {
     "keys": [
         jwk("permit-2026-a", SEED_A),
         jwk("permit-2026-b", SEED_B),
-        jwk("permit-2025-old", SEED_C, revoked=True),
+        # Revoked, and its x deliberately PADDED ("="): the live alias below
+        # uses the unpadded form, so only a byte-level comparison links them.
+        {**jwk("permit-2025-old", SEED_C, revoked=True), "x": pub_x(SEED_C) + "="},
         # A live entry re-publishing the revoked permit-2025-old material.
         jwk("permit-alias-of-old", SEED_C),
         jwk("audit-a", SEED_A, role="R3_audit"),
@@ -154,6 +156,16 @@ KEY_SET = {
     ],
 }
 SINGLE_SET = {"keys": [jwk("permit-2026-a", SEED_A)]}
+# Mid-rotation: the current key plus a staged next key not yet valid. A
+# kid-less token issued now must still resolve to the one key valid for it.
+ROTATION_SET = {
+    "keys": [
+        jwk("permit-2026-a", SEED_A),
+        jwk("permit-next", SEED_B, valid_from="2099-01-01T00:00:00Z", valid_until=None),
+    ]
+}
+# A key set that states its own expiry, already passed.
+EXPIRED_SET = {**SINGLE_SET, "valid_until": "2020-01-01T00:00:00Z"}
 
 cases = [
     # Accept
@@ -249,6 +261,8 @@ cases = [
         "key": "key_set",
         "expect": "key_revoked",
     },
+    {"name": "no_kid_mid_rotation_uses_the_key_valid_for_iat", "token": full["token"], "key": "rotation_set", "expect": "ok"},
+    {"name": "expired_key_set", "token": full["token"], "key": "expired_set", "expect": "key_set_expired"},
     {"name": "no_kid_ambiguous_key_set", "token": full["token"], "key": "key_set", "expect": "kid_required"},
     {
         "name": "extra_header_label",
@@ -290,6 +304,8 @@ json.dump(
         "pinned_key_b64": BASE["public_key_b64"],
         "key_set": KEY_SET,
         "single_set": SINGLE_SET,
+        "rotation_set": ROTATION_SET,
+        "expired_set": EXPIRED_SET,
         "expected_claims": full["expected_claims"],
         "cases": cases,
     },

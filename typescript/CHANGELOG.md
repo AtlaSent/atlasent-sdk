@@ -22,7 +22,10 @@ With a key set, the header kid selects the `R2_permit` key. Revoked keys
 keys whose validity window excludes the permit's `iat`, and non-permit roles
 are refused. A kid-less token uses the single usable key or
 `opts.defaultKid`; otherwise it fails with `kid_required`. New reasons:
-`unknown_kid`, `key_revoked`, `key_not_valid_for_permit`, `kid_required`.
+`unknown_kid`, `key_revoked`, `key_not_valid_for_permit`, `kid_required`,
+`key_set_expired` (a set whose own `expires_at`/`valid_until` has passed).
+Revocation propagates to every entry with the same key bytes; the kid-less
+fallback counts only keys valid for the permit's `iat`.
 The result adds `kid` and `verifiedWithKid`. Any other header label, a
 duplicate label, a non-EdDSA alg or a text-string kid still fails with
 `wrong_protected_header`.

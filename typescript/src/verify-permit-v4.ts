@@ -41,7 +41,8 @@ export type PermitV4VerifyReason =
   | 'unknown_kid'
   | 'key_revoked'
   | 'key_not_valid_for_permit'
-  | 'kid_required';
+  | 'kid_required'
+  | 'key_set_expired';
 
 export class PermitV4VerifyError extends Error {
   readonly reason: PermitV4VerifyReason;
@@ -167,6 +168,10 @@ export interface PermitVerificationKeySet {
   keys: PermitVerificationKey[];
   revoked_keys?: Array<{ kid: string; [key: string]: unknown }>;
   revoked_kids?: string[];
+  /** TrustSnapshot expiry (epoch ms). An expired set is refused. */
+  expires_at?: number;
+  /** Trust-root document expiry (ISO-8601). An expired set is refused. */
+  valid_until?: string | null;
   [key: string]: unknown;
 }
 
@@ -461,15 +466,60 @@ function isRevokedKid(set: PermitVerificationKeySet, k: PermitVerificationKey): 
   return Array.isArray(set.revoked_keys) && set.revoked_keys.some((r) => r?.kid === k.kid);
 }
 
+/** Canonical key material: the decoded bytes as hex (padding/alphabet-proof). */
+function materialOf(x: unknown): string | null {
+  if (typeof x !== 'string') return null;
+  try {
+    return bytesHex(fromB64url(x.replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Revoked when the entry's kid is revoked OR any revoked entry in the set
- * carries the same key material (`x`): otherwise the holder of a revoked
+ * carries the same key material (compared as decoded bytes, so padding or
+ * base64 alphabet cannot hide an alias): otherwise the holder of a revoked
  * private key could sign under a live alias kid.
  */
 function isRevoked(set: PermitVerificationKeySet, k: PermitVerificationKey): boolean {
   if (isRevokedKid(set, k)) return true;
+  const mine = materialOf(k.x);
+  if (mine === null) return true; // undecodable material is never usable
   const all = Array.isArray(set?.keys) ? set.keys : [];
-  return all.some((o) => o?.x === k.x && typeof o.kid === 'string' && isRevokedKid(set, o));
+  return all.some((o) => typeof o?.kid === 'string' && isRevokedKid(set, o) && materialOf(o.x) === mine);
+}
+
+/** True when the permit's iat lies in the key's validity window (null = open). */
+function inWindow(k: PermitVerificationKey, iat: number): boolean {
+  const iatMs = iat * 1000;
+  const bound = (v: string | null | undefined) =>
+    v === undefined || v === null ? undefined : Date.parse(v);
+  const from = bound(k.valid_from);
+  const until = bound(k.valid_until);
+  return !(
+    (from !== undefined && (Number.isNaN(from) || iatMs < from)) ||
+    (until !== undefined && (Number.isNaN(until) || iatMs > until))
+  );
+}
+
+/**
+ * A key set that states its own expiry (a TrustSnapshot `expires_at` in ms,
+ * or a trust-root `valid_until`) is refused once expired: stale keys and
+ * stale revocation state must not keep authorizing permits.
+ */
+function assertKeySetFresh(set: PermitVerificationKeySet, nowMs: number): void {
+  const exp = set?.expires_at;
+  if (exp !== undefined && (typeof exp !== 'number' || !(exp > nowMs))) {
+    throw new PermitV4VerifyError('key_set_expired', 'the key set has expired (expires_at)');
+  }
+  const until = set?.valid_until;
+  if (until !== undefined && until !== null) {
+    const ms = typeof until === 'string' ? Date.parse(until) : NaN;
+    if (!(ms > nowMs)) {
+      throw new PermitV4VerifyError('key_set_expired', 'the key set has expired (valid_until)');
+    }
+  }
 }
 
 function selectKey(
@@ -478,6 +528,7 @@ function selectKey(
   iat: number,
   defaultKid: string | undefined,
 ): PermitVerificationKey {
+  assertKeySetFresh(set, Date.now());
   const keys = Array.isArray(set?.keys) ? set.keys.filter(isPermitKey) : [];
   let entry: PermitVerificationKey | undefined;
   const wanted = kid ?? defaultKid ?? null;
@@ -493,27 +544,21 @@ function selectKey(
     }
     entry = matches[0]!;
   } else {
-    const live = keys.filter((k) => !isRevoked(set, k));
-    if (live.length !== 1) {
+    // Kid-less fallback: exactly one key that is unrevoked AND valid for this
+    // permit's iat, so a staged next key or a retired one does not block it.
+    const usable = keys.filter((k) => !isRevoked(set, k) && inWindow(k, iat));
+    if (usable.length !== 1) {
       throw new PermitV4VerifyError(
         'kid_required',
-        `token carries no kid and the key set has ${live.length} usable permit keys`,
+        `token carries no kid and the key set has ${usable.length} permit keys valid for it`,
       );
     }
-    entry = live[0]!;
+    entry = usable[0]!;
   }
   if (isRevoked(set, entry)) {
     throw new PermitV4VerifyError('key_revoked', `permit key ${entry.kid} is revoked`);
   }
-  const iatMs = iat * 1000;
-  const bound = (v: string | null | undefined) =>
-    v === undefined || v === null ? undefined : Date.parse(v);
-  const from = bound(entry.valid_from);
-  const until = bound(entry.valid_until);
-  if (
-    (from !== undefined && (Number.isNaN(from) || iatMs < from)) ||
-    (until !== undefined && (Number.isNaN(until) || iatMs > until))
-  ) {
+  if (!inWindow(entry, iat)) {
     throw new PermitV4VerifyError(
       'key_not_valid_for_permit',
       `permit issued outside the validity window of key ${entry.kid}`,

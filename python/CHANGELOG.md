@@ -10,7 +10,7 @@ root's verifier-keys document (merged with its `revoked_keys` ledger), any
 `{"keys": [...]}`, or the SDK's own `TrustRootSnapshot`. The header kid
 selects the `R2_permit` key, with the same rules and reasons as the
 TypeScript SDK (`unknown_kid`, `key_revoked`, `key_not_valid_for_permit`,
-`kid_required`; `default_kid=` for kid-less tokens). The result adds `kid`
+`kid_required`, `key_set_expired`; `default_kid=` for kid-less tokens). The result adds `kid`
 and `verified_with_kid`.
 
 ### Added: full pt.v4 claim decode, typed verify error codes, `execution_payload_hash_accepted` (additive)
