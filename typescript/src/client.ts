@@ -493,7 +493,7 @@ interface ApiKeySelfWire {
   environment: string;
   scopes?: string[];
   allowed_cidrs?: string[] | null;
-  rate_limit_per_minute: number;
+  rate_limit_per_minute?: number | null;
   client_ip?: string | null;
   expires_at?: string | null;
 }
@@ -1670,7 +1670,10 @@ export class AtlaSentClient {
       environment: wire.environment,
       scopes: wire.scopes ?? [],
       allowedCidrs: wire.allowed_cidrs ?? null,
-      rateLimitPerMinute: wire.rate_limit_per_minute,
+      rateLimitPerMinute:
+        typeof wire.rate_limit_per_minute === "number"
+          ? wire.rate_limit_per_minute
+          : null,
       clientIp: wire.client_ip ?? null,
       expiresAt: wire.expires_at ?? null,
       rateLimit,

@@ -621,6 +621,28 @@ class TestAsyncKeySelf:
         assert result.rate_limit is None
 
     @pytest.mark.asyncio
+    async def test_runtime_body_with_no_stored_rate_limit(self, async_client, mocker):
+        body = {
+            "key_id": "0f0e0d0c-0000-4000-8000-0000000000b1",
+            "org_id": "0f0e0d0c-0000-4000-8000-0000000000a1",
+            "organization_id": "0f0e0d0c-0000-4000-8000-0000000000a1",
+            "environment": "test",
+            "scopes": ["evaluate:write", "verify:execute"],
+            "allowed_cidrs": None,
+            "rate_limit_per_minute": None,
+            "client_ip": "203.0.113.5",
+            "expires_at": None,
+        }
+        mocker.patch.object(
+            async_client._client,
+            "get",
+            return_value=_mock_resp(mocker, json_data=body),
+        )
+        result = await async_client.key_self()
+        assert result.rate_limit_per_minute is None
+        assert result.key_id == body["key_id"]
+
+    @pytest.mark.asyncio
     async def test_issues_get_not_post(self, async_client, mocker):
         get_mock = mocker.patch.object(
             async_client._client,

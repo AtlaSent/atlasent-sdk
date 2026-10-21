@@ -8,6 +8,17 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Fixed: `keySelf()` accepts a key with no stored rate limit (contract-conforming)
+
+`GET /v1-api-key-self` is now served by the runtime (atlasent-api#4632); before
+that it did not exist and `keySelf()` always failed with a 404. The runtime
+reports `rate_limit_per_minute` as `null` when the key has no stored limit,
+because enforced limits are per plan (read them from `rateLimit`, parsed from
+`X-RateLimit-*`). `ApiKeySelfResponse.rateLimitPerMinute` is therefore
+`number | null`, and a missing or non-numeric value reads as `null`. The
+contract schema was widened first. Type-level change: code that treated the
+field as always a number needs a null check.
+
 ### Added: `approvalRequestId` on evaluate responses (additive, contract-conforming)
 
 `/v1-evaluate` returns `approval_request_id` on hold and escalate decisions

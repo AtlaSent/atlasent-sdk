@@ -1044,6 +1044,28 @@ class TestKeySelf:
         assert result.rate_limit.limit == 1000
         assert result.rate_limit.remaining == 987
 
+    def test_runtime_body_with_no_stored_rate_limit(self, client, mocker):
+        # The body atlasent-api's v1-api-key-self returns for a key with no
+        # stored limit: rate_limit_per_minute is null, never a made-up number,
+        # and organization_id rides along beside org_id.
+        body = {
+            "key_id": "0f0e0d0c-0000-4000-8000-0000000000b1",
+            "org_id": "0f0e0d0c-0000-4000-8000-0000000000a1",
+            "organization_id": "0f0e0d0c-0000-4000-8000-0000000000a1",
+            "environment": "test",
+            "scopes": ["evaluate:write", "verify:execute"],
+            "allowed_cidrs": None,
+            "rate_limit_per_minute": None,
+            "client_ip": "203.0.113.5",
+            "expires_at": None,
+        }
+        resp = _mock_resp(mocker, json_data=body)
+        mocker.patch.object(client._client, "get", return_value=resp)
+        result = client.key_self()
+        assert result.rate_limit_per_minute is None
+        assert result.org_id == body["org_id"]
+        assert result.scopes == ["evaluate:write", "verify:execute"]
+
     def test_defaults_optional_fields(self, client, mocker):
         minimal = {
             "key_id": "k",

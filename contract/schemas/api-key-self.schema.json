@@ -37,9 +37,9 @@
       "description": "Per-key IP allowlist as CIDR strings (e.g. ['10.0.0.0/8']). null when the key is unrestricted."
     },
     "rate_limit_per_minute": {
-      "type": "integer",
+      "type": ["integer", "null"],
       "minimum": 0,
-      "description": "Server-enforced per-minute rate limit for this key."
+      "description": "The key's stored per-minute rate limit; null when the key has none set. Enforced limits are per plan and reported in X-RateLimit-* headers, not by this field."
     },
     "client_ip": {
       "type": ["string", "null"],

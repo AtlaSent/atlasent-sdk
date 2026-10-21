@@ -814,7 +814,9 @@ class ApiKeySelfResult(BaseModel):
         scopes: Granted scopes (e.g. ``["evaluate", "audit.read"]``).
         allowed_cidrs: Per-key IP allowlist as CIDR strings, or
             ``None`` when the key is unrestricted.
-        rate_limit_per_minute: Server-enforced per-minute rate limit.
+        rate_limit_per_minute: The key's stored per-minute rate limit, or
+            ``None`` when none is set. Enforced limits are per plan; read
+            them from :attr:`rate_limit`.
         client_ip: Client IP as the server observed it.
         expires_at: Server-stored expiry; ``None`` means no auto-expire.
         rate_limit: Per-key rate-limit state from ``X-RateLimit-*``
@@ -827,7 +829,7 @@ class ApiKeySelfResult(BaseModel):
     environment: str
     scopes: list[str] = Field(default_factory=list)
     allowed_cidrs: list[str] | None = None
-    rate_limit_per_minute: int
+    rate_limit_per_minute: int | None = None
     client_ip: str | None = None
     expires_at: str | None = None
     rate_limit: RateLimitState | None = None
