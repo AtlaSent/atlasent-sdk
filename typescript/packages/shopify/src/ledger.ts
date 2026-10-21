@@ -250,9 +250,14 @@ export async function acquireFileLock(
       const fd = openSync(lockPath, "wx");
       try {
         writeFileSync(fd, token);
-      } finally {
+      } catch (err) {
+        // This attempt created the file and nothing else can own it yet; an
+        // empty lock left here would block every writer forever.
         closeSync(fd);
+        unlinkSync(lockPath);
+        throw err;
       }
+      closeSync(fd);
       heldLocks.set(lockPath, token);
       releaseOnExit();
       return token;
