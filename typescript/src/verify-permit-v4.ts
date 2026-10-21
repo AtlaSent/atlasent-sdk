@@ -155,6 +155,7 @@ export interface PermitVerificationKey {
   kty?: string;
   crv?: string;
   role?: string;
+  alg?: string;
   revoked?: boolean;
   /**
    * ISO-8601; when set, the permit's iat must be inside the window.
@@ -475,7 +476,8 @@ function isPermitKey(k: PermitVerificationKey): boolean {
     // sign permits.
     k.role === 'R2_permit' &&
     k.kty === 'OKP' &&
-    k.crv === 'Ed25519'
+    k.crv === 'Ed25519' &&
+    k.alg === 'EdDSA'
   );
 }
 

@@ -81,10 +81,17 @@ describe("kid-aware pt.v4 verification vectors", () => {
     expect((bad as PermitV4VerifyError).reason).toBe("key_set_expired");
   });
 
-  it("an entry with no role (or no kty/crv) is never a permit key", async () => {
+  it("an entry declaring a non-EdDSA alg is never a permit key", async () => {
+    const a = file.cases.find((x) => x.name === "kid_selects_key_a")!;
+    const keys = file.key_set.keys.map((k) => (k.kid === "permit-2026-a" ? { ...k, alg: "RS256" } : k));
+    const err = await verifyPermitV4(a.token, { ...file.key_set, keys }).catch((e: unknown) => e);
+    expect((err as PermitV4VerifyError).reason).toBe("unknown_kid");
+  });
+
+  it("an entry with no role (or no kty/crv/alg) is never a permit key", async () => {
     // Codex repro: the audit key with its role dropped must not sign permits.
     const c = file.cases.find((x) => x.name === "kid_of_non_permit_role")!;
-    for (const field of ["role", "kty", "crv"]) {
+    for (const field of ["role", "kty", "crv", "alg"]) {
       const keys = file.key_set.keys.map((k) => {
         if (k.kid !== "audit-a" && k.kid !== "permit-2026-a") return k;
         const { [field]: _drop, ...rest } = k;

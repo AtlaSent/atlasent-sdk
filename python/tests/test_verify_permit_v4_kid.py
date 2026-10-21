@@ -120,7 +120,7 @@ def test_snapshot_older_than_age_limit_is_refused() -> None:
         verify_permit_v4(case["token"], {**snap, "fetched_at": "yesterday"})
 
 
-@pytest.mark.parametrize("field", ["role", "kty", "crv"])
+@pytest.mark.parametrize("field", ["role", "kty", "crv", "alg"])
 def test_entry_without_explicit_metadata_is_never_a_permit_key(field: str) -> None:
     # Codex repro: the audit key with its role dropped must not sign permits.
     def strip(k: dict) -> dict:
@@ -134,3 +134,14 @@ def test_entry_without_explicit_metadata_is_never_a_permit_key(field: str) -> No
         with pytest.raises(PermitV4VerifyError) as exc:
             verify_permit_v4(case["token"], key_set)
         assert exc.value.reason == "unknown_kid"
+
+
+def test_non_eddsa_alg_is_never_a_permit_key() -> None:
+    keys = [
+        {**k, "alg": "RS256"} if k["kid"] == "permit-2026-a" else k
+        for k in _F["key_set"]["keys"]
+    ]
+    case = next(c for c in _F["cases"] if c["name"] == "kid_selects_key_a")
+    with pytest.raises(PermitV4VerifyError) as exc:
+        verify_permit_v4(case["token"], {**_F["key_set"], "keys": keys})
+    assert exc.value.reason == "unknown_kid"

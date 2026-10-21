@@ -321,6 +321,7 @@ def _is_permit_key(k: dict[str, Any]) -> bool:
         and k.get("role") == "R2_permit"
         and k.get("kty") == "OKP"
         and k.get("crv") == "Ed25519"
+        and k.get("alg") == "EdDSA"
     )
 
 
