@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Makes writing the lock token fail, as a full disk would, while the lock
 // file itself is created.
-const failTokenWrite = vi.hoisted(() => ({ on: false }));
+const failTokenWrite = vi.hoisted(() => ({ on: false, close: false, renameLock: false }));
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
   return {
@@ -16,14 +16,31 @@ vi.mock("node:fs", async (importOriginal) => {
       }
       return fs.writeFileSync(...args);
     },
+    closeSync: (fd: number) => {
+      fs.closeSync(fd);
+      if (failTokenWrite.close) {
+        failTokenWrite.close = false;
+        throw Object.assign(new Error("EIO: i/o error, close"), { code: "EIO" });
+      }
+    },
+    renameSync: (from: import("node:fs").PathLike, to: import("node:fs").PathLike) => {
+      if (failTokenWrite.renameLock && String(from).endsWith(".lock")) {
+        failTokenWrite.renameLock = false;
+        throw Object.assign(new Error("EIO: i/o error, rename"), { code: "EIO" });
+      }
+      return fs.renameSync(from, to);
+    },
   };
 });
 
-const { acquireFileLock, JsonFileLedger } = await import("../src/ledger.js");
+const { acquireFileLock, isLockTracked, JsonFileLedger, removeLockIfHeldBy } = await import("../src/ledger.js");
+const { readFileSync } = await import("node:fs");
 
 let dir = "";
 afterEach(() => {
   failTokenWrite.on = false;
+  failTokenWrite.close = false;
+  failTokenWrite.renameLock = false;
   if (dir) rmSync(dir, { recursive: true, force: true });
   dir = "";
 });
@@ -47,5 +64,29 @@ describe("a lock whose token cannot be written", () => {
       ...({ payment_intent: "pi_1" }),
     });
     expect(await ledger.get("ref-1")).toBeDefined();
+  });
+
+  it("is removed if closing it fails after the token was written", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ledger-lock-init-"));
+    const path = join(dir, "refund-ledger.json");
+    failTokenWrite.close = true;
+    await expect(acquireFileLock(`${path}.lock`, path, { timeoutMs: 100 })).rejects.toThrow(/EIO/);
+    expect(existsSync(`${path}.lock`)).toBe(false);
+    expect(isLockTracked(`${path}.lock`)).toBe(false);
+  });
+});
+
+describe("a release that fails", () => {
+  it("keeps the lock tracked so the exit hook can still remove it", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ledger-lock-init-"));
+    const lockPath = join(dir, "refund-ledger.json.lock");
+    const token = await acquireFileLock(lockPath, join(dir, "refund-ledger.json"), { timeoutMs: 100 });
+    failTokenWrite.renameLock = true;
+    expect(() => removeLockIfHeldBy(lockPath, token)).toThrow(/EIO/);
+    expect(readFileSync(lockPath, "utf8")).toBe(token);
+    expect(isLockTracked(lockPath)).toBe(true);
+    expect(removeLockIfHeldBy(lockPath, token)).toBe(true);
+    expect(isLockTracked(lockPath)).toBe(false);
+    expect(existsSync(lockPath)).toBe(false);
   });
 });

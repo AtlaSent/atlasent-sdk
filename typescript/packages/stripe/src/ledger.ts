@@ -191,12 +191,19 @@ function releaseOnExit(): void {
  * holder's, and otherwise links it straight back. Exported for tests.
  */
 export function removeLockIfHeldBy(lockPath: string, token: string): boolean {
-  if (heldLocks.get(lockPath) === token) heldLocks.delete(lockPath);
+  // Stop tracking the lock only once it is gone or known not to be ours: if
+  // removing it fails, the exit hook must still be able to retry.
+  const untrack = () => {
+    if (heldLocks.get(lockPath) === token) heldLocks.delete(lockPath);
+  };
   const aside = `${lockPath}.${process.pid}.${randomUUID()}.aside`;
   try {
     renameSync(lockPath, aside);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      untrack();
+      return false;
+    }
     throw err;
   }
   let moved: string | undefined;
@@ -212,8 +219,14 @@ export function removeLockIfHeldBy(lockPath: string, token: string): boolean {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
   }
+  untrack();
   unlinkSync(aside);
   return moved === token;
+}
+
+/** Whether this process is still tracking a lock at `lockPath` for release on exit. Exported for tests. */
+export function isLockTracked(lockPath: string): boolean {
+  return heldLocks.has(lockPath);
 }
 
 /** Throws unless the lock at `lockPath` still holds `token`. Exported for tests. */
@@ -244,16 +257,25 @@ export async function acquireFileLock(
   for (;;) {
     try {
       const fd = openSync(lockPath, "wx");
+      // This attempt created the file and nothing else can own it yet. If
+      // writing the token or closing the file fails, remove it: a lock left
+      // here untracked would block every writer until deleted by hand.
+      let closed = false;
       try {
         writeFileSync(fd, token);
-      } catch (err) {
-        // This attempt created the file and nothing else can own it yet; an
-        // empty lock left here would block every writer forever.
+        closed = true; // a failed close still releases the descriptor
         closeSync(fd);
+      } catch (err) {
+        if (!closed) {
+          try {
+            closeSync(fd);
+          } catch {
+            // already reported by the original error
+          }
+        }
         unlinkSync(lockPath);
         throw err;
       }
-      closeSync(fd);
       heldLocks.set(lockPath, token);
       releaseOnExit();
       return token;
