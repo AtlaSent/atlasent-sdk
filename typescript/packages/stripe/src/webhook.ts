@@ -11,7 +11,7 @@
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { PermitLedger } from "./ledger.js";
+import type { LedgerEntry, PermitLedger } from "./ledger.js";
 import type { StripeRefund } from "./stripe.js";
 
 /**
@@ -75,7 +75,13 @@ export async function auditStripeRefund(refund: StripeRefund, ledger: PermitLedg
 
   const gateRef = refund.metadata?.atlasent_gate_ref;
   if (typeof gateRef !== "string" || gateRef.length === 0) return unauthorized("the refund carries no AtlaSent gate reference");
-  const entry = await ledger.get(gateRef);
+  let entry: LedgerEntry | undefined;
+  try {
+    entry = await ledger.get(gateRef);
+  } catch (err) {
+    // Fail closed: a ledger that cannot be read never vouches for a refund.
+    return unauthorized(`the permit ledger is unavailable (${err instanceof Error ? err.message : String(err)})`, gateRef);
+  }
   if (entry === undefined) return unauthorized("the gate reference is not in the permit ledger", gateRef);
   if (entry.aborted_reason !== undefined) {
     return unauthorized(`the gate stopped this refund before issuing it (${entry.aborted_reason})`, gateRef);
@@ -85,7 +91,26 @@ export async function auditStripeRefund(refund: StripeRefund, ledger: PermitLedg
     return unauthorized(`the permit was for ${entry.amount_cents} cents, the refund was ${refund.amount}`, gateRef);
   }
   if (entry.refund_id !== undefined && entry.refund_id !== refundId) return unauthorized("the permit was used by a different refund", gateRef);
-  if (!(await ledger.claim(gateRef, refundId))) return unauthorized("the permit already accounts for another refund", gateRef);
+  let claimed: boolean;
+  try {
+    claimed = await ledger.claim(gateRef, refundId);
+  } catch (err) {
+    // Includes LedgerLockError: the claim was not recorded, so it is not authorized.
+    return unauthorized(`the permit ledger is unavailable (${err instanceof Error ? err.message : String(err)})`, gateRef);
+  }
+  if (!claimed) {
+    // Say why: the entry may have changed since it was read above.
+    let now: LedgerEntry | undefined;
+    try {
+      now = await ledger.get(gateRef);
+    } catch {
+      now = undefined;
+    }
+    if (now?.aborted_reason !== undefined) {
+      return unauthorized(`the gate stopped this refund before issuing it (${now.aborted_reason})`, gateRef);
+    }
+    return unauthorized("the permit already accounts for another refund", gateRef);
+  }
   return { verdict: "authorized", refundId, paymentIntent: refund.payment_intent, amountCents: refund.amount, gateRef };
 }
 
