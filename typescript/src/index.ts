@@ -170,6 +170,7 @@ export {
   type PermitV4VerifyReason,
   type PermitVerificationKey,
   type PermitVerificationKeySet,
+  type PermitV4KeySetInput,
 } from "./verify-permit-v4.js";
 export {
   VERIFY_ERROR_CODES,
