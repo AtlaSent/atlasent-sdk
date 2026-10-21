@@ -135,6 +135,11 @@ alarm **detects**, it does not prevent:
   the demo logs. In a real deployment, wire it to Slack, PagerDuty or email.
   A staff member copying a note onto another refund is flagged too.
 
+  The CLI, the agent and the app server can share one `LEDGER_PATH`: every
+  operation re-reads the file, and every write holds `<LEDGER_PATH>.lock`
+  and replaces the file atomically. If the ledger cannot be read or locked,
+  the refund is reported as unauthorized, never as authorized.
+
 **Prevention is a store setting:** remove the refund permission from staff
 accounts (Shopify admin → Settings → Users → each staff member → order
 permissions) so that the "Refund via AtlaSent" button is the only refund path

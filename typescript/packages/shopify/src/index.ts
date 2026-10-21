@@ -29,7 +29,17 @@ export {
   type RefundSnapshot,
   type ResumeRequest,
 } from "./guard.js";
-export { InMemoryLedger, JsonFileLedger, refundNote, gateRefFromNote, type PermitLedger, type LedgerEntry, type PendingApproval } from "./ledger.js";
+export {
+  InMemoryLedger,
+  JsonFileLedger,
+  LedgerLockError,
+  refundNote,
+  gateRefFromNote,
+  type JsonFileLedgerOptions,
+  type PermitLedger,
+  type LedgerEntry,
+  type PendingApproval,
+} from "./ledger.js";
 export { verifyShopifyWebhookHmac, auditRefundWebhook, type RefundWebhookPayload, type RefundAuditVerdict } from "./webhook.js";
 export { verifySessionToken, signSessionToken, SessionTokenError, type VerifiedSession } from "./session-token.js";
 export { createGateHandler, tokenExchangeAdmin, type GateServerDeps } from "./server.js";
