@@ -829,7 +829,9 @@ class ApiKeySelfResult(BaseModel):
     environment: str
     scopes: list[str] = Field(default_factory=list)
     allowed_cidrs: list[str] | None = None
-    rate_limit_per_minute: int | None = None
+    # Required but nullable: an explicit null means "no stored limit"; a
+    # missing field is a malformed response and fails validation.
+    rate_limit_per_minute: int | None
     client_ip: str | None = None
     expires_at: str | None = None
     rate_limit: RateLimitState | None = None

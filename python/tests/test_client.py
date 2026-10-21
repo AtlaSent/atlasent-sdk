@@ -2,6 +2,7 @@
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from atlasent.audit import AuditEventsResult, AuditExportResult
 from atlasent.client import AtlaSentClient
@@ -1065,6 +1066,14 @@ class TestKeySelf:
         assert result.rate_limit_per_minute is None
         assert result.org_id == body["org_id"]
         assert result.scopes == ["evaluate:write", "verify:execute"]
+
+    def test_missing_rate_limit_is_rejected_not_read_as_none(self, client, mocker):
+        # null means "no stored limit"; an absent field is a drifted response.
+        body = {"key_id": "k", "org_id": "o", "environment": "test"}
+        resp = _mock_resp(mocker, json_data=body)
+        mocker.patch.object(client._client, "get", return_value=resp)
+        with pytest.raises(ValidationError):
+            client.key_self()
 
     def test_defaults_optional_fields(self, client, mocker):
         minimal = {
