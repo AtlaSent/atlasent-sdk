@@ -77,7 +77,7 @@ on any failure.
 
 | System | Checked | Not checkable from here |
 |---|---|---|
-| AtlaSent | key accepted; key is a `test` key; scopes `evaluate:write` + `verify:execute`; expiry | whether the key may claim an approved permit |
+| AtlaSent | key accepted; key is a `test` key; scopes `evaluate:write` + `verify:execute`; `approvals:read` for resuming escalations (read from the runtime's `GET /v1-api-keys/check`) | the key's expiry (the key check does not report it); that a claim-time approval (verified actor classes) can be claimed: these packages cannot mint an actor identity, so such a claim fails closed |
 | AtlaSent, `--probe-policy` | allow under $50; deny not delivered; deny past 30 days. Each failure names the likely cause: no bundle, or an action class that routes everything to approval | |
 | AtlaSent, `--probe-escalation` | $72 escalates **and** the runtime returns an approval request id, without which nothing can be resumed | |
 | Shopify | token accepted; Partner development store; `read_orders`/`write_orders` | whether staff can still refund in the admin |

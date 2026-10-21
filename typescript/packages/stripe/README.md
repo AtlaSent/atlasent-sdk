@@ -161,7 +161,7 @@ You need three keys, kept apart on purpose:
 |---|---|---|
 | `STRIPE_SETUP_KEY`, a test secret key `sk_test_...` | the seed script only | creating PaymentIntents |
 | `STRIPE_SECRET_KEY`, a **restricted** test key `rk_test_...` | the gate | read PaymentIntents and Charges, write Refunds |
-| `ATLASENT_API_KEY`, a test key | the gate | `evaluate:write`, `verify:execute` |
+| `ATLASENT_API_KEY`, a test key | the gate | `evaluate:write`, `verify:execute`; plus `approvals:read` to resume escalated refunds, with the same key that asked |
 
 1. **Load the policy** onto the AtlaSent test org's `finance.payment.authorize`
    bundle (atlasent-api `examples/fake-store-refunds/policy.json`), active for

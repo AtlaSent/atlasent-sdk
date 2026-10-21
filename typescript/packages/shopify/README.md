@@ -175,7 +175,7 @@ test account that a restricted staff member cannot refund.
 You need the following:
 
 - An active `finance.payment.authorize` bundle carrying the policy above.
-- An API key with `evaluate:write` and `verify:execute`.
+- An API key with `evaluate:write` and `verify:execute`, plus `approvals:read` to resume escalated refunds. Resume with the same key that asked: only it may claim the permit.
 - `ATLASENT_ENVIRONMENT` set to the environment the bundle is published for.
 
 If the org's `finance.payment.authorize` action class has
