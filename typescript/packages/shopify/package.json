@@ -1,0 +1,33 @@
+{
+  "name": "@atlasent/shopify",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AtlaSent refund-time authorization gate for the Shopify Admin API: evaluate + verify finance.payment.authorize BEFORE refundCreate runs. Includes a demo admin button, refund webhook alarm and AI support agent.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "refund": "tsx src/cli.ts",
+    "serve": "tsx src/server.ts",
+    "agent": "tsx src/agent-cli.ts",
+    "seed-dev-store": "tsx scripts/seed-dev-store.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AtlaSent/atlasent-sdk.git",
+    "directory": "typescript/packages/shopify"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.136.0",
+    "@atlasent/sdk": "file:../../",
+    "@types/node": "^25.6.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.5"
+  }
+}

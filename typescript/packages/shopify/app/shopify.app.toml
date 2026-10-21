@@ -1,0 +1,25 @@
+# Shopify app config for the AtlaSent refund-gate demo.
+# Replace every REPLACE_ value, then link and deploy with the Shopify CLI
+# (`shopify app config link`, `shopify app deploy`). See ../README.md.
+
+client_id = "REPLACE_WITH_CLIENT_ID"
+name = "AtlaSent Refund Gate (demo)"
+handle = "atlasent-refund-gate-demo"
+application_url = "https://REPLACE_WITH_YOUR_TUNNEL_OR_HOST"
+embedded = true
+
+[access_scopes]
+# read_orders: order, fulfillment and transaction facts. write_orders: refundCreate.
+# The dev-store seed script needs more; see README.
+scopes = "read_orders,write_orders"
+
+[auth]
+redirect_urls = ["https://REPLACE_WITH_YOUR_TUNNEL_OR_HOST/auth/callback"]
+
+[webhooks]
+api_version = "2025-10"
+
+  [[webhooks.subscriptions]]
+  # The alarm: every refund, however it was made, is checked against the permit ledger.
+  topics = ["refunds/create"]
+  uri = "/webhooks/refunds-create"

@@ -1,0 +1,31 @@
+{
+  "name": "@atlasent/refund-evidence",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Evidence report for AtlaSent-gated refunds (every refund, the rule that decided it, refunds made around the gate), plus a one-command demo across the Shopify gate, the Stripe gate and the support agent's refund tool.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "demo": "tsx src/demo.ts",
+    "report": "tsx src/report-cli.ts",
+    "preflight": "tsx src/preflight.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AtlaSent/atlasent-sdk.git",
+    "directory": "typescript/packages/refund-evidence"
+  },
+  "devDependencies": {
+    "@atlasent/sdk": "file:../../",
+    "@types/node": "^25.6.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.5"
+  }
+}

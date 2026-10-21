@@ -408,6 +408,10 @@ class EvaluateResult(BaseModel):
     authority_basis: dict[str, Any] | None = None
     # Present iff decision == 'hold'. ID of the auto-created HITL escalation.
     escalation_id: str | None = None
+    # Present on hold/escalate when the runtime created an approval request.
+    # A person resolves it in the AtlaSent console; poll GET /v1-approvals/{id}
+    # and, once approved, claim the permit with POST /v1-approvals/{id}/claim-permit.
+    approval_request_id: str | None = None
     # Two-stage authorization lifecycle (atlasent-api #1617): the human
     # approval REQUIREMENT for this evaluation, distinct from its current
     # satisfaction state (``human_approval_status``). ``None`` on responses

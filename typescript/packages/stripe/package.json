@@ -1,0 +1,29 @@
+{
+  "name": "@atlasent/stripe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AtlaSent refund-time authorization gate for Stripe: evaluate + verify finance.payment.authorize BEFORE POST /v1/refunds runs, plus a refund.created webhook alarm.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "refund": "tsx src/cli.ts",
+    "webhook": "tsx src/webhook-server.ts",
+    "seed-test-payments": "tsx src/seed.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AtlaSent/atlasent-sdk.git",
+    "directory": "typescript/packages/stripe"
+  },
+  "devDependencies": {
+    "@atlasent/sdk": "file:../../",
+    "@types/node": "^25.6.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.5"
+  }
+}

@@ -409,6 +409,7 @@ interface EvaluateWire {
     expires_at?: string;
   };
   escalation_id?: string;
+  approval_request_id?: string;
   /**
    * Two-stage authorization lifecycle (#1617): the human-approval
    * REQUIREMENT for this evaluation, distinct from its current
@@ -897,6 +898,9 @@ export class AtlaSentClient {
         },
       }),
       ...(wire.escalation_id !== undefined && { escalationId: wire.escalation_id }),
+      ...(typeof wire.approval_request_id === "string" && wire.approval_request_id.length > 0 && {
+        approvalRequestId: wire.approval_request_id,
+      }),
       ...(wire.human_approval_required !== undefined && {
         humanApprovalRequired: wire.human_approval_required,
       }),

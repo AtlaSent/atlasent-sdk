@@ -1185,6 +1185,20 @@ describe("X-RateLimit-* header parsing", () => {
     expect(result.humanApprovalStatus).toBe("pending");
   });
 
+  it("maps approval_request_id from a hold/escalate response", async () => {
+    const wire = { decision: "escalate", deny_code: "MANAGER_APPROVAL_REQUIRED", approval_request_id: "apr_123" };
+    const client = makeClient(mockFetch(() => jsonResponse(wire)));
+    const result = await client.evaluate({ agent: "bot", action: "act" });
+    expect(result.approvalRequestId).toBe("apr_123");
+  });
+
+  it("omits approvalRequestId when absent or empty", async () => {
+    const client = makeClient(mockFetch(() => jsonResponse(EVALUATE_PERMIT_WIRE)));
+    expect((await client.evaluate({ agent: "bot", action: "act" })).approvalRequestId).toBeUndefined();
+    const empty = makeClient(mockFetch(() => jsonResponse({ decision: "escalate", approval_request_id: "" })));
+    expect((await empty.evaluate({ agent: "bot", action: "act" })).approvalRequestId).toBeUndefined();
+  });
+
   it("omits humanApprovalRequired and humanApprovalStatus when absent from response (backward compat with older runtimes)", async () => {
     const client = makeClient(mockFetch(() => jsonResponse(EVALUATE_PERMIT_WIRE)));
     const result = await client.evaluate({ agent: "bot", action: "act" });

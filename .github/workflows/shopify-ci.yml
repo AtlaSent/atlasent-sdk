@@ -1,0 +1,78 @@
+name: Shopify CI
+
+# @atlasent/shopify (refund gate, admin-button backend, webhook alarm, support
+# agent). typescript-ci.yml covers only the root package's test/**. The
+# package links the core SDK through `file:../../`, so core changes trigger
+# this too and core is built first. The admin UI extension under app/ is
+# bundled with esbuild as a syntax check; it is not unit-tested here.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "typescript/packages/shopify/**"
+      - "typescript/src/**"
+      - "typescript/package.json"
+      - "typescript/package-lock.json"
+      - ".github/workflows/shopify-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "typescript/packages/shopify/**"
+      - "typescript/src/**"
+      - "typescript/package.json"
+      - "typescript/package-lock.json"
+      - ".github/workflows/shopify-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ts-shopify:
+    name: "TS shopify / Node ${{ matrix.node-version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20.x", "22.x"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: |
+            typescript/package-lock.json
+            typescript/packages/shopify/package-lock.json
+
+      - name: Build the core SDK the package links to
+        working-directory: typescript
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install dependencies
+        working-directory: typescript/packages/shopify
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: typescript/packages/shopify
+        run: npm run typecheck
+
+      - name: Test
+        working-directory: typescript/packages/shopify
+        run: npm test
+
+      - name: Syntax-check the admin UI extension
+        working-directory: typescript/packages/shopify
+        run: >-
+          npx esbuild app/extensions/atlasent-refund/src/ActionExtension.jsx
+          --bundle --external:react '--external:@shopify/*' --jsx=automatic
+          --outfile=/dev/null
+
+      - name: Seed script dry run
+        working-directory: typescript/packages/shopify
+        run: npm run seed-dev-store -- --dry-run
