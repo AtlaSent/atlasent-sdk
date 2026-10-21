@@ -196,3 +196,80 @@ describe("the published trust root is still trusted", () => {
     }
   });
 });
+
+describe("revocation material must be a 32-byte Ed25519 key (Codex P1)", () => {
+  for (const [label, x] of [
+    ["empty", ""],
+    ["one byte", "AA"],
+    ["31 bytes", Buffer.alloc(31, 1).toString("base64url")],
+    ["33 bytes", Buffer.alloc(33, 1).toString("base64url")],
+  ] as const) {
+    it(`a revoked entry whose x decodes to ${label} is unresolved`, async () => {
+      await refusedBoth({ keys: [A, { ...B, revoked: true, x }] });
+    });
+    it(`a ledger kid whose entry's x decodes to ${label} is unresolved`, async () => {
+      await refusedBoth({ keys: [A, { ...B, x }], revoked_keys: [{ kid: B.kid }] });
+    });
+  }
+});
+
+describe("SDK loaders keep unreadable revocation data visible (Codex P1)", () => {
+  const index = { valid_until: "2099-01-01T00:00:00Z", issued_at: "2026-01-01T00:00:00Z" };
+  const fetchOf = (keys: unknown, revocations: unknown): typeof fetch =>
+    (async (url: string | URL) => {
+      const u = String(url);
+      const body = u.endsWith("atlasent-verifier-keys.json")
+        ? { keys }
+        : u.endsWith("atlasent-revocations.json")
+          ? revocations
+          : index;
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+
+  for (const [label, revocations] of [
+    ["a ledger that is an object", { revoked_keys: { kid: "permit-gone" } }],
+    ["a ledger that is null", { revoked_keys: null }],
+    ["a ledger row without a kid", { revoked_keys: [{ revoked_at: "2026-10-01T00:00:00Z" }] }],
+    ["a ledger row with an empty kid", { revoked_keys: [{ kid: "" }] }],
+  ] as const) {
+    it(`bootstrapTrust marks ${label} and the verifier refuses the snapshot`, async () => {
+      const { bootstrapTrust } = await import("../src/trust.js");
+      const snap = await bootstrapTrust("https://keys.example", undefined, undefined, fetchOf([A], revocations));
+      expect(snap.revocations_unreadable).toBe(true);
+      await refusedBoth(snap);
+    });
+  }
+
+  it("bootstrapTrust marks a dropped key entry (it may have been a revocation)", async () => {
+    const { kid: _k, ...anon } = { ...B, revoked: true };
+    const { bootstrapTrust } = await import("../src/trust.js");
+    const snap = await bootstrapTrust("https://keys.example", undefined, undefined, fetchOf([A, anon], { revoked_keys: [] }));
+    expect(snap.keys).toHaveLength(1);
+    await refusedBoth(snap);
+  });
+
+  it("a sound bootstrap carries no marker and verifies (control)", async () => {
+    const { bootstrapTrust } = await import("../src/trust.js");
+    const snap = await bootstrapTrust("https://keys.example", undefined, undefined, fetchOf([A, B], {}));
+    expect(snap.revocations_unreadable).toBeUndefined();
+    expect(await reason(KID_A, snap)).toBe("ok");
+  });
+
+  it("TrustRootManager keeps its snapshot when the refreshed ledger is unreadable", async () => {
+    const { TrustRootManager } = await import("../src/trustRoot.js");
+    const mgr = new TrustRootManager(VENDORED_TRUST_ROOT_SNAPSHOT, {
+      disableRefresh: true,
+      refreshBaseUrl: "https://keys.example",
+      fetch: fetchOf([A], { revoked_keys: { kid: "permit-gone" } }),
+    });
+    await (mgr as unknown as { _doRefresh(): Promise<void> })._doRefresh();
+    expect(mgr.getSnapshot().keys).toBe(VENDORED_TRUST_ROOT_SNAPSHOT.keys);
+    const sound = new TrustRootManager(VENDORED_TRUST_ROOT_SNAPSHOT, {
+      disableRefresh: true,
+      refreshBaseUrl: "https://keys.example",
+      fetch: fetchOf([A], {}),
+    });
+    await (sound as unknown as { _doRefresh(): Promise<void> })._doRefresh();
+    expect(sound.getSnapshot().keys).toEqual([A]);
+  });
+});

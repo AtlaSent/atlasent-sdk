@@ -218,3 +218,62 @@ def test_published_trust_root_reaches_the_signature_check() -> None:
     doc = {"keys": V["keys"], "revoked_keys": V["revoked_keys"]}
     assert _reason(NO_KID, doc) == "signature_invalid"
     assert all(isinstance(k.get("revoked"), bool) for k in V["keys"])
+
+
+_SHORT_X = [
+    "",
+    "AA",
+    base64.urlsafe_b64encode(b"\x01" * 31).decode().rstrip("="),
+    base64.urlsafe_b64encode(b"\x01" * 33).decode().rstrip("="),
+]
+
+
+@pytest.mark.parametrize("x", _SHORT_X, ids=["empty", "1-byte", "31-byte", "33-byte"])
+def test_revoked_entry_material_must_be_32_bytes(x: str) -> None:
+    _refused_both({"keys": [A, {**B, "revoked": True, "x": x}]})
+
+
+@pytest.mark.parametrize("x", _SHORT_X, ids=["empty", "1-byte", "31-byte", "33-byte"])
+def test_ledger_entry_material_must_be_32_bytes(x: str) -> None:
+    _refused_both({"keys": [A, {**B, "x": x}], "revoked_keys": [{"kid": B["kid"]}]})
+
+
+@pytest.mark.parametrize(
+    "doc_entry",
+    [
+        {k: v for k, v in B.items() if k != "revoked"},
+        {**B, "revoked": "false"},
+        {**B, "revoked": None},
+    ],
+    ids=["missing", "string", "null"],
+)
+def test_loaded_snapshot_keeps_unknown_revoked_visible(doc_entry: dict) -> None:
+    # The trust-root loader must not turn an unknown `revoked` into the
+    # dataclass default False ("not revoked").
+    from atlasent.trust_root import TrustRootSnapshot, _make_trust_root_key
+
+    key = _make_trust_root_key(doc_entry)
+    assert key.revoked is None
+    snap = TrustRootSnapshot(
+        valid_until="2099-01-01T00:00:00Z",
+        issued_at="2026-01-01T00:00:00Z",
+        keys=[_make_trust_root_key(A), key],
+    )
+    _refused_both(snap)
+
+
+def test_loaded_snapshot_with_boolean_revoked_control() -> None:
+    from atlasent.trust_root import TrustRootSnapshot, _make_trust_root_key
+
+    snap = TrustRootSnapshot(
+        valid_until="2099-01-01T00:00:00Z",
+        issued_at="2026-01-01T00:00:00Z",
+        keys=[_make_trust_root_key(A), _make_trust_root_key(B)],
+    )
+    assert _reason(KID_A, snap) == "ok"
+
+
+@pytest.mark.parametrize("marker", [True, False, None], ids=repr)
+def test_unreadable_revocations_marker_refuses(marker: object) -> None:
+    # The TypeScript bootstrapTrust() marker; any presence refuses.
+    _refused_both({"keys": [A, B], "revocations_unreadable": marker})

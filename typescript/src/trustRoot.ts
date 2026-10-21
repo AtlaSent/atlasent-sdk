@@ -228,6 +228,22 @@ export class TrustRootManager {
       ]);
 
       if (!index.valid_until || !Array.isArray(keys.keys)) return;
+      // A revocation ledger that is present but unreadable keeps the current
+      // snapshot rather than installing "nothing revoked" (atlasent-api#4640).
+      const ledger: unknown = revoc?.revoked_keys;
+      if (
+        ledger !== undefined &&
+        (!Array.isArray(ledger) ||
+          !ledger.every(
+            (r) =>
+              r !== null &&
+              typeof r === "object" &&
+              typeof (r as Record<string, unknown>).kid === "string" &&
+              ((r as Record<string, unknown>).kid as string).length > 0,
+          ))
+      ) {
+        return;
+      }
 
       this._snapshot = {
         valid_until: index.valid_until,

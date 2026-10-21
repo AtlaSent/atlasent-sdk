@@ -510,7 +510,10 @@ function materialOf(x: unknown): string | null {
   // is unreadable, never silently skipped by a lenient decoder.
   if (!/^[A-Za-z0-9_-]*$/.test(v) || v.length % 4 === 1) return null;
   try {
-    return bytesHex(fromB64url(v));
+    const raw = fromB64url(v);
+    // Only a raw 32-byte Ed25519 key is material: "" or "AA" decodes, but
+    // names no key, so a revocation carrying it is unresolved, not resolved.
+    return raw.length === 32 ? bytesHex(raw) : null;
   } catch {
     return null;
   }
@@ -609,6 +612,11 @@ function assertKeySetTrustworthy(set: PermitVerificationKeySet): void {
   const refuse = (why: string): never => {
     throw new PermitV4VerifyError('key_set_untrustworthy', why);
   };
+  // bootstrapTrust() marks a snapshot whose documents it could not read in
+  // full (a dropped entry, an unreadable ledger): it may hide a revocation.
+  if ((set as Record<string, unknown> | undefined)?.revocations_unreadable !== undefined) {
+    refuse('the trust snapshot was built from unreadable revocation data');
+  }
   const keys: unknown = set?.keys;
   if (!Array.isArray(keys)) refuse('the key set has no keys array');
   const entries = keys as unknown[];

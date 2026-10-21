@@ -392,6 +392,10 @@ def _assert_key_set_trustworthy(key_set: Any) -> None:
     def refuse(why: str) -> NoReturn:
         raise PermitV4VerifyError(REASON_KEY_SET_UNTRUSTWORTHY, why)
 
+    # Same marker the TypeScript bootstrapTrust() sets on a snapshot whose
+    # documents could not be read in full: it may hide a revocation.
+    if _field(key_set, "revocations_unreadable") is not _ABSENT:
+        refuse("the trust snapshot was built from unreadable revocation data")
     raw_keys = _field(key_set, "keys")
     if not isinstance(raw_keys, list):
         refuse("the key set has no keys array")
@@ -448,9 +452,12 @@ def _material(x: Any) -> str | None:
     if _B64URL_RE.fullmatch(v) is None or len(v) % 4 == 1:
         return None
     try:
-        return base64.urlsafe_b64decode(v + "=" * (-len(v) % 4)).hex()
+        raw = base64.urlsafe_b64decode(v + "=" * (-len(v) % 4))
     except Exception:
         return None
+    # Only a raw 32-byte Ed25519 key is material: "" or "AA" decodes, but
+    # names no key, so a revocation carrying it is unresolved, not resolved.
+    return raw.hex() if len(raw) == 32 else None
 
 
 def _in_window(k: dict[str, Any], iat: int) -> bool:

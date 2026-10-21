@@ -63,6 +63,14 @@ export interface TrustSnapshot {
    * server response when available, otherwise from fetched_at + TTL.
    */
   expires_at: number;
+  /**
+   * Set when the fetched documents could not be read in full: a key entry
+   * without a string kid/kty was dropped, or `revoked_keys` was present but
+   * not a list of rows each naming a kid. Either could have hidden a
+   * revocation, so `verifyPermitV4` refuses a snapshot carrying it
+   * (`key_set_untrustworthy`, atlasent-api#4640). Absent on a sound fetch.
+   */
+  revocations_unreadable?: true;
 }
 
 /** Default snapshot TTL: 24 hours in milliseconds. */
@@ -160,6 +168,23 @@ export async function bootstrapTrust(
         typeof (k as Record<string, unknown>).kty === "string",
     ) as JWK[];
 
+    // A dropped key entry, or a revocations ledger that is present but not a
+    // list of rows each naming a kid, may have hidden a revocation: the
+    // snapshot is marked so the permit verifier refuses it (fail closed).
+    const ledgerWire: unknown = revocWire.revoked_keys;
+    const revocationsUnreadable =
+      keys.length !== rawKeys.length ||
+      !Array.isArray(keysWire.keys) ||
+      (ledgerWire !== undefined &&
+        (!Array.isArray(ledgerWire) ||
+          !ledgerWire.every(
+            (r) =>
+              r !== null &&
+              typeof r === "object" &&
+              typeof (r as Record<string, unknown>).kid === "string" &&
+              ((r as Record<string, unknown>).kid as string).length > 0,
+          )));
+
     // Revoked KIDs from the dedicated revocations document.
     const revokedKids: string[] = Array.isArray(revocWire.revoked_keys)
       ? revocWire.revoked_keys
@@ -183,6 +208,7 @@ export async function bootstrapTrust(
       revoked_kids: revokedKids,
       fetched_at: fetchedAt,
       expires_at: Number.isFinite(expiresAt) ? expiresAt : fetchedAt + ttlMs,
+      ...(revocationsUnreadable ? { revocations_unreadable: true as const } : {}),
     };
   } catch (err) {
     if (pinnedSnapshot !== undefined) {

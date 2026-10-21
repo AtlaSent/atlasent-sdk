@@ -36,6 +36,14 @@ base64 / base64url alphabet strictly, and a non-string `valid_from` /
 unchanged. The published trust root (atlasent-keys `.well-known`) satisfies
 every rule.
 
+Only a raw 32-byte Ed25519 key counts as readable material: a revocation
+whose `x` decodes to anything else (`""`, `"AA"`) is unresolved.
+`bootstrapTrust()` keeps its lenient parsing, but when it drops a key entry
+or meets a present-but-unreadable `revoked_keys` it now sets
+`revocations_unreadable: true` on the `TrustSnapshot`, and the verifier
+refuses such a snapshot. `TrustRootManager`'s refresh keeps its current
+snapshot when the fetched ledger is present but unreadable.
+
 ### Added: kid-aware pt.v4 verification (reading side only, additive)
 
 `verifyPermitV4(token, key)` now accepts a COSE protected header with or

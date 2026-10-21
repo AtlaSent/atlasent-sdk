@@ -30,6 +30,13 @@ base64 / base64url alphabet strictly, and a non-string `valid_from` /
 unchanged. The published trust root (atlasent-keys `.well-known`) satisfies
 every rule.
 
+Only a raw 32-byte Ed25519 key counts as readable material: a revocation
+whose `x` decodes to anything else (`""`, `"AA"`) is unresolved. The
+trust-root loader no longer turns a missing or non-boolean `revoked` into
+`TrustRootKey.revoked = False`; it keeps `None`, so the verifier refuses the
+snapshot. A key set carrying the `revocations_unreadable` marker (set by the
+TypeScript `bootstrapTrust()`) is refused too.
+
 ### Added: kid-aware pt.v4 verification (reading side only, additive)
 
 `verify_permit_v4()` accepts a protected header with or without a `kid`.
