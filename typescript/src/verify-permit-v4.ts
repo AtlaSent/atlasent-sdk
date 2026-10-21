@@ -488,11 +488,18 @@ function isRevokedKid(set: PermitVerificationKeySet, k: PermitVerificationKey): 
   return Array.isArray(set.revoked_keys) && set.revoked_keys.some((r) => r?.kid === k.kid);
 }
 
+/** `s` without trailing `=` padding (a linear scan, not a backtracking regex). */
+function stripPadding(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 0x3d) end--;
+  return s.slice(0, end);
+}
+
 /** Canonical key material: the decoded bytes as hex (padding/alphabet-proof). */
 function materialOf(x: unknown): string | null {
   if (typeof x !== 'string') return null;
   try {
-    return bytesHex(fromB64url(x.replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')));
+    return bytesHex(fromB64url(stripPadding(x).replace(/\+/g, '-').replace(/\//g, '_')));
   } catch {
     return null;
   }

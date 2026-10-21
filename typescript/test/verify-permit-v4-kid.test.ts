@@ -169,6 +169,16 @@ describe("kid-aware pt.v4 verification vectors", () => {
       expect((err as PermitV4VerifyError).reason).toBe("key_role_conflict");
     });
 
+    it("a pathological x (many '=' before other text) is refused quickly, not matched", async () => {
+      const set = {
+        ...file.key_set,
+        keys: [...file.key_set.keys, { ...keyOf("permit-2026-a"), kid: "audit-pad", role: "R3_audit", x: "=".repeat(200_000) + "!" }],
+      } as PermitVerificationKeySet;
+      const t0 = Date.now();
+      expect((await verifyPermitV4(kidA().token, set)).verifiedWithKid).toBe("permit-2026-a");
+      expect(Date.now() - t0).toBeLessThan(2000);
+    });
+
     it("defaultKid cannot route a kid-less token around the alias", async () => {
       const c = file.cases.find((x) => x.name === "no_kid_with_cross_role_alias")!;
       const err = await verifyPermitV4(c.token, file.alias_set, { defaultKid: "permit-2026-a" }).catch(
