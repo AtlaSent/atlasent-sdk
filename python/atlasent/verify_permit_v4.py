@@ -51,6 +51,9 @@ REASON_KEY_NOT_VALID_FOR_PERMIT = "key_not_valid_for_permit"
 REASON_KID_REQUIRED = "kid_required"
 REASON_KEY_SET_EXPIRED = "key_set_expired"
 
+#: Maximum TrustSnapshot age (ms), the TypeScript SDK's DEFAULT_TRUST_TTL_MS.
+TRUST_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
 
 class PermitV4VerifyError(Exception):
     """Raised when a pt.v4.* permit fails verification. ``reason`` is stable."""
@@ -386,10 +389,24 @@ def _assert_key_set_fresh(key_set: Any) -> None:
     if isinstance(key_set, Mapping):
         until = key_set.get("valid_until")
         exp_ms = key_set.get("expires_at")
+        fetched_ms = key_set.get("fetched_at")
     else:
         until = getattr(key_set, "valid_until", None)
         exp_ms = getattr(key_set, "expires_at", None)
+        fetched_ms = getattr(key_set, "fetched_at", None)
     now = _time.time()
+    # A TrustSnapshot-shaped set (``fetched_at`` in epoch ms) is also refused
+    # once older than the snapshot age limit, even if ``expires_at`` is later
+    # (same rule as the TypeScript SDK's isTrustSnapshotExpired()).
+    if fetched_ms is not None and not (
+        isinstance(fetched_ms, (int, float))
+        and not isinstance(fetched_ms, bool)
+        and now * 1000 <= fetched_ms + TRUST_SNAPSHOT_MAX_AGE_MS
+    ):
+        raise PermitV4VerifyError(
+            REASON_KEY_SET_EXPIRED,
+            "the key set is older than the trust snapshot age limit (fetched_at)",
+        )
     if exp_ms is not None and not (
         isinstance(exp_ms, (int, float)) and exp_ms / 1000 > now
     ):

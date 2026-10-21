@@ -14,6 +14,8 @@ import {
   type PermitVerificationKeySet,
   verifyPermitV4,
 } from "../src/index.js";
+import { DEFAULT_TRUST_TTL_MS, type TrustSnapshot } from "../src/trust.js";
+import { TRUST_SNAPSHOT_MAX_AGE_MS } from "../src/verify-permit-v4.js";
 
 interface KidFile {
   pinned_key_b64: string;
@@ -59,6 +61,28 @@ describe("kid-aware pt.v4 verification vectors", () => {
     const c = file.cases.find((x) => x.name === "kid_selects_key_b")!;
     const res = await verifyPermitV4(c.token, file.key_set, { defaultKid: "permit-2026-a" });
     expect(res.verifiedWithKid).toBe("permit-2026-b");
+  });
+
+  it("a TrustSnapshot older than the age limit is refused even with a later expires_at", async () => {
+    const c = file.cases.find((x) => x.name === "kid_selects_key_a")!;
+    const now = Date.now();
+    // Typed as the SDK's own TrustSnapshot: it must be accepted without a cast.
+    const snap: TrustSnapshot = {
+      keys: file.key_set.keys as unknown as TrustSnapshot["keys"],
+      revoked_kids: [],
+      fetched_at: now - TRUST_SNAPSHOT_MAX_AGE_MS - 60_000,
+      expires_at: now + 60 * 60 * 1000,
+    };
+    const err = await verifyPermitV4(c.token, snap).catch((e: unknown) => e);
+    expect((err as PermitV4VerifyError).reason).toBe("key_set_expired");
+    const fresh = await verifyPermitV4(c.token, { ...snap, fetched_at: now - 60_000 });
+    expect(fresh.verifiedWithKid).toBe("permit-2026-a");
+    const bad = await verifyPermitV4(c.token, { ...snap, fetched_at: "yesterday" as unknown as number }).catch((e: unknown) => e);
+    expect((bad as PermitV4VerifyError).reason).toBe("key_set_expired");
+  });
+
+  it("the age limit equals trust.ts DEFAULT_TRUST_TTL_MS", () => {
+    expect(TRUST_SNAPSHOT_MAX_AGE_MS).toBe(DEFAULT_TRUST_TTL_MS);
   });
 
   it("a flat revoked_kids list (TrustSnapshot shape) also revokes", async () => {

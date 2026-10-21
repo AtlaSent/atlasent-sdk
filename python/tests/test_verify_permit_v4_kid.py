@@ -97,3 +97,24 @@ def test_accepts_the_sdk_trust_root_snapshot_dataclasses() -> None:
     with pytest.raises(PermitV4VerifyError) as exc:
         verify_permit_v4(ledger["token"], snap)
     assert exc.value.reason == "key_revoked"
+
+
+def test_snapshot_older_than_age_limit_is_refused() -> None:
+    import time
+
+    from atlasent.verify_permit_v4 import TRUST_SNAPSHOT_MAX_AGE_MS
+
+    case = next(c for c in _F["cases"] if c["name"] == "kid_selects_key_a")
+    now_ms = time.time() * 1000
+    snap = {
+        **_F["key_set"],
+        "fetched_at": now_ms - TRUST_SNAPSHOT_MAX_AGE_MS - 60_000,
+        "expires_at": now_ms + 3_600_000,
+    }
+    with pytest.raises(PermitV4VerifyError) as exc:
+        verify_permit_v4(case["token"], snap)
+    assert exc.value.reason == "key_set_expired"
+    fresh = verify_permit_v4(case["token"], {**snap, "fetched_at": now_ms - 60_000})
+    assert fresh.verified_with_kid == "permit-2026-a"
+    with pytest.raises(PermitV4VerifyError):
+        verify_permit_v4(case["token"], {**snap, "fetched_at": "yesterday"})

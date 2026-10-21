@@ -30,6 +30,16 @@
  * Deno, and Bun. No external dependencies.
  */
 
+import type { TrustSnapshot } from './trust.js';
+import type { TrustRootSnapshot } from './trustRoot.js';
+
+/**
+ * What `verifyPermitV4` accepts as a key set: a generic `{ keys }` document,
+ * or either SDK trust snapshot as-is (`bootstrapTrust()`'s `TrustSnapshot`,
+ * `TrustRootManager`'s `TrustRootSnapshot`). All are read the same way.
+ */
+export type PermitV4KeySetInput = PermitVerificationKeySet | TrustSnapshot | TrustRootSnapshot;
+
 export type PermitV4VerifyReason =
   | 'bad_format'
   | 'bad_prefix'
@@ -170,6 +180,12 @@ export interface PermitVerificationKeySet {
   revoked_kids?: string[];
   /** TrustSnapshot expiry (epoch ms). An expired set is refused. */
   expires_at?: number;
+  /**
+   * TrustSnapshot fetch time (epoch ms). A set older than
+   * `TRUST_SNAPSHOT_MAX_AGE_MS` is refused even if `expires_at` is later,
+   * matching `isTrustSnapshotExpired()`'s independent age limit.
+   */
+  fetched_at?: number;
   /** Trust-root document expiry (ISO-8601). An expired set is refused. */
   valid_until?: string | null;
   [key: string]: unknown;
@@ -508,7 +524,17 @@ function inWindow(k: PermitVerificationKey, iat: number): boolean {
  * or a trust-root `valid_until`) is refused once expired: stale keys and
  * stale revocation state must not keep authorizing permits.
  */
+/**
+ * Maximum TrustSnapshot age, the same 24 h as trust.ts DEFAULT_TRUST_TTL_MS
+ * (a test pins the two equal; not imported, to keep this module standalone).
+ */
+export const TRUST_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 function assertKeySetFresh(set: PermitVerificationKeySet, nowMs: number): void {
+  const fetched = set?.fetched_at;
+  if (fetched !== undefined && (typeof fetched !== 'number' || !(nowMs <= fetched + TRUST_SNAPSHOT_MAX_AGE_MS))) {
+    throw new PermitV4VerifyError('key_set_expired', 'the key set is older than the trust snapshot age limit (fetched_at)');
+  }
   const exp = set?.expires_at;
   if (exp !== undefined && (typeof exp !== 'number' || !(exp > nowMs))) {
     throw new PermitV4VerifyError('key_set_expired', 'the key set has expired (expires_at)');
@@ -588,7 +614,7 @@ function selectKey(
  */
 export async function verifyPermitV4(
   token: string,
-  key: string | PermitVerificationKeySet,
+  key: string | PermitV4KeySetInput,
   opts?: { checkExpiry?: boolean; defaultKid?: string },
 ): Promise<PermitV4VerifyResult> {
   if (typeof token !== 'string') {
@@ -633,7 +659,10 @@ export async function verifyPermitV4(
   if (typeof key === 'string') {
     rawKey = fromB64(key);
   } else {
-    const entry = selectKey(key, headerKid, claims.iat, opts?.defaultKid);
+    // The selector re-checks every field at runtime (an entry without `x`,
+    // role or curve mismatch is never selected), so the snapshot shapes are
+    // read through the generic type.
+    const entry = selectKey(key as PermitVerificationKeySet, headerKid, claims.iat, opts?.defaultKid);
     rawKey = fromB64url(entry.x);
     verifiedWithKid = entry.kid;
   }
