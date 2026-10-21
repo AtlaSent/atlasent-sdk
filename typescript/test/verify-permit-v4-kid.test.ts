@@ -23,8 +23,10 @@ interface KidFile {
   single_set: PermitVerificationKeySet;
   rotation_set: PermitVerificationKeySet;
   expired_set: PermitVerificationKeySet;
+  alias_set: PermitVerificationKeySet;
+  roleless_alias_set: PermitVerificationKeySet;
   expected_claims: Record<string, unknown>;
-  cases: Array<{ name: string; token: string; key: "pinned" | "key_set" | "single_set" | "rotation_set" | "expired_set"; expect: string; kid?: string }>;
+  cases: Array<{ name: string; token: string; key: "pinned" | "key_set" | "single_set" | "rotation_set" | "expired_set" | "alias_set" | "roleless_alias_set"; expect: string; kid?: string }>;
 }
 
 const file = JSON.parse(
@@ -122,5 +124,64 @@ describe("kid-aware pt.v4 verification vectors", () => {
     const set = { ...file.single_set, revoked_keys: [{ kid: "permit-2026-a" }] };
     const err = await verifyPermitV4(c.token, set).catch((e: unknown) => e);
     expect((err as PermitV4VerifyError).reason).toBe("kid_required");
+  });
+
+  describe("cross-role key aliases (permit material re-published under another role)", () => {
+    const kidA = () => file.cases.find((x) => x.name === "kid_selects_key_a")!;
+    const kidB = () => file.cases.find((x) => x.name === "kid_selects_key_b")!;
+    const keyOf = (kid: string) => file.key_set.keys.find((k) => k.kid === kid)!;
+
+    it("an audit alias of one permit key refuses that key only", async () => {
+      const set = {
+        ...file.key_set,
+        keys: [...file.key_set.keys, { ...keyOf("permit-2026-b"), kid: "audit-b", role: "R3_audit" }],
+      } as PermitVerificationKeySet;
+      const err = await verifyPermitV4(kidB().token, set).catch((e: unknown) => e);
+      expect((err as PermitV4VerifyError).reason).toBe("key_role_conflict");
+      // permit-2026-a's material has only R2_permit entries: still verifies.
+      expect((await verifyPermitV4(kidA().token, set)).verifiedWithKid).toBe("permit-2026-a");
+    });
+
+    for (const [label, role] of [
+      ["lower-case role", "r2_permit"],
+      ["role as an array", ["R2_permit"]],
+      ["role null", null],
+      ["empty role", ""],
+    ] as const) {
+      it(`a non-permit alias with ${label} refuses the permit key`, async () => {
+        const set = {
+          ...file.key_set,
+          keys: [...file.key_set.keys, { ...keyOf("permit-2026-a"), kid: "alias", role }],
+        } as unknown as PermitVerificationKeySet;
+        const err = await verifyPermitV4(kidA().token, set).catch((e: unknown) => e);
+        expect((err as PermitV4VerifyError).reason).toBe("key_role_conflict");
+      });
+    }
+
+    it("the alias is matched on decoded bytes, whatever its spelling", async () => {
+      const x = keyOf("permit-2026-a").x;
+      const std = Buffer.from(x, "base64url").toString("base64"); // padded, standard alphabet
+      const set = {
+        ...file.key_set,
+        keys: [...file.key_set.keys, { ...keyOf("permit-2026-a"), kid: "audit-std", role: "R3_audit", x: std }],
+      } as PermitVerificationKeySet;
+      const err = await verifyPermitV4(kidA().token, set).catch((e: unknown) => e);
+      expect((err as PermitV4VerifyError).reason).toBe("key_role_conflict");
+    });
+
+    it("defaultKid cannot route a kid-less token around the alias", async () => {
+      const c = file.cases.find((x) => x.name === "no_kid_with_cross_role_alias")!;
+      const err = await verifyPermitV4(c.token, file.alias_set, { defaultKid: "permit-2026-a" }).catch(
+        (e: unknown) => e,
+      );
+      expect((err as PermitV4VerifyError).reason).toBe("key_role_conflict");
+    });
+
+    it("the vectors' audit key no longer shares material with any permit key", () => {
+      const audit = new Set(file.key_set.keys.filter((k) => k.role !== "R2_permit").map((k) => k.x.replace(/=+$/, "")));
+      for (const k of file.key_set.keys.filter((k) => k.role === "R2_permit")) {
+        expect(audit.has(k.x.replace(/=+$/, "")), k.kid).toBe(false);
+      }
+    });
   });
 });

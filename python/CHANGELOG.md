@@ -10,8 +10,11 @@ root's verifier-keys document (merged with its `revoked_keys` ledger), any
 `{"keys": [...]}`, or the SDK's own `TrustRootSnapshot`. The header kid
 selects the `R2_permit` key, with the same rules and reasons as the
 TypeScript SDK (`unknown_kid`, `key_revoked`, `key_not_valid_for_permit`,
-`kid_required`, `key_set_expired`; `default_kid=` for kid-less tokens). The result adds `kid`
-and `verified_with_kid`.
+`kid_required`, `key_set_expired`, `key_role_conflict`; `default_kid=` for kid-less tokens). The result adds `kid`
+and `verified_with_kid`. A permit key whose material also appears on any
+entry with a role other than `R2_permit` (an audit key, or no role) is
+refused with `key_role_conflict`: role eligibility belongs to the key
+material, not to one entry.
 
 ### Added: full pt.v4 claim decode, typed verify error codes, `execution_payload_hash_accepted` (additive)
 

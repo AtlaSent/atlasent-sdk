@@ -24,7 +24,9 @@ are refused. A kid-less token uses the single usable key or
 `opts.defaultKid`; otherwise it fails with `kid_required`. New reasons:
 `unknown_kid`, `key_revoked`, `key_not_valid_for_permit`, `kid_required`,
 `key_set_expired` (a set whose own `expires_at`/`valid_until` has passed).
-Revocation propagates to every entry with the same key bytes; the kid-less
+Revocation propagates to every entry with the same key bytes. A permit key
+whose bytes also appear on an entry with any role other than `R2_permit` (an
+audit key, or no role) is refused with `key_role_conflict`. The kid-less
 fallback counts only keys valid for the permit's `iat`.
 The result adds `kid` and `verifiedWithKid`. Any other header label, a
 duplicate label, a non-EdDSA alg or a text-string kid still fails with

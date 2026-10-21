@@ -31,6 +31,8 @@ def _key(name: str):
         "single_set": _F["single_set"],
         "rotation_set": _F["rotation_set"],
         "expired_set": _F["expired_set"],
+        "alias_set": _F["alias_set"],
+        "roleless_alias_set": _F["roleless_alias_set"],
     }[name]
 
 
@@ -145,3 +147,78 @@ def test_non_eddsa_alg_is_never_a_permit_key() -> None:
     with pytest.raises(PermitV4VerifyError) as exc:
         verify_permit_v4(case["token"], {**_F["key_set"], "keys": keys})
     assert exc.value.reason == "unknown_kid"
+
+
+def _case(name: str) -> dict:
+    return next(c for c in _F["cases"] if c["name"] == name)
+
+
+def _key_entry(kid: str) -> dict:
+    return next(k for k in _F["key_set"]["keys"] if k["kid"] == kid)
+
+
+def test_audit_alias_refuses_that_permit_key_only() -> None:
+    alias = {**_key_entry("permit-2026-b"), "kid": "audit-b", "role": "R3_audit"}
+    key_set = {**_F["key_set"], "keys": [*_F["key_set"]["keys"], alias]}
+    with pytest.raises(PermitV4VerifyError) as exc:
+        verify_permit_v4(_case("kid_selects_key_b")["token"], key_set)
+    assert exc.value.reason == "key_role_conflict"
+    ok = verify_permit_v4(_case("kid_selects_key_a")["token"], key_set)
+    assert ok.verified_with_kid == "permit-2026-a"
+
+
+@pytest.mark.parametrize("role", ["r2_permit", ["R2_permit"], None, ""])
+def test_any_non_permit_role_alias_is_refused(role: object) -> None:
+    alias = {**_key_entry("permit-2026-a"), "kid": "alias", "role": role}
+    key_set = {**_F["key_set"], "keys": [*_F["key_set"]["keys"], alias]}
+    with pytest.raises(PermitV4VerifyError) as exc:
+        verify_permit_v4(_case("kid_selects_key_a")["token"], key_set)
+    assert exc.value.reason == "key_role_conflict"
+
+
+def test_alias_matched_on_decoded_bytes_in_standard_base64() -> None:
+    import base64
+
+    x = _key_entry("permit-2026-a")["x"]
+    std = base64.b64encode(base64.urlsafe_b64decode(x + "=" * (-len(x) % 4))).decode()
+    alias = {
+        **_key_entry("permit-2026-a"),
+        "kid": "audit-std",
+        "role": "R3_audit",
+        "x": std,
+    }
+    key_set = {**_F["key_set"], "keys": [*_F["key_set"]["keys"], alias]}
+    with pytest.raises(PermitV4VerifyError) as exc:
+        verify_permit_v4(_case("kid_selects_key_a")["token"], key_set)
+    assert exc.value.reason == "key_role_conflict"
+
+
+def test_default_kid_cannot_route_around_alias() -> None:
+    with pytest.raises(PermitV4VerifyError) as exc:
+        verify_permit_v4(
+            _case("no_kid_with_cross_role_alias")["token"],
+            _F["alias_set"],
+            default_kid="permit-2026-a",
+        )
+    assert exc.value.reason == "key_role_conflict"
+
+
+def test_alias_in_object_shaped_key_set_is_refused() -> None:
+    from types import SimpleNamespace
+
+    snap = SimpleNamespace(
+        keys=_F["alias_set"]["keys"], revoked_keys=[], revoked_kids=[]
+    )
+    with pytest.raises(PermitV4VerifyError) as exc:
+        verify_permit_v4(_case("kid_with_cross_role_alias")["token"], snap)
+    assert exc.value.reason == "key_role_conflict"
+
+
+def test_vector_audit_key_shares_no_material_with_permit_keys() -> None:
+    keys = _F["key_set"]["keys"]
+    audit = {k["x"].rstrip("=") for k in keys if k["role"] != "R2_permit"}
+    assert not [
+        k["kid"]
+        for k in keys
+        if k["role"] == "R2_permit" and k["x"].rstrip("=") in audit
+    ]

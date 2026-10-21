@@ -52,7 +52,8 @@ export type PermitV4VerifyReason =
   | 'key_revoked'
   | 'key_not_valid_for_permit'
   | 'kid_required'
-  | 'key_set_expired';
+  | 'key_set_expired'
+  | 'key_role_conflict';
 
 export class PermitV4VerifyError extends Error {
   readonly reason: PermitV4VerifyReason;
@@ -511,6 +512,19 @@ function isRevoked(set: PermitVerificationKeySet, k: PermitVerificationKey): boo
   return all.some((o) => typeof o?.kid === 'string' && isRevokedKid(set, o) && materialOf(o.x) === mine);
 }
 
+/**
+ * Role eligibility is a property of the key MATERIAL, not of one entry: when
+ * any other entry in the set carries the same key bytes under a role other
+ * than R2_permit (an R3 audit key, or an entry with no role), the holder of
+ * that private key could sign permits, so the permit key is refused.
+ */
+function hasCrossRoleAlias(set: PermitVerificationKeySet, k: PermitVerificationKey): boolean {
+  const mine = materialOf(k.x);
+  if (mine === null) return false; // undecodable: already refused by isRevoked
+  const all = Array.isArray(set?.keys) ? set.keys : [];
+  return all.some((o) => o !== null && typeof o === 'object' && o.role !== 'R2_permit' && materialOf(o.x) === mine);
+}
+
 /** True when the permit's iat lies in the key's validity window (null = open). */
 function inWindow(k: PermitVerificationKey, iat: number): boolean {
   const iatMs = iat * 1000;
@@ -585,6 +599,12 @@ function selectKey(
       );
     }
     entry = usable[0]!;
+  }
+  if (hasCrossRoleAlias(set, entry)) {
+    throw new PermitV4VerifyError(
+      'key_role_conflict',
+      `permit key ${entry.kid} shares key material with a non-permit entry`,
+    );
   }
   if (isRevoked(set, entry)) {
     throw new PermitV4VerifyError('key_revoked', `permit key ${entry.kid} is revoked`);

@@ -50,6 +50,7 @@ REASON_KEY_REVOKED = "key_revoked"
 REASON_KEY_NOT_VALID_FOR_PERMIT = "key_not_valid_for_permit"
 REASON_KID_REQUIRED = "kid_required"
 REASON_KEY_SET_EXPIRED = "key_set_expired"
+REASON_KEY_ROLE_CONFLICT = "key_role_conflict"
 
 #: Maximum TrustSnapshot age (ms), the TypeScript SDK's DEFAULT_TRUST_TTL_MS.
 TRUST_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000
@@ -452,6 +453,16 @@ def _select_key(
         m = _material(k.get("x"))
         return revoked_kid(k) or m is None or m in revoked_material
 
+    # Role eligibility is a property of the key MATERIAL: if any entry carries
+    # the same key bytes under a role other than R2_permit (an R3 audit key,
+    # or an entry with no role), whoever holds that private key could sign
+    # permits, so the permit key is refused.
+    non_permit_material = {
+        m
+        for d in all_entries
+        if d.get("role") != "R2_permit" and (m := _material(d.get("x")))
+    }
+
     wanted = kid if kid is not None else default_kid
     if wanted is not None:
         matches = [k for k in keys if k["kid"] == wanted]
@@ -471,6 +482,11 @@ def _select_key(
                 f"{len(usable)} permit keys valid for it",
             )
         entry = usable[0]
+    if _material(entry.get("x")) in non_permit_material:
+        raise PermitV4VerifyError(
+            REASON_KEY_ROLE_CONFLICT,
+            f"permit key {entry['kid']} shares key material with a non-permit entry",
+        )
     if revoked(entry):
         raise PermitV4VerifyError(
             REASON_KEY_REVOKED, f"permit key {entry['kid']} is revoked"

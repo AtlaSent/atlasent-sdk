@@ -31,7 +31,10 @@ vectors are synthetic.
 These are for verifiers only; the runtime does not mint a kid yet. Each token
 reuses the claims bytes of the runtime-minted `full` token, under a different
 protected header, re-signed with the same test seed (or with the RFC 8032
-test-2 seed for `permit-2026-b`). Both SDKs must accept or reject every case
+test-2 seed for `permit-2026-b`). The audit entry `audit-a` has its own seed
+(RFC 8032 test-1024): an audit key that shares material with a permit key is
+a cross-role alias, and `alias_set` / `roleless_alias_set` pin that a verifier
+refuses it (`key_role_conflict`). Both SDKs must accept or reject every case
 with the stated reason:
 
 - TypeScript: `typescript/test/verify-permit-v4-kid.test.ts`

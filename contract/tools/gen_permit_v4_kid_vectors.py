@@ -34,6 +34,10 @@ SEED_B = bytes.fromhex("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed
 # REVOKED entries, so revocation never touches SEED_A / SEED_B's live keys.
 SEED_C = bytes.fromhex("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7")
 SEED_D = bytes.fromhex("833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42")
+# RFC 8032 test-1024 seed: the AUDIT (R3) key's own material. An audit key
+# must never share material with a permit key (cross-role alias, refused), so
+# audit-a no longer reuses SEED_A.
+SEED_E = bytes.fromhex("f5e5767cf153319517630f226876b86c8160cc583bc013744c6bf255f5cc0ee5")
 
 
 def b64u(b: bytes) -> str:
@@ -141,7 +145,7 @@ KEY_SET = {
         {**jwk("permit-2025-old", SEED_C, revoked=True), "x": pub_x(SEED_C) + "="},
         # A live entry re-publishing the revoked permit-2025-old material.
         jwk("permit-alias-of-old", SEED_C),
-        jwk("audit-a", SEED_A, role="R3_audit"),
+        jwk("audit-a", SEED_E, role="R3_audit"),
         jwk("permit-future", SEED_A, valid_from="2099-01-01T00:00:00Z"),
         jwk("permit-open-ended", SEED_A, valid_from=None, valid_until=None),
         # Revoked through the trust-root revocation ledger only (its own
@@ -162,6 +166,23 @@ ROTATION_SET = {
     "keys": [
         jwk("permit-2026-a", SEED_A),
         jwk("permit-next", SEED_B, valid_from="2099-01-01T00:00:00Z", valid_until=None),
+    ]
+}
+# Cross-role alias: the permit key's material re-published under an AUDIT
+# role (x padded, so only a byte-level comparison links them). Whoever holds
+# the audit private key could sign permits, so the permit key is refused.
+ALIAS_SET = {
+    "keys": [
+        jwk("permit-2026-a", SEED_A),
+        {**jwk("audit-alias-of-a", SEED_A, role="R3_audit"), "x": pub_x(SEED_A) + "="},
+    ]
+}
+# The same alias through an entry with no role at all: not a permit key, so
+# its material is not permit-only either.
+ROLELESS_ALIAS_SET = {
+    "keys": [
+        jwk("permit-2026-a", SEED_A),
+        {k: v for k, v in jwk("unroled-alias-of-a", SEED_A).items() if k != "role"},
     ]
 }
 # A key set that states its own expiry, already passed.
@@ -238,7 +259,7 @@ cases = [
     },
     {
         "name": "kid_of_non_permit_role",
-        "token": sign(hdr_kid(b"audit-a"), payload, SEED_A),
+        "token": sign(hdr_kid(b"audit-a"), payload, SEED_E),
         "key": "key_set",
         "expect": "unknown_kid",
     },
@@ -263,6 +284,19 @@ cases = [
     },
     {"name": "no_kid_mid_rotation_uses_the_key_valid_for_iat", "token": full["token"], "key": "rotation_set", "expect": "ok"},
     {"name": "expired_key_set", "token": full["token"], "key": "expired_set", "expect": "key_set_expired"},
+    {
+        "name": "kid_with_cross_role_alias",
+        "token": sign(hdr_kid(b"permit-2026-a"), payload, SEED_A),
+        "key": "alias_set",
+        "expect": "key_role_conflict",
+    },
+    {"name": "no_kid_with_cross_role_alias", "token": full["token"], "key": "alias_set", "expect": "key_role_conflict"},
+    {
+        "name": "kid_with_roleless_alias",
+        "token": sign(hdr_kid(b"permit-2026-a"), payload, SEED_A),
+        "key": "roleless_alias_set",
+        "expect": "key_role_conflict",
+    },
     {"name": "no_kid_ambiguous_key_set", "token": full["token"], "key": "key_set", "expect": "kid_required"},
     {
         "name": "extra_header_label",
@@ -306,6 +340,8 @@ json.dump(
         "single_set": SINGLE_SET,
         "rotation_set": ROTATION_SET,
         "expired_set": EXPIRED_SET,
+        "alias_set": ALIAS_SET,
+        "roleless_alias_set": ROLELESS_ALIAS_SET,
         "expected_claims": full["expected_claims"],
         "cases": cases,
     },
