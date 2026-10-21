@@ -26,7 +26,7 @@
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
-import { DEFAULT_APPROVALS_BASE_URL } from "../../stripe/src/approvals.js";
+import { DEFAULT_APPROVALS_BASE_URL, resolveRuntimeBaseUrl } from "../../stripe/src/approvals.js";
 import { AtlaSentClient, type ApiKeySelfResponse, type EvaluateRequest, type EvaluateResponse } from "@atlasent/sdk";
 
 export type CheckStatus = "pass" | "fail" | "not_checked";
@@ -218,9 +218,8 @@ export async function checkShopify(
  * 2026-10-21).
  */
 export async function fetchKeyCheck(doFetch: typeof fetch, opts: { apiKey: string; baseUrl: string; timeoutMs?: number }): Promise<KeyInfo> {
-  let end = opts.baseUrl.length;
-  while (end > 0 && opts.baseUrl.charCodeAt(end - 1) === 47) end--;
-  const res = await doFetch(`${opts.baseUrl.slice(0, end)}/v1-api-keys/check`, {
+  // Same normalization as AtlaSentClient, so a bare hosted URL reaches /functions/v1.
+  const res = await doFetch(`${resolveRuntimeBaseUrl(opts.baseUrl)}/v1-api-keys/check`, {
     method: "GET",
     headers: { authorization: `Bearer ${opts.apiKey}` },
     signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),

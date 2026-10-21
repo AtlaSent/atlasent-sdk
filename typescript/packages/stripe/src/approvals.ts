@@ -17,6 +17,32 @@
 export const DEFAULT_APPROVALS_BASE_URL = "https://api.atlasent.io/functions/v1";
 
 /** Statuses on which a permit can be claimed. Everything else that is not "pending" is final and has no permit. */
+/** Hosts of AtlaSent's hosted runtime, where functions live under /functions/v1. */
+const HOSTED_RUNTIME_HOSTS: ReadonlySet<string> = new Set(["api.atlasent.io", "kttccumlnmdtupgbyfue.supabase.co", "lwnqpmnxpeyhpxvastku.supabase.co"]);
+
+/**
+ * The SDK's base-URL rule (typescript/src/baseUrl.ts `resolveBaseUrl`; keep in
+ * step, a test compares them): strip trailing slashes, and give a hosted host
+ * with no path `/functions/v1`, where the gateway serves functions. Any other
+ * host or explicit path passes through.
+ */
+export function resolveRuntimeBaseUrl(baseUrl: string): string {
+  let end = baseUrl.length;
+  while (end > 0 && baseUrl.charCodeAt(end - 1) === 47) end--;
+  const trimmed = baseUrl.slice(0, end);
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return trimmed;
+  }
+  const atRoot = parsed.pathname === "" || parsed.pathname === "/";
+  if (atRoot && parsed.search === "" && parsed.hash === "" && HOSTED_RUNTIME_HOSTS.has(parsed.hostname.toLowerCase())) {
+    return `${trimmed}/functions/v1`;
+  }
+  return trimmed;
+}
+
 export const CLAIMABLE_APPROVAL_STATUSES: ReadonlySet<string> = new Set(["approved", "approved_awaiting_claim"]);
 
 export type ApprovalStatus = { found: false } | { found: true; status: string; reEvaluationDecision?: string };
@@ -41,10 +67,7 @@ export function assertApprovalRequestId(id: string): string {
 
 export function createApprovalsClient(opts: { apiKey: string; baseUrl?: string; fetch?: typeof fetch; timeoutMs?: number }): ApprovalsApi {
   const doFetch = opts.fetch ?? fetch;
-  const raw = opts.baseUrl ?? DEFAULT_APPROVALS_BASE_URL;
-  let end = raw.length;
-  while (end > 0 && raw.charCodeAt(end - 1) === 47) end--;
-  const base = raw.slice(0, end);
+  const base = resolveRuntimeBaseUrl(opts.baseUrl ?? DEFAULT_APPROVALS_BASE_URL);
   const timeoutMs = opts.timeoutMs ?? 10_000;
   const headers = { authorization: `Bearer ${opts.apiKey}`, "content-type": "application/json" };
 
