@@ -13,6 +13,8 @@ import { AtlaSentClient } from "@atlasent/sdk";
 import { createAdminClient, normalizeShopDomain } from "./admin.js";
 import { runSupportAgent } from "./agent.js";
 import { guardedShopifyRefund } from "./guard.js";
+import { appendEvidence } from "./evidence-log.js";
+import type { RefundDecisionRecord } from "./decision-record.js";
 import { JsonFileLedger } from "./ledger.js";
 
 function env(name: string): string {
@@ -33,6 +35,7 @@ const atlasent = new AtlaSentClient({
 const environment = env("ATLASENT_ENVIRONMENT");
 const ledger = new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json");
 const customerEmail = env("CUSTOMER_EMAIL");
+const evidenceLog = process.env.EVIDENCE_LOG;
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 let history: Anthropic.Beta.BetaMessageParam[] = [];
@@ -47,7 +50,14 @@ for (;;) {
       anthropic: new Anthropic(),
       customerEmail,
       lookupOrder: (id) => shopify.getOrder(id, { includeEmail: true }),
-      refund: (req) => guardedShopifyRefund(shopify, atlasent, req, { actor: "agent:pinecone-support", environment, ledger, shop }),
+      refund: (req) =>
+        guardedShopifyRefund(shopify, atlasent, req, {
+          actor: "agent:pinecone-support",
+          environment,
+          ledger,
+          shop,
+          ...(evidenceLog ? { onDecision: (r: RefundDecisionRecord) => appendEvidence(evidenceLog, r) } : {}),
+        }),
     },
     history,
   );

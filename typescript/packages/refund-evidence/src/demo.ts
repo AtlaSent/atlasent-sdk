@@ -28,12 +28,14 @@ import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "../../shopify
 import type { ApprovalsApi } from "../../shopify/src/approvals.js";
 import { InMemoryLedger as ShopifyLedger } from "../../shopify/src/ledger.js";
 import { auditRefundWebhook } from "../../shopify/src/webhook.js";
+import { alarmRecord as shopifyAlarmRecord } from "../../shopify/src/evidence-log.js";
 import { runSupportTool, type SupportAgentDeps } from "../../shopify/src/agent.js";
 import { guardedStripeRefund, resumeApprovedStripeRefund } from "../../stripe/src/guard.js";
 import { InMemoryLedger as StripeLedger } from "../../stripe/src/ledger.js";
 import { auditStripeRefund } from "../../stripe/src/webhook.js";
+import { alarmRecord as stripeAlarmRecord } from "../../stripe/src/evidence-log.js";
 import { staticDeliveryFacts } from "../../stripe/src/facts.js";
-import { REFUND_ALARM_SCHEMA, type RefundAlarmRecord, type RefundDecisionRecord } from "./records.js";
+import type { RefundAlarmRecord, RefundDecisionRecord } from "./records.js";
 import { buildEvidenceReport, formatMoney, outcomeText, type EvidenceReport } from "./report.js";
 import { createSimulatedRuntime, SimShopify, SimStripe } from "./sim.js";
 
@@ -155,34 +157,12 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
   say("  stripe  pi_2002   $85.00 refunded by a teammate in the Stripe Dashboard, after the manager declined it");
 
   for (const payload of shopify.webhooks) {
-    const v = await auditRefundWebhook(payload, shopifyLedger);
-    alarms.push({
-      schema: REFUND_ALARM_SCHEMA,
-      at: now().toISOString(),
-      system: "shopify",
-      refund_id: v.refundId,
-      target: `gid://shopify/Order/${v.orderId}`,
-      amount_cents: v.amountCents,
-      currency: "USD",
-      verdict: v.verdict,
-      reason: v.verdict === "unauthorized" ? v.reason : null,
-      gate_ref: v.gateRef ?? null,
-    });
+    // The same record the Shopify server appends with EVIDENCE_LOG set.
+    alarms.push(shopifyAlarmRecord(await auditRefundWebhook(payload, shopifyLedger), payload, now()));
   }
   for (const refund of stripe.events) {
-    const v = await auditStripeRefund(refund, stripeLedger);
-    alarms.push({
-      schema: REFUND_ALARM_SCHEMA,
-      at: now().toISOString(),
-      system: "stripe",
-      refund_id: v.refundId,
-      target: v.verdict === "ignored" ? null : v.paymentIntent,
-      amount_cents: v.verdict === "ignored" ? null : v.amountCents,
-      currency: refund.currency.toUpperCase(),
-      verdict: v.verdict,
-      reason: v.verdict === "authorized" ? null : v.reason,
-      gate_ref: v.verdict === "ignored" ? null : (v.gateRef ?? null),
-    });
+    // The same record the Stripe webhook server appends with EVIDENCE_LOG set.
+    alarms.push(stripeAlarmRecord(await auditStripeRefund(refund, stripeLedger), refund, now()));
   }
   const flagged = alarms.filter((a) => a.verdict === "unauthorized");
   say(`Alarm: ${alarms.length - flagged.length} platform refund(s) matched a permit, ${flagged.length} flagged.`);

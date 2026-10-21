@@ -21,6 +21,7 @@ import type { RefundDecisionRecord } from "./decision-record.js";
 import { JsonFileLedger, type PermitLedger } from "./ledger.js";
 import { SessionTokenError, verifySessionToken } from "./session-token.js";
 import { auditRefundWebhook, verifyShopifyWebhookHmac, type RefundAuditVerdict, type RefundWebhookPayload } from "./webhook.js";
+import { alarmRecord, appendEvidence } from "./evidence-log.js";
 
 export interface GateServerDeps {
   clientId: string;
@@ -37,6 +38,8 @@ export interface GateServerDeps {
   approvals?: ApprovalsApi;
   /** Evidence log: one record per refund decision. */
   onDecision?: (record: RefundDecisionRecord) => void | Promise<void>;
+  /** Called with every refunds/create verdict, e.g. to append to the evidence log. Its failure never changes the response. */
+  onVerdict?: (verdict: RefundAuditVerdict, payload: RefundWebhookPayload, shop: string) => void | Promise<void>;
   now?: () => Date;
 }
 
@@ -126,6 +129,7 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
       { approvalRequestId: body.approvalRequestId, resumedBy: `shopify-staff:${who.shop}/${who.userId ?? "unknown"}` },
       gateOptions(who.shop, who.userId),
     );
+    warnIfNotLogged(result);
     return send(res, 200, describeResult(result));
   }
 
@@ -166,7 +170,15 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
       },
       gateOptions(shop, userId),
     );
+    warnIfNotLogged(result);
     return send(res, 200, describeResult(result));
+  }
+
+  /** The decision stands, but the evidence log lost it: say so where the operator looks. */
+  function warnIfNotLogged(result: { gateRef: string; logWarning?: string }): void {
+    if (result.logWarning !== undefined) {
+      console.error(JSON.stringify({ warning: "decision_not_logged", gateRef: result.gateRef, error: result.logWarning }));
+    }
   }
 
   async function handleWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -199,6 +211,11 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
     }
     const verdict = await auditRefundWebhook(payload, deps.ledger);
     if (verdict.verdict === "unauthorized") await deps.onUnauthorizedRefund?.(verdict, shop);
+    try {
+      await deps.onVerdict?.(verdict, payload, shop);
+    } catch (err) {
+      console.error(JSON.stringify({ warning: "verdict_not_logged", refundId: verdict.refundId, error: err instanceof Error ? err.message : String(err) }));
+    }
     // 200 either way: the refund already happened; a retry would change nothing.
     return send(res, 200, { verdict: verdict.verdict });
   }
@@ -306,6 +323,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     ? async (s: string) => createAdminClient({ shop: s, accessToken: staticToken })
     : tokenExchangeAdmin({ clientId, clientSecret });
   const port = Number(process.env.PORT ?? 3000);
+  const evidenceLog = process.env.EVIDENCE_LOG;
   createServer(
     createGateHandler({
       clientId,
@@ -323,6 +341,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         // Demo alert sink. Wire this to Slack, PagerDuty or email in a real deployment.
         console.error(JSON.stringify({ alert: "refund_without_atlasent_permit", shop: s, ...v }));
       },
+      ...(evidenceLog
+        ? {
+            onDecision: (r: RefundDecisionRecord) => appendEvidence(evidenceLog, r),
+            onVerdict: (v: RefundAuditVerdict, p: RefundWebhookPayload) => appendEvidence(evidenceLog, alarmRecord(v, p, new Date())),
+          }
+        : {}),
     }),
   ).listen(port, () => console.log(`AtlaSent refund gate listening on :${port} for ${shop}`));
 }

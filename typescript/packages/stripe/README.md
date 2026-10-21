@@ -8,7 +8,7 @@ gate issued.
 
 `private: true`. This package is a demo and is not published to npm.
 
-> **Status:** 83 unit tests over fakes of Stripe and the AtlaSent runtime.
+> **Status:** 106 unit tests over fakes of Stripe and the AtlaSent runtime.
 > **Nothing here has been run against a live Stripe account or a live
 > AtlaSent org yet.** See [What has not been verified](#what-has-not-been-verified).
 >
@@ -187,6 +187,10 @@ You need three keys, kept apart on purpose:
    localhost:3001/webhooks/stripe`, the alarm flags it, while the two gated
    refunds match their permits.
 
+Set `EVIDENCE_LOG=$PWD/stripe-demo/evidence.jsonl` in every terminal before
+step 4. After step 6, build the finance report from that log with
+`npm run report` in `@atlasent/refund-evidence` (see [Evidence log](#evidence-log)).
+
 Record what each step actually returned. Any step that differs from the list
 above is a finding, not a demo to re-run until it passes.
 
@@ -196,6 +200,18 @@ Pass `onDecision` to the gate to receive one `atlasent.refund_decision.v1`
 record per decision, refunded or not. If the callback fails, the result
 carries `logWarning`; the outcome never changes. The report and the
 three-system demo that read these records are in `@atlasent/refund-evidence`.
+
+The CLI and the webhook server write that log for you: set `EVIDENCE_LOG` to
+the same file in both. The CLI appends one decision record per refund or
+resume. The server appends one `atlasent.refund_alarm.v1` record per refund
+Stripe reports: authorized, unauthorized or ignored. A failed write never
+changes a decision or the webhook response; the server logs a
+`verdict_not_logged` warning. Then build the report from
+`@atlasent/refund-evidence`:
+
+```sh
+npm run report -- --log "$EVIDENCE_LOG" --store "Pinecone Pet Supply (fictional)"
+```
 
 ## Tests
 
@@ -234,6 +250,14 @@ The resume path was checked against eleven more, and each made it fail:
 - verifying as the caller instead of the original actor;
 - not saving the escalation;
 - a resumed refund not keyed by its gateRef.
+
+The evidence log was checked against five more, and each made it fail:
+
+- a lowercase currency;
+- no newline between records;
+- the server not passing verdicts on;
+- a failed log write breaking the webhook response;
+- an ignored verdict recording an amount.
 
 ## What has not been verified
 

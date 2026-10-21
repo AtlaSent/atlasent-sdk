@@ -6,17 +6,23 @@
  *
  * Subscribe the endpoint to `refund.created` in the Stripe Dashboard
  * (Developers → Webhooks) and set STRIPE_WEBHOOK_SECRET to its signing secret.
+ * Set EVIDENCE_LOG to append every verdict to the evidence log (see
+ * evidence-log.ts); use the same path as the CLI.
  */
 
 import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 import { JsonFileLedger, type PermitLedger } from "./ledger.js";
 import { auditStripeRefund, refundFromEvent, verifyStripeSignature, type StripeRefundAuditVerdict } from "./webhook.js";
+import { alarmRecord, appendEvidence } from "./evidence-log.js";
+import type { StripeRefund } from "./stripe.js";
 
 export interface StripeWebhookDeps {
   webhookSecret: string;
   ledger: PermitLedger;
   onUnauthorizedRefund?: (verdict: StripeRefundAuditVerdict) => void | Promise<void>;
+  /** Called with every verdict, e.g. to append to the evidence log. Its failure never changes the response. */
+  onVerdict?: (verdict: StripeRefundAuditVerdict, refund: StripeRefund) => void | Promise<void>;
   now?: () => Date;
 }
 
@@ -61,6 +67,11 @@ export function createStripeWebhookHandler(deps: StripeWebhookDeps): RequestList
     if (refund === null) return send(res, 200, { ignored: true });
     const verdict = await auditStripeRefund(refund, deps.ledger);
     if (verdict.verdict === "unauthorized") await deps.onUnauthorizedRefund?.(verdict);
+    try {
+      await deps.onVerdict?.(verdict, refund);
+    } catch (err) {
+      console.error(JSON.stringify({ warning: "verdict_not_logged", refundId: verdict.refundId, error: err instanceof Error ? err.message : String(err) }));
+    }
     // 200 either way: the refund already exists; a retry would change nothing.
     return send(res, 200, { verdict: verdict.verdict });
   }
@@ -84,6 +95,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(2);
   }
   const port = Number(process.env.PORT ?? 3001);
+  const evidenceLog = process.env.EVIDENCE_LOG;
   createServer(
     createStripeWebhookHandler({
       webhookSecret: secret,
@@ -92,6 +104,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         // Demo alert sink. Wire this to Slack, PagerDuty or email in a real deployment.
         console.error(JSON.stringify({ alert: "stripe_refund_without_atlasent_permit", ...v }));
       },
+      ...(evidenceLog ? { onVerdict: (v: StripeRefundAuditVerdict, refund: StripeRefund) => appendEvidence(evidenceLog, alarmRecord(v, refund, new Date())) } : {}),
     }),
   ).listen(port, () => console.log(`AtlaSent Stripe refund alarm listening on :${port}`));
 }

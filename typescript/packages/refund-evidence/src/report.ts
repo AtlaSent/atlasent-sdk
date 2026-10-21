@@ -28,7 +28,7 @@ export interface EvidenceReportInput {
 
 export interface MoneyTotal {
   count: number;
-  /** Sum per currency, in cents. Rows with an unknown amount are counted but not summed. */
+  /** Sum per currency, in cents; amounts with no recorded currency sum under "unknown", never under USD. Rows with an unknown amount are counted but not summed. */
   cents: Record<string, number>;
 }
 
@@ -77,14 +77,20 @@ export function formatMoney(cents: number | null, currency: string | null): stri
   if (cents === null) return "unknown";
   const sign = cents < 0 ? "-" : "";
   const abs = Math.abs(cents);
-  return `${sign}${currency === "USD" || currency === null ? "$" : `${currency} `}${Math.floor(abs / 100).toLocaleString("en-US")}.${String(abs % 100).padStart(2, "0")}`;
+  const digits = `${Math.floor(abs / 100).toLocaleString("en-US")}.${String(abs % 100).padStart(2, "0")}`;
+  // A missing currency stays unknown: it is never shown or totalled as dollars.
+  if (currency === null || currency === UNKNOWN_CURRENCY) return `${sign}${digits} (currency unknown)`;
+  return `${sign}${currency === "USD" ? "$" : `${currency} `}${digits}`;
 }
+
+/** The totals key for amounts whose currency was not recorded. */
+export const UNKNOWN_CURRENCY = "unknown";
 
 function total(rows: { amount_cents: number | null; currency: string | null }[]): MoneyTotal {
   const cents: Record<string, number> = {};
   for (const r of rows) {
     if (r.amount_cents === null) continue;
-    const c = r.currency ?? "USD";
+    const c = r.currency ?? UNKNOWN_CURRENCY;
     cents[c] = (cents[c] ?? 0) + r.amount_cents;
   }
   return { count: rows.length, cents };

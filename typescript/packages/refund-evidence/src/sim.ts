@@ -155,7 +155,7 @@ export class SimShopify implements ShopifyAdmin {
     const o = this.orders.get(orderId)!;
     const id = String(9000 + ++this.refundSeq);
     o.transactions.push({ id: `gid://shopify/OrderTransaction/r${id}`, kind: "REFUND", status: "SUCCESS", gateway: "manual", amountSet: { shopMoney: { amount, currencyCode: "USD" } }, parentTransaction: null });
-    const payload: RefundWebhookPayload = { id, order_id: orderId.replace(/^gid:\/\/shopify\/Order\//, ""), note, transactions: [{ kind: "refund", status: "success", amount }] };
+    const payload: RefundWebhookPayload = { id, order_id: orderId.replace(/^gid:\/\/shopify\/Order\//, ""), note, transactions: [{ kind: "refund", status: "success", amount, currency: "USD" }] };
     this.webhooks.push(payload);
     return { id, payload };
   }

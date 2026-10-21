@@ -186,3 +186,19 @@ describe("manager approvals", () => {
     expect(p.rejectedLines).toEqual([3]);
   });
 });
+
+describe("unknown currency", () => {
+  it("is never shown or totalled as dollars", () => {
+    const r = buildEvidenceReport({
+      decisions: [decision(), decision({ gate_ref: "g-2", currency: null, amount_cents: 2500 })],
+      alarms: [alarm({ currency: null, amount_cents: 1899 })],
+      storeName: "S",
+      generatedAt: new Date("2026-10-20T00:00:00Z"),
+    });
+    expect(r.summary.refunded.cents).toEqual({ USD: 1899, unknown: 2500 });
+    expect(r.summary.outsideGate.cents).toEqual({ unknown: 1899 });
+    expect(r.html).toContain("25.00 (currency unknown)");
+    expect(r.html).toContain("18.99 (currency unknown)");
+    expect(formatMoney(2500, null)).toBe("25.00 (currency unknown)");
+  });
+});
