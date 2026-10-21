@@ -129,6 +129,7 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
       { approvalRequestId: body.approvalRequestId, resumedBy: `shopify-staff:${who.shop}/${who.userId ?? "unknown"}` },
       gateOptions(who.shop, who.userId),
     );
+    warnIfNotLogged(result);
     return send(res, 200, describeResult(result));
   }
 
@@ -169,7 +170,15 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
       },
       gateOptions(shop, userId),
     );
+    warnIfNotLogged(result);
     return send(res, 200, describeResult(result));
+  }
+
+  /** The decision stands, but the evidence log lost it: say so where the operator looks. */
+  function warnIfNotLogged(result: { gateRef: string; logWarning?: string }): void {
+    if (result.logWarning !== undefined) {
+      console.error(JSON.stringify({ warning: "decision_not_logged", gateRef: result.gateRef, error: result.logWarning }));
+    }
   }
 
   async function handleWebhook(req: IncomingMessage, res: ServerResponse): Promise<void> {

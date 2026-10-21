@@ -1,11 +1,12 @@
 import { createHmac } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryLedger, refundNote } from "../src/ledger.js";
 import { createGateHandler } from "../src/server.js";
 import { signSessionToken } from "../src/session-token.js";
 import type { RefundAuditVerdict, RefundWebhookPayload } from "../src/webhook.js";
+import type { RefundDecisionRecord } from "../src/decision-record.js";
 import { demoOrders, FakeShopify, fakeRuntime, NOW } from "./fakes.js";
 
 const CLIENT_ID = "client-123";
@@ -16,7 +17,12 @@ const t = Math.floor(NOW.getTime() / 1000);
 let server: Server | undefined;
 afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r())));
 
-async function start(extra: { onVerdict?: (v: RefundAuditVerdict, p: RefundWebhookPayload, shop: string) => void } = {}) {
+async function start(
+  extra: {
+    onVerdict?: (v: RefundAuditVerdict, p: RefundWebhookPayload, shop: string) => void;
+    onDecision?: (r: RefundDecisionRecord) => void;
+  } = {},
+) {
   const runtime = fakeRuntime();
   const shopify = new FakeShopify(demoOrders());
   const ledger = new InMemoryLedger();
@@ -100,6 +106,25 @@ describe("POST /api/refunds (the admin button)", () => {
     const res = await fetch(`${s.base}/api/refunds`, { method: "OPTIONS" });
     expect(res.status).toBe(204);
     expect(res.headers.get("access-control-allow-headers")).toMatch(/authorization/);
+  });
+});
+
+describe("evidence log failures", () => {
+  it("a decision the log could not take still refunds, and the server says the log lost it", async () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((m: unknown) => void errors.push(String(m)));
+    try {
+      const s = await start({
+        onDecision: () => {
+          throw new Error("disk full");
+        },
+      });
+      const body = await (await postRefund(s.base, { orderId: "gid://shopify/Order/1001", amount: "18.99" })).json();
+      expect(body.refunded).toBe(true);
+      expect(errors.map((e) => JSON.parse(e))).toEqual([expect.objectContaining({ warning: "decision_not_logged", gateRef: body.gateRef })]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

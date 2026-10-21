@@ -134,9 +134,10 @@ dropped.
 npm ci && npm run typecheck && npm test
 ```
 
-The 39 tests cover:
+The 40 tests cover:
 
-- the summary, the period filter and per-currency totals;
+- the summary, the period filter and per-currency totals, with an unrecorded
+  currency kept out of USD;
 - the simulated banner, present only when it applies;
 - HTML escaping of hostile values, the CSV formula guard and quoting;
 - log parsing, with rejected lines reported;

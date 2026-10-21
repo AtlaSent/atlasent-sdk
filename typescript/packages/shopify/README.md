@@ -7,7 +7,7 @@ manager, and every refund is checked against the permits the gate issued.
 
 `private: true`. This package is a demo and is not published to npm.
 
-> **Status:** 140 unit tests over fakes of Shopify and the AtlaSent runtime.
+> **Status:** 141 unit tests over fakes of Shopify and the AtlaSent runtime.
 > **Nothing here has been run against a live Shopify store or a live
 > AtlaSent org yet.** The Shopify field names, mutations, token exchange and
 > extension API follow Shopify's documented shapes as best known; check them
@@ -254,7 +254,10 @@ server (`npm run serve`), and each writes it for you:
   record, with the currency only when the webhook states one.
 
 A failed write never changes a decision or the webhook response; the server
-logs a `verdict_not_logged` warning. Then, in `@atlasent/refund-evidence`:
+logs `decision_not_logged` or `verdict_not_logged`. A record with no stated
+currency is reported as "currency unknown", never added to USD totals.
+
+Then, in `@atlasent/refund-evidence`:
 `npm run report -- --log "$EVIDENCE_LOG" --store "Pinecone Pet Supply (fictional)"`.
 
 ## Tests
