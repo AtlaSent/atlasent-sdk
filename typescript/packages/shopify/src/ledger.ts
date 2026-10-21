@@ -139,11 +139,111 @@ export class LedgerLockError extends Error {
 export interface JsonFileLedgerOptions {
   /** How long to wait for another process's lock before failing. Default 5000 ms. */
   lockTimeoutMs?: number;
-  /** A lock file older than this is left over from a crashed process and is removed. Default 30000 ms. */
+  /**
+   * A lock whose owner pid cannot be read (the owner died between creating
+   * and writing it) is reclaimed once older than this. A lock whose owner pid
+   * is readable is reclaimed only when that process no longer exists, however
+   * old it is. Default 30000 ms.
+   */
   staleLockMs?: number;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function readLock(lockPath: string): { token: string; ino: number; dev: number; mtimeMs: number } | null {
+  try {
+    const st = statSync(lockPath);
+    return { token: readFileSync(lockPath, "utf8"), ino: st.ino, dev: st.dev, mtimeMs: st.mtimeMs };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: it exists, it just belongs to someone else.
+    return (err as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+/** Left by a process that died while holding it, so nobody will ever release it. */
+function isAbandoned(lock: { token: string; mtimeMs: number }, staleMs: number): boolean {
+  const pid = Number(lock.token.split(" ")[0]);
+  if (Number.isInteger(pid) && pid > 0) return !processExists(pid);
+  return Date.now() - lock.mtimeMs > staleMs;
+}
+
+/**
+ * Removes an abandoned lock. Only one process may do this at a time: it must
+ * first create `<lock>.break` with O_EXCL, and then re-check, under that
+ * breaker, that the lock path still holds the same abandoned file. Without
+ * the breaker two recovering processes could both judge the old lock
+ * abandoned, and the slower one would unlink the lock the faster one had just
+ * created. A live owner's lock is never removed. Returns false if another
+ * process is breaking the lock right now.
+ */
+export function breakAbandonedLock(lockPath: string, seen: { ino: number; dev: number }, staleMs: number): boolean {
+  const breaker = `${lockPath}.break`;
+  let fd: number;
+  try {
+    fd = openSync(breaker, "wx");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw err;
+  }
+  try {
+    closeSync(fd);
+    const now = readLock(lockPath);
+    if (now && now.ino === seen.ino && now.dev === seen.dev && isAbandoned(now, staleMs)) unlinkSync(lockPath);
+    return true;
+  } finally {
+    unlinkSync(breaker);
+  }
+}
+
+/**
+ * Takes the exclusive lock at `lockPath` and returns this holder's token.
+ * Throws LedgerLockError after `timeoutMs`. Exported for tests.
+ */
+export async function acquireFileLock(
+  lockPath: string,
+  ledgerPath: string,
+  opts: { timeoutMs: number; staleMs: number },
+): Promise<string> {
+  const token = `${process.pid} ${randomUUID()}`;
+  const started = Date.now();
+  for (;;) {
+    try {
+      const fd = openSync(lockPath, "wx");
+      try {
+        writeFileSync(fd, token);
+      } finally {
+        closeSync(fd);
+      }
+      return token;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+    const held = readLock(lockPath);
+    if (held === null) continue; // released between the open and the read
+    if (isAbandoned(held, opts.staleMs) && breakAbandonedLock(lockPath, held, opts.staleMs)) continue;
+    if (Date.now() - started >= opts.timeoutMs) throw new LedgerLockError(ledgerPath, Date.now() - started);
+    await sleep(10 + Math.floor(Math.random() * 15));
+  }
+}
+
+/** Releases the lock only if this holder still owns it. Exported for tests. */
+export function releaseFileLock(lockPath: string, token: string): void {
+  const held = readLock(lockPath);
+  // Not ours (or gone): leave it. Only an abandoned lock is ever removed by
+  // anyone but its owner, and this holder is alive, so ours cannot have been.
+  if (held === null || held.token !== token) return;
+  unlinkSync(lockPath);
+}
 
 /**
  * Same semantics, kept in a JSON file that several processes share: the CLI
@@ -152,7 +252,9 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * - Every operation re-reads the file, so nothing relies on a snapshot taken
  *   at startup.
  * - Every write holds an exclusive lock file (`<path>.lock`, created with
- *   O_EXCL) across read-modify-write, and replaces the ledger with a unique
+ *   O_EXCL, holding the owner's pid and a random token) across
+ *   read-modify-write. Only the owner releases it; a lock is reclaimed only
+ *   when its owner process is gone (acquireFileLock), and replaces the ledger with a unique
  *   temp file plus rename, so a reader never sees a partial file and two
  *   writers never lose each other's entries.
  * - If the lock cannot be taken, the operation throws LedgerLockError and
@@ -193,43 +295,15 @@ export class JsonFileLedger extends InMemoryLedger {
     if (!Array.isArray(data)) for (const p of data.pending ?? []) this.pending.set(p.approval_request_id, p);
   }
 
-  private async acquire(): Promise<string> {
-    const lock = `${this.path}.lock`;
-    const started = Date.now();
-    for (;;) {
-      try {
-        const fd = openSync(lock, "wx");
-        writeFileSync(fd, `${process.pid}\n`);
-        closeSync(fd);
-        return lock;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      }
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > this.staleLockMs) {
-          unlinkSync(lock);
-          continue;
-        }
-      } catch {
-        continue; // released between the open and the stat
-      }
-      if (Date.now() - started >= this.lockTimeoutMs) throw new LedgerLockError(this.path, Date.now() - started);
-      await sleep(10 + Math.floor(Math.random() * 15));
-    }
-  }
-
   /** Lock, reload, run one operation (which persists), unlock. */
   private async locked<T>(op: () => Promise<T>): Promise<T> {
-    const lock = await this.acquire();
+    const lockPath = `${this.path}.lock`;
+    const token = await acquireFileLock(lockPath, this.path, { timeoutMs: this.lockTimeoutMs, staleMs: this.staleLockMs });
     try {
       this.load();
       return await op();
     } finally {
-      try {
-        unlinkSync(lock);
-      } catch {
-        // already gone (removed as stale); nothing to release
-      }
+      releaseFileLock(lockPath, token);
     }
   }
 
