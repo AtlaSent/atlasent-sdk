@@ -315,9 +315,12 @@ def _is_permit_key(k: dict[str, Any]) -> bool:
     return (
         isinstance(k.get("kid"), str)
         and isinstance(k.get("x"), str)
-        and k.get("role", "R2_permit") == "R2_permit"
-        and k.get("kty", "OKP") == "OKP"
-        and k.get("crv", "Ed25519") == "Ed25519"
+        # Explicit trust metadata only: an entry with no role (or no
+        # kty/crv) is never a permit key, so an audit key whose role was
+        # dropped cannot sign permits.
+        and k.get("role") == "R2_permit"
+        and k.get("kty") == "OKP"
+        and k.get("crv") == "Ed25519"
     )
 
 

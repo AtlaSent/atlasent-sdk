@@ -81,6 +81,24 @@ describe("kid-aware pt.v4 verification vectors", () => {
     expect((bad as PermitV4VerifyError).reason).toBe("key_set_expired");
   });
 
+  it("an entry with no role (or no kty/crv) is never a permit key", async () => {
+    // Codex repro: the audit key with its role dropped must not sign permits.
+    const c = file.cases.find((x) => x.name === "kid_of_non_permit_role")!;
+    for (const field of ["role", "kty", "crv"]) {
+      const keys = file.key_set.keys.map((k) => {
+        if (k.kid !== "audit-a" && k.kid !== "permit-2026-a") return k;
+        const { [field]: _drop, ...rest } = k;
+        return k.kid === "audit-a" && field !== "role" ? k : rest;
+      });
+      const set = { ...file.key_set, keys } as PermitVerificationKeySet;
+      const err = await verifyPermitV4(c.token, set).catch((e: unknown) => e);
+      expect((err as PermitV4VerifyError).reason, `audit key, ${field} dropped`).toBe("unknown_kid");
+      const a = file.cases.find((x) => x.name === "kid_selects_key_a")!;
+      const errA = await verifyPermitV4(a.token, set).catch((e: unknown) => e);
+      expect((errA as PermitV4VerifyError).reason, `permit key, ${field} dropped`).toBe("unknown_kid");
+    }
+  });
+
   it("the age limit equals trust.ts DEFAULT_TRUST_TTL_MS", () => {
     expect(TRUST_SNAPSHOT_MAX_AGE_MS).toBe(DEFAULT_TRUST_TTL_MS);
   });

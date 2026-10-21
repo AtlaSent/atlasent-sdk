@@ -470,9 +470,12 @@ function isPermitKey(k: PermitVerificationKey): boolean {
   return (
     typeof k?.kid === 'string' &&
     typeof k.x === 'string' &&
-    (k.role === undefined || k.role === 'R2_permit') &&
-    (k.kty === undefined || k.kty === 'OKP') &&
-    (k.crv === undefined || k.crv === 'Ed25519')
+    // Explicit trust metadata only: an entry with no role (or no kty/crv)
+    // is never a permit key, so an audit key whose role was dropped cannot
+    // sign permits.
+    k.role === 'R2_permit' &&
+    k.kty === 'OKP' &&
+    k.crv === 'Ed25519'
   );
 }
 
