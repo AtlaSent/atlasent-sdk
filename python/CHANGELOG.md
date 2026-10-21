@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added: full pt.v4 claim decode, typed verify error codes, `execution_payload_hash_accepted` (additive)
+
+- `verify_permit_v4()` decodes every claim key the runtime signs (4, 6, 7 and
+  -1 to -35). `PermitClaimsV4` gains the matching optional fields plus
+  `present_claims()`. The decoder is checked against vectors generated from
+  atlasent-api's own `signPermitV4`.
+- `atlasent.verify_error_codes`: a `VerifyErrorCode` Literal,
+  `VERIFY_ERROR_CODES`, `LEGACY_VERIFY_ERROR_CODES`,
+  `TRANSIENT_VERIFY_ERROR_CODES` and `is_verify_error_code()`. They mirror
+  atlasent-api's verify error-code catalog.
+- `EvaluateResult.execution_payload_hash_accepted`. `False` means your digest
+  was dropped and verify will return `PAYLOAD_MISMATCH`. `None` means the
+  runtime did not report it.
+
 ### Added: `EvaluateResult.approval_request_id` (additive, contract-conforming)
 
 Parsed from `/v1-evaluate`'s `approval_request_id`, present on hold and

@@ -10,7 +10,10 @@ The bytes signed by Ed25519 are the COSE Sig_Structure (RFC 9052 §4.4)::
     ["Signature1", bstr(protected_header), bstr(""), bstr(permit_claims_cbor)]
 
 Protected header: ``{ 1: -8 }`` = ``0xa1 0x01 0x27`` (EdDSA, RFC 8037).
-Permit claims: CBOR integer-keyed map with keys 4, 6, 7, -1 .. -7.
+Permit claims: CBOR integer-keyed map with keys 4, 6, 7, -1 .. -35 (every key
+atlasent-api's ``_shared/cose.ts`` encodes). Cross-language parity vectors:
+``contract/vectors/permit-v4/vectors.json``, generated from the runtime's own
+``signPermitV4`` (``contract/tools/gen_permit_v4_vectors.ts``).
 
 Offline by design: with a pinned Ed25519 public key (raw 32 bytes,
 standard base64) this function needs no network.  It is the Python mirror of
@@ -22,8 +25,10 @@ Requires the ``cryptography`` library (already a dependency of the SDK).
 from __future__ import annotations
 
 import base64
+import json
 import uuid as _uuid_module
 from dataclasses import dataclass
+from typing import Any
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -62,6 +67,47 @@ class PermitClaimsV4:
     environment: str  # "live" | "test" (key -5)
     cdo_hash: str | None = None  # 64-char hex sha256 (key -6, optional)
     policy_hash: str | None = None  # 64-char hex sha256 (key -7, optional)
+    # P4 delegation lineage (keys -8 .. -11)
+    parent_permit_hash: str | None = None  # 64-char hex (key -8)
+    parent_permit_id: str | None = None  # UUID (key -9)
+    delegation_depth: int | None = None  # uint (key -10)
+    delegating_actor_id: str | None = None  # tstr (key -11)
+    # Execution binding (keys -12, -13)
+    execution_hash_expected: str | None = None  # 64-char hex (key -12)
+    envelope_hash: str | None = None  # 64-char hex (key -13)
+    # ADR-063 exceptional authority (keys -14, -15)
+    exception_id: str | None = None  # UUID (key -14)
+    exception_type: str | None = None  # tstr (key -15)
+    # AWS locus (keys -16, -17)
+    aws_account_id: str | None = None  # tstr (key -16)
+    aws_region: str | None = None  # tstr (key -17)
+    operation_intent_id: str | None = None  # tstr (key -18)
+    # Change brief (keys -19, -20)
+    change_brief_id: str | None = None  # tstr (key -19)
+    change_brief_digest: str | None = None  # tstr "sha256:..." (key -20)
+    # H8 canonical authorization identity (keys -21 .. -23)
+    authorization_identity_id: str | None = None  # UUID (key -21)
+    authorization_issuance_id: str | None = None  # UUID (key -22)
+    authorization_generation: int | None = None  # uint (key -23)
+    # agent_runtime_identity.v1 evidence, canonical-JSON tstr (key -24)
+    agent_runtime_identity: dict[str, Any] | None = None
+    # Entra acceptance slice (keys -25 .. -32, -35)
+    entra_tenant_id: str | None = None  # tstr (key -25)
+    entra_org_binding_id: str | None = None  # UUID (key -26)
+    entra_request_mapping_id: str | None = None  # UUID (key -27)
+    entra_request_mapping_version: int | None = None  # uint (key -28)
+    entra_approve_mapping_id: str | None = None  # UUID (key -29)
+    entra_approve_mapping_version: int | None = None  # uint (key -30)
+    pep_audience_executor_id: str | None = None  # tstr (key -31)
+    entra_approve_principal_oid: str | None = None  # tstr (key -32)
+    # Azure locus (keys -33, -34)
+    azure_subscription_id: str | None = None  # tstr (key -33)
+    azure_resource_group: str | None = None  # tstr (key -34)
+    entra_request_principal_oid: str | None = None  # tstr (key -35)
+
+    def present_claims(self) -> dict[str, Any]:
+        """Only the claims the token actually carries (absent = not bound)."""
+        return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
 @dataclass
@@ -245,6 +291,44 @@ def _bytes_to_uuid(b: bytes) -> str:
     return str(_uuid_module.UUID(bytes=b))
 
 
+# Optional claim keys -8 .. -35, by CBOR value type (atlasent-api _shared/cose.ts).
+_HEX_KEYS = {
+    -8: "parent_permit_hash",
+    -12: "execution_hash_expected",
+    -13: "envelope_hash",
+}
+_UUID_KEYS = {
+    -9: "parent_permit_id",
+    -14: "exception_id",
+    -21: "authorization_identity_id",
+    -22: "authorization_issuance_id",
+    -26: "entra_org_binding_id",
+    -27: "entra_request_mapping_id",
+    -29: "entra_approve_mapping_id",
+}
+_UINT_KEYS = {
+    -10: "delegation_depth",
+    -23: "authorization_generation",
+    -28: "entra_request_mapping_version",
+    -30: "entra_approve_mapping_version",
+}
+_TSTR_KEYS = {
+    -11: "delegating_actor_id",
+    -15: "exception_type",
+    -16: "aws_account_id",
+    -17: "aws_region",
+    -18: "operation_intent_id",
+    -19: "change_brief_id",
+    -20: "change_brief_digest",
+    -25: "entra_tenant_id",
+    -31: "pep_audience_executor_id",
+    -32: "entra_approve_principal_oid",
+    -33: "azure_subscription_id",
+    -34: "azure_resource_group",
+    -35: "entra_request_principal_oid",
+}
+
+
 def _decode_permit_claims(data: bytes) -> PermitClaimsV4:
     r = _CborReader(data)
     length = r.read_map_len()
@@ -271,6 +355,19 @@ def _decode_permit_claims(data: bytes) -> PermitClaimsV4:
             result["cdo_hash"] = r.read_bstr().hex()
         elif key == -7:
             result["policy_hash"] = r.read_bstr().hex()
+        elif key in _HEX_KEYS:
+            result[_HEX_KEYS[key]] = r.read_bstr().hex()
+        elif key in _UUID_KEYS:
+            result[_UUID_KEYS[key]] = _bytes_to_uuid(r.read_bstr())
+        elif key in _UINT_KEYS:
+            result[_UINT_KEYS[key]] = r.read_int()
+        elif key in _TSTR_KEYS:
+            result[_TSTR_KEYS[key]] = r.read_tstr()
+        elif key == -24:
+            parsed = json.loads(r.read_tstr())
+            if not isinstance(parsed, dict):
+                raise ValueError("agent_runtime_identity claim is not a JSON object")
+            result["agent_runtime_identity"] = parsed
         else:
             r.skip()
 
@@ -288,18 +385,7 @@ def _decode_permit_claims(data: bytes) -> PermitClaimsV4:
         if f not in result:
             raise ValueError(f"missing required claim: {f}")
 
-    return PermitClaimsV4(
-        permit_id=result["permit_id"],
-        exp=result["exp"],
-        iat=result["iat"],
-        decision_id=result["decision_id"],
-        org_id=result["org_id"],
-        action_type=result["action_type"],
-        actor_id=result["actor_id"],
-        environment=result["environment"],
-        cdo_hash=result.get("cdo_hash"),
-        policy_hash=result.get("policy_hash"),
-    )
+    return PermitClaimsV4(**result)
 
 
 # ─── Main API ─────────────────────────────────────────────────────────────────

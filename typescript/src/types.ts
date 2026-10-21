@@ -1,3 +1,4 @@
+import type { VerifyErrorCode } from "./verifyErrorCodes.js";
 /**
  * Public types for the AtlaSent TypeScript SDK.
  *
@@ -626,6 +627,16 @@ export interface EvaluateResponse {
    * legacy `denial.code` shape.
    */
   deny_code: string | null;
+  /**
+   * Whether the runtime bound the permit to the caller's own
+   * `execution_payload_hash` (wire `execution_payload_hash_accepted`).
+   * `false` means the digest you sent was DROPPED (wrong shape — e.g. a
+   * `sha256:` prefix, or nested under `context`) and the permit is bound to
+   * the runtime's own proof hash instead, so re-presenting your digest at
+   * verify will fail with `PAYLOAD_MISMATCH`. `undefined` when the runtime
+   * did not report it (no digest supplied, or an older runtime).
+   */
+  execution_payload_hash_accepted?: boolean;
   /** Hash-chained audit-trail entry (21 CFR Part 11 / GxP-ready). */
   auditHash: string;
   /** ISO 8601 timestamp of the decision. */
@@ -895,6 +906,17 @@ export interface VerifyPermitResponse {
    * from a runtime that does not report it.
    */
   consumed?: boolean;
+  /**
+   * Machine-readable reason a verify failed (`verify_error_code` on the
+   * wire), e.g. `"PAYLOAD_MISMATCH"` or `"PERMIT_ALREADY_USED"`. `null` when
+   * the permit verified or the runtime sent none (optional so hand-built
+   * responses and mocks from before this field still type-check). Typed against the known
+   * catalog ({@link VerifyErrorCode}) but kept open: a newer runtime can send
+   * a code this release does not know — treat any unknown code as a denial.
+   */
+  verifyErrorCode?: VerifyErrorCode | (string & {}) | null;
+  /** Human-readable verify reason from the server. Do not parse it. */
+  verifyReason?: string | null;
   /**
    * Per-key rate-limit state for this request's response, parsed from
    * `X-RateLimit-*` headers. `null` when the server didn't emit them.

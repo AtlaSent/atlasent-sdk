@@ -1,0 +1,140 @@
+{
+  "schema": "atlasent.permit_v4_vectors.v1",
+  "generator": "contract/tools/gen_permit_v4_vectors.ts",
+  "public_key_b64": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+  "public_key_note": "Ed25519 from the RFC 8032 test-1 seed. Test material only.",
+  "vectors": [
+    {
+      "name": "minimal",
+      "description": "Required claims only (keys 4, 6, 7, -1..-5).",
+      "token": "pt.v4.0oRDoQEnoFiBqAQaarFJkAYaarE7gAdQxnrgR5KpQQGt767cyDjV-yB4JDBiOGY3ZTlhLTZjMWQtNGYyZS05YTNiLTVjN2Q4ZTlmMGExYiFQflfA3gAAQACAAAAAAAAAASJxcHJvZHVjdGlvbi5kZXBsb3kjbmdpdGh1YjpvY3RvY2F0JGRsaXZlWECdeFbS8_nh0kHfHW4qq_t7GfoOASY3HWuanKAuBXuxh2ziaEqXZZFvLPPnXCuRlNT69SOFuxUswx25CyHXg6UE",
+      "expected_claims": {
+        "exp": 1790003600,
+        "iat": 1790000000,
+        "permit_id": "c67ae047-92a9-4101-adef-aedcc838d5fb",
+        "decision_id": "0b8f7e9a-6c1d-4f2e-9a3b-5c7d8e9f0a1b",
+        "org_id": "7e57c0de-0000-4000-8000-000000000001",
+        "action_type": "production.deploy",
+        "actor_id": "github:octocat",
+        "environment": "live"
+      }
+    },
+    {
+      "name": "hashes_and_execution_binding",
+      "description": "cdo/policy hash (-6/-7), execution_hash_expected (-12), envelope_hash (-13).",
+      "token": "pt.v4.0oRDoQEnoFkBDawEGmqxSZAGGmqxO4AHUOI8UtmWVUb6gFcd82aUNNggeCQwYjhmN2U5YS02YzFkLTRmMmUtOWEzYi01YzdkOGU5ZjBhMWIhUH5XwN4AAEAAgAAAAAAAAAEicXByb2R1Y3Rpb24uZGVwbG95I25naXRodWI6b2N0b2NhdCRkbGl2ZSVYIKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqJlggu7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7srWCDMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzCxYIN3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3dWEDZzQwpEdIh7STbD2RaF_Z61-QLTjcyz_vne2DDcvGLZ3FhpxZGrvQfcncXs4jYNFulyzLswN-K_8T66_fJA-wE",
+      "expected_claims": {
+        "exp": 1790003600,
+        "iat": 1790000000,
+        "permit_id": "e23c52d9-9655-46fa-8057-1df3669434d8",
+        "decision_id": "0b8f7e9a-6c1d-4f2e-9a3b-5c7d8e9f0a1b",
+        "org_id": "7e57c0de-0000-4000-8000-000000000001",
+        "action_type": "production.deploy",
+        "actor_id": "github:octocat",
+        "environment": "live",
+        "cdo_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "policy_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "execution_hash_expected": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "envelope_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    },
+    {
+      "name": "delegation_child",
+      "description": "P4 delegation lineage (-8..-11).",
+      "token": "pt.v4.0oRDoQEnoFjKrAQaarFJkAYaarE7gAdQFlkLXcnpSVmAlYeC3nZ4ACB4JDBiOGY3ZTlhLTZjMWQtNGYyZS05YTNiLTVjN2Q4ZTlmMGExYiFQflfA3gAAQACAAAAAAAAAASJxcHJvZHVjdGlvbi5kZXBsb3kjcGFnZW50OmRlcGxveWVyLTckZGxpdmUnWCDu7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7ihQERERESIiQzOERFVVVVVVVSkCKm5naXRodWI6b2N0b2NhdFhAlBhgfN11dFHRvBbU3YQ317gwcNjaXWpHV51-htl7Pj4sGxscDCq06EjxMwxdoxVODDVQ4VP9oT1mD2C5j-iECA",
+      "expected_claims": {
+        "exp": 1790003600,
+        "iat": 1790000000,
+        "permit_id": "16590b5d-c9e9-4959-8095-8782de767800",
+        "decision_id": "0b8f7e9a-6c1d-4f2e-9a3b-5c7d8e9f0a1b",
+        "org_id": "7e57c0de-0000-4000-8000-000000000001",
+        "action_type": "production.deploy",
+        "actor_id": "agent:deployer-7",
+        "environment": "live",
+        "parent_permit_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "parent_permit_id": "11111111-2222-4333-8444-555555555555",
+        "delegation_depth": 2,
+        "delegating_actor_id": "github:octocat"
+      }
+    },
+    {
+      "name": "full",
+      "description": "Every claim key the runtime encodes (4, 6, 7, -1..-35).",
+      "token": "pt.v4.0oRDoQEnoFkGH7gmBBpqsUmQBhpqsTuAB1BoBAdXqEVGSINopU0PYf2dIHgkMGI4ZjdlOWEtNmMxZC00ZjJlLTlhM2ItNWM3ZDhlOWYwYTFiIVB-V8DeAABAAIAAAAAAAAABInFwcm9kdWN0aW9uLmRlcGxveSNuZ2l0aHViOm9jdG9jYXQkZHRlc3QlWCARERERERERERERERERERERERERERERERERERERERERESZYICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiJ1ggMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMoUKqqqqq7u0zMjd3u7u7u7u4pASp0Z2l0aHViOnJvb3Qtb3BlcmF0b3IrWCBERERERERERERERERERERERERERERERERERERERERERCxYIFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVLVASNFZ4kKtM3o8BI0VniavNLmticmVha19nbGFzcy9sMTIzNDU2Nzg5MDEyMGl1cy13ZXN0LTIxdWludGVudC0yMDI2LTEwLTIxLTAwMTJtY2JfMDFIWlhBTVBMRTN4R3NoYTI1Njo2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NFAhISEhNDRFZYeHkJCQkJCQNVAxMTExRUVGdoiYoKCgoKCgNgc3eQMMeyJhZ2VudF9kZXBsb3ltZW50X2lkIjoiZGVwbG95LTEiLCJhZ2VudF9pZGVudGl0eV9pZCI6ImFnZW50LWlkLTEiLCJhZ2VudF9yZWdpc3RyeV9pZCI6InJlZ2lzdHJ5LTEiLCJhZ2VudF92ZXJzaW9uIjoiMS4yLjMiLCJiaW5kaW5nX2lkIjoiYmluZC0xIiwiZGVwbG95bWVudF9kaWdlc3QiOiJzaGEyNTY6Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3NyIsInByb3ZpZGVyX3Byb29mIjp7ImF1ZGllbmNlIjoiYXBpOi8vYXRsYXNlbnQiLCJjcmVkZW50aWFsX3R5cGUiOiJvaWRjX3dvcmtsb2FkX3Rva2VuIiwiaXNzdWVyIjoiaHR0cHM6Ly9sb2dpbi5taWNyb3NvZnRvbmxpbmUuY29tL3RpZC92Mi4wIiwicHJvb2ZfZXhwaXJlc19hdCI6IjIwMjYtMTAtMjFUMDE6MDA6MDBaIiwicHJvb2ZfZmluZ2VycHJpbnQiOiI4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4IiwicHJvb2ZfaXNzdWVkX2F0IjoiMjAyNi0xMC0yMVQwMDowMDowMFoiLCJwcm92aWRlciI6Im1pY3Jvc29mdF9lbnRyYSIsInByb3ZpZGVyX3N1YmplY3QiOiJzcC1vaWQiLCJwcm92aWRlcl90ZW5hbnRfaWQiOiJ0aWQiLCJzdWJqZWN0X2tpbmQiOiJzZXJ2aWNlX3ByaW5jaXBhbCIsInZlcmlmaWNhdGlvbl9tZXRob2QiOiJyczI1Nl9qd2tzIiwidmVyaWZpZWRfYXQiOiIyMDI2LTEwLTIxVDAwOjAwOjAxWiJ9LCJ2ZXJzaW9uIjoiYWdlbnRfcnVudGltZV9pZGVudGl0eS52MSJ9OBh4JDdlNTdjMGRlLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBlMTgZUEFBQUFWVkdniYmwsLCwsLA4GlBRUVFRZ2dIeIqawMDAwMDAOBsDOBxQYWFhYXh4SYmLq9DQ0NDQ0DgdBDgeeCplbnRyYTowMDAwMDAwMC0xMTExLTQyMjItODMzMy00NDQ0NDQ0NDQ0NDQ4H2xhcHByb3Zlci1vaWQ4IHgkMDAwMDAwMDAtYWFhYS00YmJiLThjY2MtZGRkZGRkZGRkZGRkOCFncmctcHJvZDgibXJlcXVlc3Rlci1vaWRYQLqKCjZc18MiANtLE9dELsCytPHGq9GgxbuTXPhF-CBGdIyLojXHXjFaap6OMICMTZXso7O1DaBrNTmIP0U-0Qg",
+      "expected_claims": {
+        "exp": 1790003600,
+        "iat": 1790000000,
+        "permit_id": "68040757-a845-4648-8368-a54d0f61fd9d",
+        "decision_id": "0b8f7e9a-6c1d-4f2e-9a3b-5c7d8e9f0a1b",
+        "org_id": "7e57c0de-0000-4000-8000-000000000001",
+        "action_type": "production.deploy",
+        "actor_id": "github:octocat",
+        "environment": "test",
+        "cdo_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "policy_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "parent_permit_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "parent_permit_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "delegation_depth": 1,
+        "delegating_actor_id": "github:root-operator",
+        "execution_hash_expected": "4444444444444444444444444444444444444444444444444444444444444444",
+        "envelope_hash": "5555555555555555555555555555555555555555555555555555555555555555",
+        "exception_id": "12345678-90ab-4cde-8f01-23456789abcd",
+        "exception_type": "break_glass",
+        "aws_account_id": "123456789012",
+        "aws_region": "us-west-2",
+        "operation_intent_id": "intent-2026-10-21-001",
+        "change_brief_id": "cb_01HZXAMPLE",
+        "change_brief_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+        "authorization_identity_id": "21212121-3434-4565-8787-909090909090",
+        "authorization_issuance_id": "31313131-4545-4676-8898-a0a0a0a0a0a0",
+        "authorization_generation": 7,
+        "agent_runtime_identity": {
+          "agent_deployment_id": "deploy-1",
+          "agent_identity_id": "agent-id-1",
+          "agent_registry_id": "registry-1",
+          "agent_version": "1.2.3",
+          "binding_id": "bind-1",
+          "deployment_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+          "provider_proof": {
+            "audience": "api://atlasent",
+            "credential_type": "oidc_workload_token",
+            "issuer": "https://login.microsoftonline.com/tid/v2.0",
+            "proof_expires_at": "2026-10-21T01:00:00Z",
+            "proof_fingerprint": "8888888888888888888888888888888888888888888888888888888888888888",
+            "proof_issued_at": "2026-10-21T00:00:00Z",
+            "provider": "microsoft_entra",
+            "provider_subject": "sp-oid",
+            "provider_tenant_id": "tid",
+            "subject_kind": "service_principal",
+            "verification_method": "rs256_jwks",
+            "verified_at": "2026-10-21T00:00:01Z"
+          },
+          "version": "agent_runtime_identity.v1"
+        },
+        "entra_tenant_id": "7e57c0de-0000-4000-8000-0000000000e1",
+        "entra_org_binding_id": "41414141-5656-4767-8989-b0b0b0b0b0b0",
+        "entra_request_mapping_id": "51515151-6767-4878-8a9a-c0c0c0c0c0c0",
+        "entra_request_mapping_version": 3,
+        "entra_approve_mapping_id": "61616161-7878-4989-8bab-d0d0d0d0d0d0",
+        "entra_approve_mapping_version": 4,
+        "pep_audience_executor_id": "entra:00000000-1111-4222-8333-444444444444",
+        "entra_approve_principal_oid": "approver-oid",
+        "azure_subscription_id": "00000000-aaaa-4bbb-8ccc-dddddddddddd",
+        "azure_resource_group": "rg-prod",
+        "entra_request_principal_oid": "requester-oid"
+      }
+    }
+  ],
+  "negative": [
+    {
+      "name": "signature_tampered",
+      "token": "pt.v4.0oRDoQEnoFkGH7gmBBpqsUmQBhpqsTuAB1BoBAdXqEVGSINopU0PYf2dIHgkMGI4ZjdlOWEtNmMxZC00ZjJlLTlhM2ItNWM3ZDhlOWYwYTFiIVB-V8DeAABAAIAAAAAAAAABInFwcm9kdWN0aW9uLmRlcGxveSNuZ2l0aHViOm9jdG9jYXQkZHRlc3QlWCARERERERERERERERERERERERERERERERERERERERERESZYICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiJ1ggMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMoUKqqqqq7u0zMjd3u7u7u7u4pASp0Z2l0aHViOnJvb3Qtb3BlcmF0b3IrWCBERERERERERERERERERERERERERERERERERERERERERCxYIFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVLVASNFZ4kKtM3o8BI0VniavNLmticmVha19nbGFzcy9sMTIzNDU2Nzg5MDEyMGl1cy13ZXN0LTIxdWludGVudC0yMDI2LTEwLTIxLTAwMTJtY2JfMDFIWlhBTVBMRTN4R3NoYTI1Njo2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NFAhISEhNDRFZYeHkJCQkJCQNVAxMTExRUVGdoiYoKCgoKCgNgc3eQMMeyJhZ2VudF9kZXBsb3ltZW50X2lkIjoiZGVwbG95LTEiLCJhZ2VudF9pZGVudGl0eV9pZCI6ImFnZW50LWlkLTEiLCJhZ2VudF9yZWdpc3RyeV9pZCI6InJlZ2lzdHJ5LTEiLCJhZ2VudF92ZXJzaW9uIjoiMS4yLjMiLCJiaW5kaW5nX2lkIjoiYmluZC0xIiwiZGVwbG95bWVudF9kaWdlc3QiOiJzaGEyNTY6Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3NyIsInByb3ZpZGVyX3Byb29mIjp7ImF1ZGllbmNlIjoiYXBpOi8vYXRsYXNlbnQiLCJjcmVkZW50aWFsX3R5cGUiOiJvaWRjX3dvcmtsb2FkX3Rva2VuIiwiaXNzdWVyIjoiaHR0cHM6Ly9sb2dpbi5taWNyb3NvZnRvbmxpbmUuY29tL3RpZC92Mi4wIiwicHJvb2ZfZXhwaXJlc19hdCI6IjIwMjYtMTAtMjFUMDE6MDA6MDBaIiwicHJvb2ZfZmluZ2VycHJpbnQiOiI4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4IiwicHJvb2ZfaXNzdWVkX2F0IjoiMjAyNi0xMC0yMVQwMDowMDowMFoiLCJwcm92aWRlciI6Im1pY3Jvc29mdF9lbnRyYSIsInByb3ZpZGVyX3N1YmplY3QiOiJzcC1vaWQiLCJwcm92aWRlcl90ZW5hbnRfaWQiOiJ0aWQiLCJzdWJqZWN0X2tpbmQiOiJzZXJ2aWNlX3ByaW5jaXBhbCIsInZlcmlmaWNhdGlvbl9tZXRob2QiOiJyczI1Nl9qd2tzIiwidmVyaWZpZWRfYXQiOiIyMDI2LTEwLTIxVDAwOjAwOjAxWiJ9LCJ2ZXJzaW9uIjoiYWdlbnRfcnVudGltZV9pZGVudGl0eS52MSJ9OBh4JDdlNTdjMGRlLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBlMTgZUEFBQUFWVkdniYmwsLCwsLA4GlBRUVFRZ2dIeIqawMDAwMDAOBsDOBxQYWFhYXh4SYmLq9DQ0NDQ0DgdBDgeeCplbnRyYTowMDAwMDAwMC0xMTExLTQyMjItODMzMy00NDQ0NDQ0NDQ0NDQ4H2xhcHByb3Zlci1vaWQ4IHgkMDAwMDAwMDAtYWFhYS00YmJiLThjY2MtZGRkZGRkZGRkZGRkOCFncmctcHJvZDgibXJlcXVlc3Rlci1vaWRYQLqKCjZc18MiANtLE9dELsCytPHGq9GgxbuTXPhF-CBGdIyLojXHXjFaap6OMICMTZXso7O1DaBrNAmIP0U-0Qg",
+      "expected_reason": "signature_invalid"
+    },
+    {
+      "name": "wrong_prefix",
+      "token": "pt.v3.0oRDoQEnoFkGH7gmBBpqsUmQBhpqsTuAB1BoBAdXqEVGSINopU0PYf2dIHgkMGI4ZjdlOWEtNmMxZC00ZjJlLTlhM2ItNWM3ZDhlOWYwYTFiIVB-V8DeAABAAIAAAAAAAAABInFwcm9kdWN0aW9uLmRlcGxveSNuZ2l0aHViOm9jdG9jYXQkZHRlc3QlWCARERERERERERERERERERERERERERERERERERERERERESZYICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiJ1ggMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMoUKqqqqq7u0zMjd3u7u7u7u4pASp0Z2l0aHViOnJvb3Qtb3BlcmF0b3IrWCBERERERERERERERERERERERERERERERERERERERERERCxYIFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVLVASNFZ4kKtM3o8BI0VniavNLmticmVha19nbGFzcy9sMTIzNDU2Nzg5MDEyMGl1cy13ZXN0LTIxdWludGVudC0yMDI2LTEwLTIxLTAwMTJtY2JfMDFIWlhBTVBMRTN4R3NoYTI1Njo2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NFAhISEhNDRFZYeHkJCQkJCQNVAxMTExRUVGdoiYoKCgoKCgNgc3eQMMeyJhZ2VudF9kZXBsb3ltZW50X2lkIjoiZGVwbG95LTEiLCJhZ2VudF9pZGVudGl0eV9pZCI6ImFnZW50LWlkLTEiLCJhZ2VudF9yZWdpc3RyeV9pZCI6InJlZ2lzdHJ5LTEiLCJhZ2VudF92ZXJzaW9uIjoiMS4yLjMiLCJiaW5kaW5nX2lkIjoiYmluZC0xIiwiZGVwbG95bWVudF9kaWdlc3QiOiJzaGEyNTY6Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3NyIsInByb3ZpZGVyX3Byb29mIjp7ImF1ZGllbmNlIjoiYXBpOi8vYXRsYXNlbnQiLCJjcmVkZW50aWFsX3R5cGUiOiJvaWRjX3dvcmtsb2FkX3Rva2VuIiwiaXNzdWVyIjoiaHR0cHM6Ly9sb2dpbi5taWNyb3NvZnRvbmxpbmUuY29tL3RpZC92Mi4wIiwicHJvb2ZfZXhwaXJlc19hdCI6IjIwMjYtMTAtMjFUMDE6MDA6MDBaIiwicHJvb2ZfZmluZ2VycHJpbnQiOiI4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4IiwicHJvb2ZfaXNzdWVkX2F0IjoiMjAyNi0xMC0yMVQwMDowMDowMFoiLCJwcm92aWRlciI6Im1pY3Jvc29mdF9lbnRyYSIsInByb3ZpZGVyX3N1YmplY3QiOiJzcC1vaWQiLCJwcm92aWRlcl90ZW5hbnRfaWQiOiJ0aWQiLCJzdWJqZWN0X2tpbmQiOiJzZXJ2aWNlX3ByaW5jaXBhbCIsInZlcmlmaWNhdGlvbl9tZXRob2QiOiJyczI1Nl9qd2tzIiwidmVyaWZpZWRfYXQiOiIyMDI2LTEwLTIxVDAwOjAwOjAxWiJ9LCJ2ZXJzaW9uIjoiYWdlbnRfcnVudGltZV9pZGVudGl0eS52MSJ9OBh4JDdlNTdjMGRlLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDBlMTgZUEFBQUFWVkdniYmwsLCwsLA4GlBRUVFRZ2dIeIqawMDAwMDAOBsDOBxQYWFhYXh4SYmLq9DQ0NDQ0DgdBDgeeCplbnRyYTowMDAwMDAwMC0xMTExLTQyMjItODMzMy00NDQ0NDQ0NDQ0NDQ4H2xhcHByb3Zlci1vaWQ4IHgkMDAwMDAwMDAtYWFhYS00YmJiLThjY2MtZGRkZGRkZGRkZGRkOCFncmctcHJvZDgibXJlcXVlc3Rlci1vaWRYQLqKCjZc18MiANtLE9dELsCytPHGq9GgxbuTXPhF-CBGdIyLojXHXjFaap6OMICMTZXso7O1DaBrNTmIP0U-0Qg",
+      "expected_reason": "bad_prefix"
+    }
+  ]
+}

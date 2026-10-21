@@ -1,0 +1,27 @@
+# pt.v4 permit parity vectors
+
+`vectors.json` holds `pt.v4` COSE Sign1 permit tokens minted by
+**atlasent-api's own** `signPermitV4`. Each `expected_claims` value is what
+the runtime's own `decodePermitClaimsV4` returns for that token. Both SDK
+decoders must reproduce `expected_claims` exactly:
+
+- TypeScript: `typescript/test/verify-permit-v4-vectors.test.ts`
+- Python: `python/tests/test_verify_permit_v4_vectors.py`
+
+The `full` vector carries every claim key the runtime encodes (4, 6, 7 and
+-1 to -35). The `negative` vectors must be rejected with the stated reason.
+
+**Generated from:** atlasent-api `ace85ce9b9100f6daac68f01130aaeec3169ddf0`
+(`supabase/functions/_shared/permit-token.ts` and `_shared/cose.ts`).
+
+**Regenerate** after the runtime adds a claim key:
+
+```sh
+ATLASENT_API_DIR=/path/to/atlasent-api \
+  deno run --allow-read --allow-env --allow-write \
+  contract/tools/gen_permit_v4_vectors.ts > contract/vectors/permit-v4/vectors.json
+```
+
+Then update this file's commit pin. The signing key is the RFC 8032 test-1
+seed: public test material that signs nothing real. The identifiers in the
+vectors are synthetic.

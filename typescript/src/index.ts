@@ -164,10 +164,18 @@ export { withPermit } from "./withPermit.js";
 export {
   verifyPermitV4,
   PermitV4VerifyError,
+  type AgentRuntimeIdentityClaim,
   type PermitClaimsV4,
   type PermitV4VerifyResult,
   type PermitV4VerifyReason,
 } from "./verify-permit-v4.js";
+export {
+  VERIFY_ERROR_CODES,
+  LEGACY_VERIFY_ERROR_CODES,
+  TRANSIENT_VERIFY_ERROR_CODES,
+  isVerifyErrorCode,
+  type VerifyErrorCode,
+} from "./verifyErrorCodes.js";
 export type {
   ApiKeySelfResponse,
   AssertionSubmitInput,

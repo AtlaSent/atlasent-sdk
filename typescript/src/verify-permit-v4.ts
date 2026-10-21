@@ -9,7 +9,9 @@
  *   ["Signature1", bstr(protected_header), bstr(""), bstr(permit_claims_cbor)]
  *
  * Protected header: { 1: -8 } = 0xa1 0x01 0x27 (COSE algorithm EdDSA, RFC 8037).
- * Permit claims: CBOR integer-keyed map (keys 4/6/7/–1..–7, see PermitClaimsV4).
+ * Permit claims: CBOR integer-keyed map (keys 4/6/7/–1..–35, see PermitClaimsV4).
+ * Cross-language parity: contract/vectors/permit-v4/vectors.json, generated from
+ * atlasent-api's own signPermitV4 (contract/tools/gen_permit_v4_vectors.ts).
  *
  * Offline by design: with a pinned Ed25519 public key this function needs no
  * network. It is the SDK mirror of the atlasent-api `_shared/cose.ts` decode path.
@@ -36,6 +38,28 @@ export class PermitV4VerifyError extends Error {
   }
 }
 
+/**
+ * Canonical `agent_runtime_identity.v1` evidence carried in claim key -24
+ * (a canonical-JSON text string the COSE signature covers).
+ */
+export interface AgentRuntimeIdentityClaim {
+  version: string;
+  binding_id: string;
+  agent_identity_id: string;
+  agent_registry_id: string;
+  agent_version: string;
+  agent_deployment_id: string;
+  deployment_digest: string;
+  provider_proof: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/**
+ * Every claim the runtime signs into a pt.v4 permit (atlasent-api
+ * `_shared/cose.ts` encodePermitClaimsV4, keys 4/6/7 and -1..-35). Optional
+ * claims are present only when the runtime bound them; absence means "not
+ * bound", never "bound to empty". Unknown future keys are skipped.
+ */
 export interface PermitClaimsV4 {
   permit_id: string;    // UUID (from key 7 / CWT cti — 16-byte bstr)
   exp: number;          // Unix epoch seconds (key 4)
@@ -47,6 +71,42 @@ export interface PermitClaimsV4 {
   environment: string;  // "live" | "test" (key -5)
   cdo_hash?: string;    // 64-char hex sha256 (key -6, optional)
   policy_hash?: string; // 64-char hex sha256 (key -7, optional)
+  // P4 delegation lineage (keys -8..-11)
+  parent_permit_hash?: string;   // 64-char hex (key -8)
+  parent_permit_id?: string;     // UUID (key -9)
+  delegation_depth?: number;     // uint (key -10)
+  delegating_actor_id?: string;  // tstr (key -11)
+  // Execution binding (keys -12, -13)
+  execution_hash_expected?: string; // 64-char hex (key -12)
+  envelope_hash?: string;           // 64-char hex (key -13)
+  // ADR-063 exceptional authority (keys -14, -15)
+  exception_id?: string;   // UUID (key -14)
+  exception_type?: string; // tstr (key -15)
+  // AWS locus (keys -16, -17)
+  aws_account_id?: string; // tstr (key -16)
+  aws_region?: string;     // tstr (key -17)
+  operation_intent_id?: string; // tstr (key -18)
+  // Change brief (keys -19, -20)
+  change_brief_id?: string;     // tstr (key -19)
+  change_brief_digest?: string; // tstr, "sha256:..." (key -20)
+  // H8 canonical authorization identity (keys -21..-23)
+  authorization_identity_id?: string; // UUID (key -21)
+  authorization_issuance_id?: string; // UUID (key -22)
+  authorization_generation?: number;  // uint (key -23)
+  agent_runtime_identity?: AgentRuntimeIdentityClaim; // canonical JSON tstr (key -24)
+  // Entra acceptance slice (keys -25..-32, -35)
+  entra_tenant_id?: string;               // tstr (key -25)
+  entra_org_binding_id?: string;          // UUID (key -26)
+  entra_request_mapping_id?: string;      // UUID (key -27)
+  entra_request_mapping_version?: number; // uint (key -28)
+  entra_approve_mapping_id?: string;      // UUID (key -29)
+  entra_approve_mapping_version?: number; // uint (key -30)
+  pep_audience_executor_id?: string;      // tstr (key -31)
+  entra_approve_principal_oid?: string;   // tstr (key -32)
+  // Azure locus (keys -33, -34)
+  azure_subscription_id?: string; // tstr (key -33)
+  azure_resource_group?: string;  // tstr (key -34)
+  entra_request_principal_oid?: string; // tstr (key -35)
 }
 
 export interface PermitV4VerifyResult {
@@ -251,6 +311,41 @@ function decodePermitClaims(bytes: Uint8Array): PermitClaimsV4 {
       case -5: result.environment = r.readTstr(); break;
       case -6: result.cdo_hash = bytesHex(r.readBstr()); break;
       case -7: result.policy_hash = bytesHex(r.readBstr()); break;
+      case -8: result.parent_permit_hash = bytesHex(r.readBstr()); break;
+      case -9: result.parent_permit_id = uuidFromBytes(r.readBstr()); break;
+      case -10: result.delegation_depth = r.readInt(); break;
+      case -11: result.delegating_actor_id = r.readTstr(); break;
+      case -12: result.execution_hash_expected = bytesHex(r.readBstr()); break;
+      case -13: result.envelope_hash = bytesHex(r.readBstr()); break;
+      case -14: result.exception_id = uuidFromBytes(r.readBstr()); break;
+      case -15: result.exception_type = r.readTstr(); break;
+      case -16: result.aws_account_id = r.readTstr(); break;
+      case -17: result.aws_region = r.readTstr(); break;
+      case -18: result.operation_intent_id = r.readTstr(); break;
+      case -19: result.change_brief_id = r.readTstr(); break;
+      case -20: result.change_brief_digest = r.readTstr(); break;
+      case -21: result.authorization_identity_id = uuidFromBytes(r.readBstr()); break;
+      case -22: result.authorization_issuance_id = uuidFromBytes(r.readBstr()); break;
+      case -23: result.authorization_generation = r.readInt(); break;
+      case -24: {
+        const parsed: unknown = JSON.parse(r.readTstr());
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('agent_runtime_identity claim is not a JSON object');
+        }
+        result.agent_runtime_identity = parsed as AgentRuntimeIdentityClaim;
+        break;
+      }
+      case -25: result.entra_tenant_id = r.readTstr(); break;
+      case -26: result.entra_org_binding_id = uuidFromBytes(r.readBstr()); break;
+      case -27: result.entra_request_mapping_id = uuidFromBytes(r.readBstr()); break;
+      case -28: result.entra_request_mapping_version = r.readInt(); break;
+      case -29: result.entra_approve_mapping_id = uuidFromBytes(r.readBstr()); break;
+      case -30: result.entra_approve_mapping_version = r.readInt(); break;
+      case -31: result.pep_audience_executor_id = r.readTstr(); break;
+      case -32: result.entra_approve_principal_oid = r.readTstr(); break;
+      case -33: result.azure_subscription_id = r.readTstr(); break;
+      case -34: result.azure_resource_group = r.readTstr(); break;
+      case -35: result.entra_request_principal_oid = r.readTstr(); break;
       default: r.skip();
     }
   }

@@ -438,6 +438,14 @@ _LAZY_MODULES: dict[str, tuple[str, ...]] = {
         "evaluate_many",
         "graphql",
     ),
+    ".verify_error_codes": (
+        "ALL_VERIFY_ERROR_CODES",
+        "LEGACY_VERIFY_ERROR_CODES",
+        "TRANSIENT_VERIFY_ERROR_CODES",
+        "VERIFY_ERROR_CODES",
+        "VerifyErrorCode",
+        "is_verify_error_code",
+    ),
     ".verify_permit_v4": (
         "PermitClaimsV4",
         "PermitV4VerifyError",
@@ -972,6 +980,14 @@ if TYPE_CHECKING:
         evaluate_many,
         graphql,
     )
+    from .verify_error_codes import (
+        ALL_VERIFY_ERROR_CODES,
+        LEGACY_VERIFY_ERROR_CODES,
+        TRANSIENT_VERIFY_ERROR_CODES,
+        VERIFY_ERROR_CODES,
+        VerifyErrorCode,
+        is_verify_error_code,
+    )
     from .verify_permit_v4 import (
         PermitClaimsV4,
         PermitV4VerifyError,
@@ -1432,4 +1448,11 @@ __all__ = [
     "PermitClaimsV4",
     "PermitV4VerifyError",
     "PermitV4VerifyResult",
+    # Typed /v1-verify-permit verify_error_code values.
+    "ALL_VERIFY_ERROR_CODES",
+    "LEGACY_VERIFY_ERROR_CODES",
+    "TRANSIENT_VERIFY_ERROR_CODES",
+    "VERIFY_ERROR_CODES",
+    "VerifyErrorCode",
+    "is_verify_error_code",
 ]
