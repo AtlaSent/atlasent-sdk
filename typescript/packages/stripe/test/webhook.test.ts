@@ -130,6 +130,34 @@ describe("POST /webhooks/stripe", () => {
     expect(s.alerts).toHaveLength(0);
   });
 
+  it("hands every verdict to onVerdict, and a failing one does not change the response", async () => {
+    const ledger = new InMemoryLedger();
+    await ledger.recordAuthorized(entry());
+    const seen: string[] = [];
+    server = createServer(
+      createStripeWebhookHandler({
+        webhookSecret: SECRET,
+        ledger,
+        now: () => NOW,
+        onVerdict: (v, r) => {
+          seen.push(`${v.verdict}:${r.id}`);
+          if (r.id === "re_dash") throw new Error("disk full");
+        },
+      }),
+    );
+    await new Promise<void>((r) => server!.listen(0, "127.0.0.1", () => r()));
+    const base = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
+    const deliver = (event: unknown) => {
+      const raw = JSON.stringify(event);
+      return fetch(`${base}/webhooks/stripe`, { method: "POST", headers: { "stripe-signature": sign(raw) }, body: raw });
+    };
+    await deliver({ type: "refund.created", data: { object: refund() } });
+    const res = await deliver({ type: "refund.created", data: { object: refund({ id: "re_dash", metadata: {} }) } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ verdict: "unauthorized" });
+    expect(seen).toEqual([`authorized:${refund().id}`, "unauthorized:re_dash"]);
+  });
+
   it("ignores other event types", async () => {
     const s = await start();
     expect(await (await s.deliver({ type: "charge.succeeded", data: { object: {} } })).json()).toEqual({ ignored: true });

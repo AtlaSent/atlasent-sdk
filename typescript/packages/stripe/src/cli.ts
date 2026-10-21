@@ -7,7 +7,8 @@
  *
  * Env: STRIPE_SECRET_KEY (use a test-mode restricted key), ATLASENT_API_KEY,
  * ATLASENT_ENVIRONMENT, DELIVERY_FACTS_FILE; optional ATLASENT_BASE_URL,
- * ATLASENT_ACTOR, STRIPE_ACCOUNT_LABEL, ORDER_REF_KEY, LEDGER_PATH.
+ * ATLASENT_ACTOR, STRIPE_ACCOUNT_LABEL, ORDER_REF_KEY, LEDGER_PATH, EVIDENCE_LOG
+ * (appends each decision to the evidence log; see evidence-log.ts).
  *
  * DELIVERY_FACTS_FILE stands in for the store's order system: a JSON map of
  * order reference -> { "order_status": "delivered", "delivered_at": "<ISO>" }.
@@ -20,6 +21,8 @@ import { AtlaSentClient } from "@atlasent/sdk";
 import { centsToMoney, deriveStripeRefundFacts, moneyToCents, staticDeliveryFacts, type DeliveryFacts } from "./facts.js";
 import { guardedStripeRefund, resumeApprovedStripeRefund } from "./guard.js";
 import { createApprovalsClient } from "./approvals.js";
+import { appendEvidence } from "./evidence-log.js";
+import type { RefundDecisionRecord } from "./decision-record.js";
 import { JsonFileLedger } from "./ledger.js";
 import { createStripeClient } from "./stripe.js";
 
@@ -51,7 +54,9 @@ async function main(): Promise<number> {
   const delivery = staticDeliveryFacts(JSON.parse(readFileSync(env("DELIVERY_FACTS_FILE"), "utf8")) as Record<string, DeliveryFacts>);
   const orderRefKey = process.env.ORDER_REF_KEY ?? "order_id";
   const actor = process.env.ATLASENT_ACTOR ?? `stripe-cli:${process.env.USER ?? "operator"}`;
+  const evidenceLog = process.env.EVIDENCE_LOG;
   const gateOptions = () => ({
+    ...(evidenceLog ? { onDecision: (r: RefundDecisionRecord) => appendEvidence(evidenceLog, r) } : {}),
     actor,
     environment: env("ATLASENT_ENVIRONMENT"),
     ledger: new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"),

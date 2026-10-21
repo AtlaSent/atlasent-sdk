@@ -32,6 +32,7 @@ import { runSupportTool, type SupportAgentDeps } from "../../shopify/src/agent.j
 import { guardedStripeRefund, resumeApprovedStripeRefund } from "../../stripe/src/guard.js";
 import { InMemoryLedger as StripeLedger } from "../../stripe/src/ledger.js";
 import { auditStripeRefund } from "../../stripe/src/webhook.js";
+import { alarmRecord as stripeAlarmRecord } from "../../stripe/src/evidence-log.js";
 import { staticDeliveryFacts } from "../../stripe/src/facts.js";
 import { REFUND_ALARM_SCHEMA, type RefundAlarmRecord, type RefundDecisionRecord } from "./records.js";
 import { buildEvidenceReport, formatMoney, outcomeText, type EvidenceReport } from "./report.js";
@@ -170,19 +171,8 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
     });
   }
   for (const refund of stripe.events) {
-    const v = await auditStripeRefund(refund, stripeLedger);
-    alarms.push({
-      schema: REFUND_ALARM_SCHEMA,
-      at: now().toISOString(),
-      system: "stripe",
-      refund_id: v.refundId,
-      target: v.verdict === "ignored" ? null : v.paymentIntent,
-      amount_cents: v.verdict === "ignored" ? null : v.amountCents,
-      currency: refund.currency.toUpperCase(),
-      verdict: v.verdict,
-      reason: v.verdict === "authorized" ? null : v.reason,
-      gate_ref: v.verdict === "ignored" ? null : (v.gateRef ?? null),
-    });
+    // The same record the Stripe webhook server appends with EVIDENCE_LOG set.
+    alarms.push(stripeAlarmRecord(await auditStripeRefund(refund, stripeLedger), refund, now()));
   }
   const flagged = alarms.filter((a) => a.verdict === "unauthorized");
   say(`Alarm: ${alarms.length - flagged.length} platform refund(s) matched a permit, ${flagged.length} flagged.`);
