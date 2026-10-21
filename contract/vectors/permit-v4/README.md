@@ -25,3 +25,17 @@ ATLASENT_API_DIR=/path/to/atlasent-api \
 Then update this file's commit pin. The signing key is the RFC 8032 test-1
 seed: public test material that signs nothing real. The identifiers in the
 vectors are synthetic.
+
+## Kid-aware vectors (`kid-vectors.json`)
+
+These are for verifiers only; the runtime does not mint a kid yet. Each token
+reuses the claims bytes of the runtime-minted `full` token, under a different
+protected header, re-signed with the same test seed (or with the RFC 8032
+test-2 seed for `permit-2026-b`). Both SDKs must accept or reject every case
+with the stated reason:
+
+- TypeScript: `typescript/test/verify-permit-v4-kid.test.ts`
+- Python: `python/tests/test_verify_permit_v4_kid.py`
+
+Regenerate with `python3 contract/tools/gen_permit_v4_kid_vectors.py >
+contract/vectors/permit-v4/kid-vectors.json`.

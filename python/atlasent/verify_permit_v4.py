@@ -9,7 +9,8 @@ The bytes signed by Ed25519 are the COSE Sig_Structure (RFC 9052 §4.4)::
 
     ["Signature1", bstr(protected_header), bstr(""), bstr(permit_claims_cbor)]
 
-Protected header: ``{ 1: -8 }`` = ``0xa1 0x01 0x27`` (EdDSA, RFC 8037).
+Protected header: ``{ 1: -8 }`` (EdDSA, RFC 8037), optionally with
+``{ 4: bstr(kid) }``; see ``_parse_protected_header``.
 Permit claims: CBOR integer-keyed map with keys 4, 6, 7, -1 .. -35 (every key
 atlasent-api's ``_shared/cose.ts`` encodes). Cross-language parity vectors:
 ``contract/vectors/permit-v4/vectors.json``, generated from the runtime's own
@@ -27,6 +28,7 @@ from __future__ import annotations
 import base64
 import json
 import uuid as _uuid_module
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,6 +44,10 @@ REASON_WRONG_PROTECTED_HEADER = "wrong_protected_header"
 REASON_CLAIMS_DECODE_FAILED = "claims_decode_failed"
 REASON_SIGNATURE_INVALID = "signature_invalid"
 REASON_EXPIRED = "expired"
+REASON_UNKNOWN_KID = "unknown_kid"
+REASON_KEY_REVOKED = "key_revoked"
+REASON_KEY_NOT_VALID_FOR_PERMIT = "key_not_valid_for_permit"
+REASON_KID_REQUIRED = "kid_required"
 
 
 class PermitV4VerifyError(Exception):
@@ -114,6 +120,10 @@ class PermitClaimsV4:
 class PermitV4VerifyResult:
     ok: bool
     claims: PermitClaimsV4
+    #: kid from the COSE protected header; ``None`` when the header has none.
+    kid: str | None = None
+    #: kid of the key-set entry that verified the token; ``None`` for a pinned key.
+    verified_with_kid: str | None = None
 
 
 # ─── Minimal CBOR reader ──────────────────────────────────────────────────────
@@ -207,6 +217,9 @@ class _CborReader:
             return
         raise ValueError(f"cbor: unsupported major {major}")
 
+    def at_end(self) -> bool:
+        return self._pos == len(self._b)
+
     def peek_major(self) -> int:
         return (self._b[self._pos] >> 5) & 7
 
@@ -251,7 +264,96 @@ def _cbor_array(items: list[bytes]) -> bytes:
 
 # ─── Protected header ─────────────────────────────────────────────────────────
 
-_PROTECTED_HEADER = bytes([0xA1, 0x01, 0x27])  # { 1: -8 } = EdDSA
+# Accepted: { 1: -8 } (EdDSA) alone, or with { 4: bstr(kid) }, in either order.
+# Anything else (another label, a duplicate, a non-EdDSA alg, a tstr kid) is
+# rejected: the runtime mints { 1: -8 } today, and accepting a kid now lets it
+# start stamping one without breaking verifiers already in the field.
+
+
+def _parse_protected_header(data: bytes) -> str | None:
+    r = _CborReader(data)
+    n = r.read_map_len()
+    alg: int | None = None
+    kid: str | None = None
+    seen: set[int] = set()
+    for _ in range(n):
+        label = r.read_int()
+        if label in seen:
+            raise ValueError(f"duplicate protected header label {label}")
+        seen.add(label)
+        if label == 1:
+            alg = r.read_int()
+        elif label == 4:
+            raw = r.read_bstr()
+            if not raw:
+                raise ValueError("empty kid")
+            kid = raw.decode("utf-8")
+        else:
+            raise ValueError(f"unexpected protected header label {label}")
+    if not r.at_end():
+        raise ValueError("trailing bytes after protected header")
+    if alg != -8:
+        raise ValueError("expected EdDSA protected header { 1: -8 }")
+    return kid
+
+
+def _is_permit_key(k: Any) -> bool:
+    return (
+        isinstance(k, dict)
+        and isinstance(k.get("kid"), str)
+        and isinstance(k.get("x"), str)
+        and k.get("role", "R2_permit") == "R2_permit"
+        and k.get("kty", "OKP") == "OKP"
+        and k.get("crv", "Ed25519") == "Ed25519"
+    )
+
+
+def _parse_iso(value: Any) -> float:
+    from datetime import datetime
+
+    if not isinstance(value, str):
+        raise ValueError("not a timestamp")
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+
+
+def _select_key(
+    key_set: Mapping[str, Any], kid: str | None, iat: int, default_kid: str | None
+) -> dict[str, Any]:
+    raw_keys = key_set.get("keys") if isinstance(key_set, Mapping) else None
+    keys = (
+        [k for k in raw_keys if _is_permit_key(k)] if isinstance(raw_keys, list) else []
+    )
+    wanted = kid if kid is not None else default_kid
+    if wanted is not None:
+        entry = next((k for k in keys if k["kid"] == wanted), None)
+        if entry is None:
+            raise PermitV4VerifyError(
+                REASON_UNKNOWN_KID, f"no permit key with kid {wanted!r}"
+            )
+    else:
+        live = [k for k in keys if k.get("revoked") is not True]
+        if len(live) != 1:
+            raise PermitV4VerifyError(
+                REASON_KID_REQUIRED,
+                "token carries no kid and the key set has "
+                f"{len(live)} usable permit keys",
+            )
+        entry = live[0]
+    if entry.get("revoked") is True:
+        raise PermitV4VerifyError(
+            REASON_KEY_REVOKED, f"permit key {entry['kid']} is revoked"
+        )
+    try:
+        if "valid_from" in entry and iat < _parse_iso(entry["valid_from"]):
+            raise ValueError("before valid_from")
+        if "valid_until" in entry and iat > _parse_iso(entry["valid_until"]):
+            raise ValueError("after valid_until")
+    except ValueError as exc:
+        raise PermitV4VerifyError(
+            REASON_KEY_NOT_VALID_FOR_PERMIT,
+            f"permit issued outside the validity window of key {entry['kid']}",
+        ) from exc
+    return entry
 
 
 # ─── COSE Sign1 decode ────────────────────────────────────────────────────────
@@ -393,9 +495,10 @@ def _decode_permit_claims(data: bytes) -> PermitClaimsV4:
 
 def verify_permit_v4(
     token: str,
-    public_key_b64: str,
+    public_key_b64: str | Mapping[str, Any],
     *,
     check_expiry: bool = False,
+    default_kid: str | None = None,
 ) -> PermitV4VerifyResult:
     """Verify a pt.v4.* COSE Sign1 permit token offline.
 
@@ -408,7 +511,12 @@ def verify_permit_v4(
 
     Args:
         token:          Full ``pt.v4.*`` token string.
-        public_key_b64: Raw 32-byte Ed25519 public key, standard base64.
+        public_key_b64: Either one pinned key (raw 32-byte Ed25519, standard
+                        base64), used whatever the header says, or a key set
+                        (the trust root's atlasent-verifier-keys.json document,
+                        or any ``{"keys": [...]}``) indexed by the header kid.
+        default_kid:    With a key set, the kid to use when the token's header
+                        carries none and the set has several permit keys.
         check_expiry:   If True, raises if ``claims.exp ≤ now`` (default False).
 
     Returns:
@@ -442,20 +550,31 @@ def verify_permit_v4(
     except Exception as exc:
         raise PermitV4VerifyError(REASON_COSE_DECODE_FAILED, str(exc)) from exc
 
-    if protected_bytes != _PROTECTED_HEADER:
-        raise PermitV4VerifyError(
-            REASON_WRONG_PROTECTED_HEADER,
-            "expected EdDSA protected header { 1: -8 } = 0xa1 0x01 0x27",
-        )
+    try:
+        header_kid = _parse_protected_header(protected_bytes)
+    except Exception as exc:
+        raise PermitV4VerifyError(REASON_WRONG_PROTECTED_HEADER, str(exc)) from exc
 
     try:
         claims = _decode_permit_claims(payload_bytes)
     except Exception as exc:
         raise PermitV4VerifyError(REASON_CLAIMS_DECODE_FAILED, str(exc)) from exc
 
+    verified_with_kid: str | None = None
+    if isinstance(public_key_b64, str):
+        key_b64 = public_key_b64
+        decode_key = base64.b64decode
+    else:
+        entry = _select_key(public_key_b64, header_kid, claims.iat, default_kid)
+        verified_with_kid = entry["kid"]
+        key_b64 = entry["x"]
+
+        def decode_key(v: str) -> bytes:
+            return base64.urlsafe_b64decode(v + "=" * (-len(v) % 4))
+
     to_verify = _build_sig_structure(protected_bytes, payload_bytes)
     try:
-        raw_key = base64.b64decode(public_key_b64)
+        raw_key = decode_key(key_b64)
         pub_key = Ed25519PublicKey.from_public_bytes(raw_key)
         pub_key.verify(sig, to_verify)
     except InvalidSignature:
@@ -475,4 +594,6 @@ def verify_permit_v4(
             exp_str = datetime.fromtimestamp(claims.exp, tz=timezone.utc).isoformat()
             raise PermitV4VerifyError(REASON_EXPIRED, f"permit expired at {exp_str}")
 
-    return PermitV4VerifyResult(ok=True, claims=claims)
+    return PermitV4VerifyResult(
+        ok=True, claims=claims, kid=header_kid, verified_with_kid=verified_with_kid
+    )

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added: kid-aware pt.v4 verification (reading side only, additive)
+
+`verify_permit_v4()` accepts a protected header with or without a `kid`.
+Its key argument may be one pinned key (as before) or a key set: the trust
+root's verifier-keys document or any `{"keys": [...]}`. The header kid
+selects the `R2_permit` key, with the same rules and reasons as the
+TypeScript SDK (`unknown_kid`, `key_revoked`, `key_not_valid_for_permit`,
+`kid_required`; `default_kid=` for kid-less tokens). The result adds `kid`
+and `verified_with_kid`.
+
 ### Added: full pt.v4 claim decode, typed verify error codes, `execution_payload_hash_accepted` (additive)
 
 - `verify_permit_v4()` decodes every claim key the runtime signs (4, 6, 7 and

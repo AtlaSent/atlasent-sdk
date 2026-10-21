@@ -8,6 +8,23 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: kid-aware pt.v4 verification (reading side only, additive)
+
+`verifyPermitV4(token, key)` now accepts a COSE protected header with or
+without a `kid` (`{1:-8}` or `{1:-8, 4:bstr(kid)}`). The runtime still mints
+`{1:-8}`. Accepting a kid now means the runtime can start stamping one later
+without breaking SDKs already in the field. `key` may be one pinned key
+(unchanged behaviour: it is used whatever the header says) or a key set: the
+trust root's `atlasent-verifier-keys.json` document or any `{ keys: [...] }`.
+With a key set, the header kid selects the `R2_permit` key. Revoked keys,
+keys whose validity window excludes the permit's `iat`, and non-permit roles
+are refused. A kid-less token uses the single usable key or
+`opts.defaultKid`; otherwise it fails with `kid_required`. New reasons:
+`unknown_kid`, `key_revoked`, `key_not_valid_for_permit`, `kid_required`.
+The result adds `kid` and `verifiedWithKid`. Any other header label, a
+duplicate label, a non-EdDSA alg or a text-string kid still fails with
+`wrong_protected_header`.
+
 ### Added: full pt.v4 claim decode, typed verify error codes, `execution_payload_hash_accepted` (additive)
 
 - `verifyPermitV4()` now decodes every claim key the runtime signs (4, 6, 7
