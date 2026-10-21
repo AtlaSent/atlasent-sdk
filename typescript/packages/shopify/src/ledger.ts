@@ -13,7 +13,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { closeSync, fstatSync, linkSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, linkSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
 export interface LedgerEntry {
   /** Random per-refund reference, written into the Shopify refund note. */
@@ -150,19 +150,12 @@ export class LedgerLockError extends Error {
 export interface JsonFileLedgerOptions {
   /** How long to wait for another process's lock before failing. Default 5000 ms. */
   lockTimeoutMs?: number;
-  /**
-   * A lock not released within this long is treated as left by a crashed
-   * process and taken over. A holder that is still working when that happens
-   * finds out before it writes, and fails closed. Default 30000 ms; every
-   * ledger operation takes milliseconds.
-   */
-  staleLockMs?: number;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** The lock's token and age, read through one descriptor (no check-then-read gap). */
-function readLock(lockPath: string): { token: string; mtimeMs: number } | null {
+/** The lock's token, read through one descriptor. */
+function readLock(lockPath: string): { token: string } | null {
   let fd: number;
   try {
     fd = openSync(lockPath, "r");
@@ -171,24 +164,38 @@ function readLock(lockPath: string): { token: string; mtimeMs: number } | null {
     throw err;
   }
   try {
-    return { mtimeMs: fstatSync(fd).mtimeMs, token: readFileSync(fd, "utf8") };
+    return { token: readFileSync(fd, "utf8") };
   } finally {
     closeSync(fd);
   }
 }
 
+/** Locks this process holds, so an exit in the middle of an operation (process.exit) releases them. */
+const heldLocks = new Map<string, string>();
+let exitHookInstalled = false;
+function releaseOnExit(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  const releaseAll = () => {
+    for (const [path, token] of heldLocks) {
+      try {
+        removeLockIfHeldBy(path, token);
+      } catch {
+        // best effort at exit
+      }
+    }
+  };
+  process.once("exit", releaseAll);
+}
+
 /**
- * Removes the lock at `lockPath` only if it is the one holding `token`.
- *
- * It never deletes whatever happens to be at the path. It first renames the
- * lock aside (atomic: exactly one process gets a given lock file), then reads
- * what it moved. If that is the expected lock, it is deleted. If it is a newer
- * lock someone else now holds, it is linked straight back (link fails rather
- * than overwrite if the path was taken again meanwhile; that holder then
- * fails its pre-write ownership check). Used both to release one's own lock
- * and to take over an expired one. Exported for tests.
+ * Releases the lock at `lockPath` only if it holds `token`, so a holder never
+ * deletes a lock it does not own (for example one an operator replaced). It
+ * renames the lock aside, reads what it moved, deletes it if it is this
+ * holder's, and otherwise links it straight back. Exported for tests.
  */
 export function removeLockIfHeldBy(lockPath: string, token: string): boolean {
+  if (heldLocks.get(lockPath) === token) heldLocks.delete(lockPath);
   const aside = `${lockPath}.${process.pid}.${randomUUID()}.aside`;
   try {
     renameSync(lockPath, aside);
@@ -222,14 +229,19 @@ export function assertLockHeld(lockPath: string, token: string, ledgerPath: stri
 
 /**
  * Takes the exclusive lock at `lockPath` and returns this holder's token.
- * A lock older than `staleMs` is taken over through removeLockIfHeldBy, so
- * two processes recovering the same expired lock cannot delete each other's
- * new one. Throws LedgerLockError after `timeoutMs`. Exported for tests.
+ * Throws LedgerLockError after `timeoutMs`. Exported for tests.
+ *
+ * A lock is never taken over, however old. Plain files offer no conditional
+ * delete, so every takeover scheme can, in some interleaving, remove a live
+ * holder's lock and let two writers overwrite each other. Instead a lock
+ * left by a process that crashed inside the (milliseconds-long) critical
+ * section makes every write fail closed until an operator deletes it; the
+ * error says so. process.exit() mid-operation releases it; a kill does not.
  */
 export async function acquireFileLock(
   lockPath: string,
   ledgerPath: string,
-  opts: { timeoutMs: number; staleMs: number },
+  opts: { timeoutMs: number },
 ): Promise<string> {
   const token = `${process.pid} ${randomUUID()}`;
   const started = Date.now();
@@ -241,18 +253,17 @@ export async function acquireFileLock(
       } finally {
         closeSync(fd);
       }
+      heldLocks.set(lockPath, token);
+      releaseOnExit();
       return token;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
-    const held = readLock(lockPath);
-    if (held === null) continue; // released between the open and the read
-    if (Date.now() - held.mtimeMs > opts.staleMs) {
-      removeLockIfHeldBy(lockPath, held.token);
-      continue;
-    }
     if (Date.now() - started >= opts.timeoutMs) {
-      throw new LedgerLockError(`could not lock the permit ledger ${ledgerPath} within ${Date.now() - started} ms`);
+      throw new LedgerLockError(
+        `could not lock the permit ledger ${ledgerPath} within ${Date.now() - started} ms; nothing was written. ` +
+          `If no refund process is running, ${lockPath} was left by one that crashed: delete it to restore writes.`,
+      );
     }
     await sleep(10 + Math.floor(Math.random() * 15));
   }
@@ -269,12 +280,9 @@ export async function acquireFileLock(
  *   holds that lock just before writing, and replaces the ledger with a
  *   unique temp file plus rename, so a reader never sees a partial file and
  *   two writers never lose each other's entries.
- * - A lock is only ever removed by token (removeLockIfHeldBy): its owner
- *   releases it, or, once it is older than staleLockMs, another process takes
- *   it over. No pid is trusted, so a reused pid cannot keep a dead lock alive.
- * - Residual: a holder still working after staleLockMs whose lock is taken
- *   over fails its pre-write check, except in the instant between that check
- *   and its rename. Ledger operations take milliseconds; the limit is 30 s.
+ * - Only the holder ever removes its lock, and only by token
+ *   (removeLockIfHeldBy). No other process takes a lock over, however old:
+ *   see acquireFileLock for why, and for recovering from a crash.
  * - If the lock cannot be taken, the operation throws LedgerLockError and
  *   changes nothing. The gate then stops before refunding, and the webhook
  *   reports the refund as unauthorized: a lock failure never authorizes.
@@ -283,7 +291,6 @@ export async function acquireFileLock(
  */
 export class JsonFileLedger extends InMemoryLedger {
   private readonly lockTimeoutMs: number;
-  private readonly staleLockMs: number;
   private heldLock: { path: string; token: string } | undefined;
 
   constructor(
@@ -292,7 +299,6 @@ export class JsonFileLedger extends InMemoryLedger {
   ) {
     super();
     this.lockTimeoutMs = options.lockTimeoutMs ?? 5000;
-    this.staleLockMs = options.staleLockMs ?? 30_000;
     this.load();
   }
 
@@ -317,7 +323,7 @@ export class JsonFileLedger extends InMemoryLedger {
   /** Lock, reload, run one operation (which persists), unlock. */
   private async locked<T>(op: () => Promise<T>): Promise<T> {
     const lockPath = `${this.path}.lock`;
-    const token = await acquireFileLock(lockPath, this.path, { timeoutMs: this.lockTimeoutMs, staleMs: this.staleLockMs });
+    const token = await acquireFileLock(lockPath, this.path, { timeoutMs: this.lockTimeoutMs });
     this.heldLock = { path: lockPath, token };
     try {
       this.load();

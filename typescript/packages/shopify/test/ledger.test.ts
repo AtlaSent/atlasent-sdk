@@ -113,10 +113,15 @@ describe("JsonFileLedger lock failure fails closed", () => {
     expect((await auditRefundWebhook(payload(), ledger)).verdict).toBe("unauthorized");
   });
 
-  it("a lock left by a crashed process is removed once stale", async () => {
+  it("a lock left by a crashed process is never removed automatically; deleting it restores writes", async () => {
     const path = ledgerPath();
     holdLock(path);
-    const ledger = new JsonFileLedger(path, { lockTimeoutMs: 2000, staleLockMs: 0 });
+    const ledger = new JsonFileLedger(path, { lockTimeoutMs: 50 });
+    const err = await ledger.recordAuthorized(entry()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LedgerLockError);
+    expect(String((err as Error).message)).toContain(`delete it to restore writes`);
+    expect(String((err as Error).message)).toContain(`${path}.lock`);
+    rmSync(`${path}.lock`);
     await ledger.recordAuthorized(entry());
     expect(await ledger.get("ref-1")).toBeDefined();
   });
@@ -130,35 +135,39 @@ function foreignLock(path: string, token: string, ageMs = 0): void {
 }
 
 describe("JsonFileLedger lock ownership", () => {
-  it("a lock younger than staleLockMs is never taken over: the write fails closed", async () => {
+  it("a lock held by another process is never taken over: the write fails closed", async () => {
     const path = ledgerPath();
     foreignLock(path, "999 someone-else");
-    const ledger = new JsonFileLedger(path, { lockTimeoutMs: 100, staleLockMs: 30_000 });
+    const ledger = new JsonFileLedger(path, { lockTimeoutMs: 100 });
     await expect(ledger.recordAuthorized(entry())).rejects.toBeInstanceOf(LedgerLockError);
     expect(readFileSync(`${path}.lock`, "utf8")).toBe("999 someone-else");
   });
-
-  it("an expired lock is taken over even if its pid now belongs to a live process (pid reuse)", async () => {
+  it("an old lock is not taken over either, whatever pid it names: no takeover can remove a live holder's lock", async () => {
     const path = ledgerPath();
-    foreignLock(path, `${process.pid} from-a-previous-container`, 60_000);
-    const ledger = new JsonFileLedger(path, { lockTimeoutMs: 2000, staleLockMs: 30_000 });
-    await ledger.recordAuthorized(entry());
-    expect(await ledger.get("ref-1")).toBeDefined();
-    expect(existsSync(`${path}.lock`)).toBe(false);
+    foreignLock(path, `${process.pid} from-a-previous-container`, 24 * 3600_000);
+    const ledger = new JsonFileLedger(path, { lockTimeoutMs: 100 });
+    await expect(ledger.recordAuthorized(entry())).rejects.toBeInstanceOf(LedgerLockError);
+    expect(readFileSync(`${path}.lock`, "utf8")).toBe(`${process.pid} from-a-previous-container`);
   });
 
-  it("taking over an expired lock never removes the newer lock now in its place", async () => {
+  it("a process that exits mid-operation (process.exit) releases its lock", async () => {
+    const path = ledgerPath();
+    const mod = fileURLToPath(new URL("../src/ledger.ts", import.meta.url));
+    const script = `const { acquireFileLock } = await import(${JSON.stringify(mod)}); await acquireFileLock(${JSON.stringify(`${path}.lock`)}, ${JSON.stringify(path)}, { timeoutMs: 1000 }); process.exit(0);`;
+    await run(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { timeout: 60_000 });
+    expect(existsSync(`${path}.lock`)).toBe(false);
+  }, 60_000);
+  it("removing by token never removes a different lock now in its place", async () => {
     const path = ledgerPath();
     const lockPath = `${path}.lock`;
-    // This process saw an expired lock holding "old"; another recoverer removed it and a live writer took the lock.
-    const live = await acquireFileLock(lockPath, path, { timeoutMs: 1000, staleMs: 30_000 });
+    const live = await acquireFileLock(lockPath, path, { timeoutMs: 1000 });
     expect(removeLockIfHeldBy(lockPath, "123 old")).toBe(false);
     expect(readFileSync(lockPath, "utf8")).toBe(live);
     expect(removeLockIfHeldBy(lockPath, live)).toBe(true);
     expect(existsSync(lockPath)).toBe(false);
   });
 
-  it("a holder whose lock was taken over writes nothing and fails closed", async () => {
+  it("a holder whose lock was replaced writes nothing and fails closed", async () => {
     const path = ledgerPath();
     const ledger = new JsonFileLedger(path);
     await ledger.recordAuthorized(entry({ gate_ref: "before" }));
@@ -166,7 +175,7 @@ describe("JsonFileLedger lock ownership", () => {
     const locked = (ledger as unknown as { locked: (op: () => Promise<void>) => Promise<void> }).locked.bind(ledger);
     await expect(
       locked(async () => {
-        writeFileSync(`${path}.lock`, "456 took-it-over"); // another process took the lock while this one worked
+        writeFileSync(`${path}.lock`, "456 took-it-over"); // the lock was replaced (by hand) while this one worked
         await InMemoryLedger.prototype.recordAuthorized.call(ledger, entry({ gate_ref: "after" })); // the unlocked inner write
       }),
     ).rejects.toBeInstanceOf(LedgerLockError);
@@ -181,15 +190,6 @@ describe("JsonFileLedger lock ownership", () => {
     expect(removeLockIfHeldBy(`${path}.lock`, `${process.pid} mine`)).toBe(false);
     expect(readFileSync(`${path}.lock`, "utf8")).toBe("123 another-holder");
   });
-
-  it("processes recovering the same expired lock at once keep every entry", async () => {
-    const path = ledgerPath();
-    foreignLock(path, "1 crashed", 60_000);
-    const writers = ["r1", "r2", "r3", "r4"];
-    await Promise.all(writers.map((w) => writeFromAnotherProcess(path, w, 50)));
-    const data = JSON.parse(readFileSync(path, "utf8")) as { entries: LedgerEntry[] };
-    expect(new Set(data.entries.map((e) => e.gate_ref)).size).toBe(200);
-  }, 120_000);
 });
 
 describe("claim re-checks the entry under the lock", () => {

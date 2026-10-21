@@ -139,6 +139,9 @@ alarm **detects**, it does not prevent:
   operation re-reads the file, and every write holds `<LEDGER_PATH>.lock`
   and replaces the file atomically. If the ledger cannot be read or locked,
   the refund is reported as unauthorized, never as authorized.
+  A process killed while holding the lock leaves `<LEDGER_PATH>.lock` behind,
+  and writes then fail closed until you delete it (with no refund process
+  running). It is never taken over automatically.
 
 **Prevention is a store setting:** remove the refund permission from staff
 accounts (Shopify admin → Settings → Users → each staff member → order
