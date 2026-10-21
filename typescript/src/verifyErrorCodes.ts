@@ -80,22 +80,23 @@ export type VerifyErrorCode =
   | (typeof VERIFY_ERROR_CODES)[number]
   | (typeof LEGACY_VERIFY_ERROR_CODES)[number];
 
-const KNOWN: ReadonlySet<string> = new Set<string>([
-  ...VERIFY_ERROR_CODES,
-  ...LEGACY_VERIFY_ERROR_CODES,
-]);
-
 /** True when `code` is a verify error code this SDK release knows. */
 export function isVerifyErrorCode(code: unknown): code is VerifyErrorCode {
-  return typeof code === "string" && KNOWN.has(code);
+  return (
+    typeof code === "string" &&
+    ((VERIFY_ERROR_CODES as readonly string[]).includes(code) ||
+      (LEGACY_VERIFY_ERROR_CODES as readonly string[]).includes(code))
+  );
 }
 
 /**
  * Codes whose catalog retry advice is `transient`: a verifier or store fault,
  * not a judgement about the permit. Retrying the SAME permit may succeed.
  * Every other code means this permit will not verify as presented.
+ * (Plain arrays, not Sets, so the module stays side-effect free and tree-shakes
+ * out of bundles that never import it.)
  */
-export const TRANSIENT_VERIFY_ERROR_CODES: ReadonlySet<VerifyErrorCode> = new Set<VerifyErrorCode>([
+export const TRANSIENT_VERIFY_ERROR_CODES = [
   "EXECUTION_PRINCIPAL_BINDING_UNAVAILABLE",
   "CDO_LOOKUP_FAILED",
   "MATERIAL_EXECUTION_FIELDS_POLICY_LOOKUP_FAILED",
@@ -103,4 +104,4 @@ export const TRANSIENT_VERIFY_ERROR_CODES: ReadonlySet<VerifyErrorCode> = new Se
   "DELEGATION_CHAIN_ERROR",
   "WORKLOAD_ATTESTATION_UNAVAILABLE",
   "INTERNAL_ERROR",
-]);
+] as const satisfies readonly VerifyErrorCode[];

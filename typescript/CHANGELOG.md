@@ -21,7 +21,7 @@ follows [semver](https://semver.org/): breaking changes bump the major
   decoders must both reproduce the runtime's claim bag exactly.
 - `VERIFY_ERROR_CODES`, `LEGACY_VERIFY_ERROR_CODES`,
   `TRANSIENT_VERIFY_ERROR_CODES`, `isVerifyErrorCode()` and the
-  `VerifyErrorCode` type, mirroring atlasent-api's verify error-code catalog.
+  `VerifyErrorCode` type (plain `as const` arrays, side-effect free), mirroring atlasent-api's verify error-code catalog.
   `verifyPermit()` now returns `verifyErrorCode` and `verifyReason`; both are
   optional and the code is an open string.
 - `evaluate()` and `evaluatePreflight()` surface
