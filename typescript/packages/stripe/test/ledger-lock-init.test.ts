@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Makes writing the lock token fail, as a full disk would, while the lock
 // file itself is created.
-const failTokenWrite = vi.hoisted(() => ({ on: false, close: false, renameLock: false }));
+const failTokenWrite = vi.hoisted(() => ({ on: false, close: false, renameLock: false, readAside: false }));
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
   return {
@@ -22,6 +22,13 @@ vi.mock("node:fs", async (importOriginal) => {
         failTokenWrite.close = false;
         throw Object.assign(new Error("EIO: i/o error, close"), { code: "EIO" });
       }
+    },
+    readFileSync: (...args: Parameters<typeof fs.readFileSync>) => {
+      if (failTokenWrite.readAside && String(args[0]).endsWith(".aside")) {
+        failTokenWrite.readAside = false;
+        throw Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" });
+      }
+      return fs.readFileSync(...args);
     },
     renameSync: (from: import("node:fs").PathLike, to: import("node:fs").PathLike) => {
       if (failTokenWrite.renameLock && String(from).endsWith(".lock")) {
@@ -41,6 +48,7 @@ afterEach(() => {
   failTokenWrite.on = false;
   failTokenWrite.close = false;
   failTokenWrite.renameLock = false;
+  failTokenWrite.readAside = false;
   if (dir) rmSync(dir, { recursive: true, force: true });
   dir = "";
 });
@@ -88,5 +96,17 @@ describe("a release that fails", () => {
     expect(removeLockIfHeldBy(lockPath, token)).toBe(true);
     expect(isLockTracked(lockPath)).toBe(false);
     expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("keeps the lock tracked, and in place, when its token cannot be read back", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ledger-lock-init-"));
+    const lockPath = join(dir, "refund-ledger.json.lock");
+    const token = await acquireFileLock(lockPath, join(dir, "refund-ledger.json"), { timeoutMs: 100 });
+    failTokenWrite.readAside = true;
+    expect(removeLockIfHeldBy(lockPath, token)).toBe(false);
+    expect(readFileSync(lockPath, "utf8")).toBe(token);
+    expect(isLockTracked(lockPath)).toBe(true);
+    expect(removeLockIfHeldBy(lockPath, token)).toBe(true);
+    expect(isLockTracked(lockPath)).toBe(false);
   });
 });
