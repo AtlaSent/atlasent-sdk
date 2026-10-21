@@ -69,6 +69,12 @@ export interface PermitLedger {
   resolvePendingApproval(approvalRequestId: string, resolved: NonNullable<PendingApproval["resolved"]>): Promise<void>;
 }
 
+/** Shopify ids arrive as gids (gid://shopify/Refund/1) or bare numbers; compare their numeric part. */
+function sameRefundId(a: string, b: string): boolean {
+  const tail = (id: string) => String(id).split("/").pop();
+  return tail(a) === tail(b);
+}
+
 export class InMemoryLedger implements PermitLedger {
   protected entries = new Map<string, LedgerEntry>();
   protected pending = new Map<string, PendingApproval>();
@@ -101,6 +107,11 @@ export class InMemoryLedger implements PermitLedger {
   async claim(gateRef: string, refundId: string): Promise<boolean> {
     const e = this.entries.get(gateRef);
     if (!e) return false;
+    // Re-checked here, not only by the caller: with a shared file ledger the
+    // gate can cancel the entry, or record its own refund, between the
+    // webhook's read and this claim (which runs under the lock).
+    if (e.aborted_reason !== undefined) return false;
+    if (e.refund_id !== undefined && sameRefundId(e.refund_id, refundId) === false) return false;
     if (e.matched_refund_id !== undefined) return e.matched_refund_id === refundId;
     e.matched_refund_id = refundId;
     this.persist();

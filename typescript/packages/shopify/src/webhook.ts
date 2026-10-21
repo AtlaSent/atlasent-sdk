@@ -90,6 +90,18 @@ export async function auditRefundWebhook(payload: RefundWebhookPayload, ledger: 
     // Includes LedgerLockError: the claim was not recorded, so it is not authorized.
     return unauthorized(`the permit ledger is unavailable (${err instanceof Error ? err.message : String(err)})`, gateRef);
   }
-  if (!claimed) return unauthorized("the permit already accounts for another refund", gateRef);
+  if (!claimed) {
+    // Say why: the entry may have changed since it was read above.
+    let now: LedgerEntry | undefined;
+    try {
+      now = await ledger.get(gateRef);
+    } catch {
+      now = undefined;
+    }
+    if (now?.aborted_reason !== undefined) {
+      return unauthorized(`the gate stopped this refund before issuing it (${now.aborted_reason})`, gateRef);
+    }
+    return unauthorized("the permit already accounts for another refund", gateRef);
+  }
   return { verdict: "authorized", refundId, orderId, amountCents, gateRef };
 }
