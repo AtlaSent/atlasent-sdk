@@ -8,6 +8,30 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: kid-aware pt.v4 verification (reading side only, additive)
+
+`verifyPermitV4(token, key)` now accepts a COSE protected header with or
+without a `kid` (`{1:-8}` or `{1:-8, 4:bstr(kid)}`). The runtime still mints
+`{1:-8}`. Accepting a kid now means the runtime can start stamping one later
+without breaking SDKs already in the field. `key` may be one pinned key
+(unchanged behaviour: it is used whatever the header says) or a key set: the
+trust root's `atlasent-verifier-keys.json` document or any `{ keys: [...] }`.
+With a key set, the header kid selects the `R2_permit` key. Revoked keys
+(an entry's own `revoked`, the ledger's `revoked_keys`, or a flat
+`revoked_kids`; a `null` validity bound is open-ended),
+keys whose validity window excludes the permit's `iat`, and non-permit roles
+are refused. A kid-less token uses the single usable key or
+`opts.defaultKid`; otherwise it fails with `kid_required`. New reasons:
+`unknown_kid`, `key_revoked`, `key_not_valid_for_permit`, `kid_required`,
+`key_set_expired` (a set whose own `expires_at`/`valid_until` has passed).
+Revocation propagates to every entry with the same key bytes. A permit key
+whose bytes also appear on an entry with any role other than `R2_permit` (an
+audit key, or no role) is refused with `key_role_conflict`. The kid-less
+fallback counts only keys valid for the permit's `iat`.
+The result adds `kid` and `verifiedWithKid`. Any other header label, a
+duplicate label, a non-EdDSA alg or a text-string kid still fails with
+`wrong_protected_header`.
+
 ### Added: full pt.v4 claim decode, typed verify error codes, `execution_payload_hash_accepted` (additive)
 
 - `verifyPermitV4()` now decodes every claim key the runtime signs (4, 6, 7
