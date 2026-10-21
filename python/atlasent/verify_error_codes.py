@@ -92,9 +92,13 @@ LEGACY_VERIFY_ERROR_CODES: frozenset[str] = frozenset(
 VERIFY_ERROR_CODES: frozenset[str] = ALL_VERIFY_ERROR_CODES - LEGACY_VERIFY_ERROR_CODES
 
 #: Verifier or store faults (catalog retry advice ``transient``), not a judgement
-#: about the permit. Every other code means the permit will not verify as presented.
+#: about the permit. ``INVALID_SIGNATURE`` is included because the runtime uses it
+#: both for a bad signature and for a verifier key that is not configured; the
+#: code cannot tell them apart. Every other code means the permit will not verify
+#: as presented.
 TRANSIENT_VERIFY_ERROR_CODES: frozenset[str] = frozenset(
     {
+        "INVALID_SIGNATURE",
         "EXECUTION_PRINCIPAL_BINDING_UNAVAILABLE",
         "CDO_LOOKUP_FAILED",
         "MATERIAL_EXECUTION_FIELDS_POLICY_LOOKUP_FAILED",
