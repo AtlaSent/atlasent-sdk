@@ -13,7 +13,7 @@ import {
   PermitV4VerifyError,
   type PermitVerificationKeySet,
   verifyPermitV4,
-} from "../src/verify-permit-v4.js";
+} from "../src/index.js";
 
 interface KidFile {
   pinned_key_b64: string;
@@ -57,5 +57,19 @@ describe("kid-aware pt.v4 verification vectors", () => {
     const c = file.cases.find((x) => x.name === "kid_selects_key_b")!;
     const res = await verifyPermitV4(c.token, file.key_set, { defaultKid: "permit-2026-a" });
     expect(res.verifiedWithKid).toBe("permit-2026-b");
+  });
+
+  it("a flat revoked_kids list (TrustSnapshot shape) also revokes", async () => {
+    const c = file.cases.find((x) => x.name === "kid_selects_key_a")!;
+    const set = { ...file.key_set, revoked_kids: ["permit-2026-a"] };
+    const err = await verifyPermitV4(c.token, set).catch((e: unknown) => e);
+    expect((err as PermitV4VerifyError).reason).toBe("key_revoked");
+  });
+
+  it("a ledger-revoked key is not a usable fallback for a kid-less token", async () => {
+    const c = file.cases.find((x) => x.name === "no_kid_single_key_set")!;
+    const set = { ...file.single_set, revoked_keys: [{ kid: "permit-2026-a" }] };
+    const err = await verifyPermitV4(c.token, set).catch((e: unknown) => e);
+    expect((err as PermitV4VerifyError).reason).toBe("kid_required");
   });
 });

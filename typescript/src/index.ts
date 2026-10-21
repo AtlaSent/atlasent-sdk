@@ -168,6 +168,8 @@ export {
   type PermitClaimsV4,
   type PermitV4VerifyResult,
   type PermitV4VerifyReason,
+  type PermitVerificationKey,
+  type PermitVerificationKeySet,
 } from "./verify-permit-v4.js";
 export {
   VERIFY_ERROR_CODES,

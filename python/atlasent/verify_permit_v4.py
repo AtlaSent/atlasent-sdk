@@ -26,6 +26,7 @@ Requires the ``cryptography`` library (already a dependency of the SDK).
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import uuid as _uuid_module
 from collections.abc import Mapping
@@ -297,10 +298,18 @@ def _parse_protected_header(data: bytes) -> str | None:
     return kid
 
 
-def _is_permit_key(k: Any) -> bool:
+def _as_dict(v: Any) -> dict[str, Any] | None:
+    """A key or revocation entry as a dict (accepts trust-root dataclasses)."""
+    if isinstance(v, dict):
+        return v
+    if dataclasses.is_dataclass(v) and not isinstance(v, type):
+        return dataclasses.asdict(v)
+    return None
+
+
+def _is_permit_key(k: dict[str, Any]) -> bool:
     return (
-        isinstance(k, dict)
-        and isinstance(k.get("kid"), str)
+        isinstance(k.get("kid"), str)
         and isinstance(k.get("x"), str)
         and k.get("role", "R2_permit") == "R2_permit"
         and k.get("kty", "OKP") == "OKP"
@@ -316,13 +325,45 @@ def _parse_iso(value: Any) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
+def _key_set_parts(key_set: Any) -> tuple[list[Any], set[str]]:
+    """(keys, revoked kids) from a mapping or a TrustRootSnapshot-like object.
+
+    Revocation is read from every place the trust root records it: an entry's
+    own ``revoked``, the ledger's ``revoked_keys`` (atlasent-revocations.json
+    / ``TrustRootSnapshot.revoked_keys``) and a flat ``revoked_kids`` list.
+    """
+    if isinstance(key_set, Mapping):
+        raw_keys = key_set.get("keys")
+        ledger = key_set.get("revoked_keys")
+        flat = key_set.get("revoked_kids")
+    else:
+        raw_keys = getattr(key_set, "keys", None)
+        ledger = getattr(key_set, "revoked_keys", None)
+        flat = getattr(key_set, "revoked_kids", None)
+    revoked: set[str] = set()
+    for r in ledger if isinstance(ledger, list) else []:
+        d = _as_dict(r)
+        if d is not None and isinstance(d.get("kid"), str):
+            revoked.add(d["kid"])
+    for kid in flat if isinstance(flat, list) else []:
+        if isinstance(kid, str):
+            revoked.add(kid)
+    return (raw_keys if isinstance(raw_keys, list) else []), revoked
+
+
 def _select_key(
-    key_set: Mapping[str, Any], kid: str | None, iat: int, default_kid: str | None
+    key_set: Any, kid: str | None, iat: int, default_kid: str | None
 ) -> dict[str, Any]:
-    raw_keys = key_set.get("keys") if isinstance(key_set, Mapping) else None
-    keys = (
-        [k for k in raw_keys if _is_permit_key(k)] if isinstance(raw_keys, list) else []
-    )
+    raw_keys, ledger_revoked = _key_set_parts(key_set)
+    keys = [
+        d
+        for d in (_as_dict(k) for k in raw_keys)
+        if d is not None and _is_permit_key(d)
+    ]
+
+    def revoked(k: dict[str, Any]) -> bool:
+        return k.get("revoked") is True or k["kid"] in ledger_revoked
+
     wanted = kid if kid is not None else default_kid
     if wanted is not None:
         entry = next((k for k in keys if k["kid"] == wanted), None)
@@ -331,7 +372,7 @@ def _select_key(
                 REASON_UNKNOWN_KID, f"no permit key with kid {wanted!r}"
             )
     else:
-        live = [k for k in keys if k.get("revoked") is not True]
+        live = [k for k in keys if not revoked(k)]
         if len(live) != 1:
             raise PermitV4VerifyError(
                 REASON_KID_REQUIRED,
@@ -339,14 +380,19 @@ def _select_key(
                 f"{len(live)} usable permit keys",
             )
         entry = live[0]
-    if entry.get("revoked") is True:
+    if revoked(entry):
         raise PermitV4VerifyError(
             REASON_KEY_REVOKED, f"permit key {entry['kid']} is revoked"
         )
     try:
-        if "valid_from" in entry and iat < _parse_iso(entry["valid_from"]):
+        # A null bound is an open-ended side of the window (trust-root shape).
+        if entry.get("valid_from") is not None and iat < _parse_iso(
+            entry["valid_from"]
+        ):
             raise ValueError("before valid_from")
-        if "valid_until" in entry and iat > _parse_iso(entry["valid_until"]):
+        if entry.get("valid_until") is not None and iat > _parse_iso(
+            entry["valid_until"]
+        ):
             raise ValueError("after valid_until")
     except ValueError as exc:
         raise PermitV4VerifyError(
@@ -495,7 +541,7 @@ def _decode_permit_claims(data: bytes) -> PermitClaimsV4:
 
 def verify_permit_v4(
     token: str,
-    public_key_b64: str | Mapping[str, Any],
+    public_key_b64: str | Mapping[str, Any] | Any,
     *,
     check_expiry: bool = False,
     default_kid: str | None = None,
@@ -513,8 +559,10 @@ def verify_permit_v4(
         token:          Full ``pt.v4.*`` token string.
         public_key_b64: Either one pinned key (raw 32-byte Ed25519, standard
                         base64), used whatever the header says, or a key set
-                        (the trust root's atlasent-verifier-keys.json document,
-                        or any ``{"keys": [...]}``) indexed by the header kid.
+                        (the trust root's atlasent-verifier-keys.json document
+                        merged with its revocations, any ``{"keys": [...]}``, or
+                        a :class:`~atlasent.trust_root.TrustRootSnapshot`)
+                        indexed by the header kid.
         default_kid:    With a key set, the kid to use when the token's header
                         carries none and the set has several permit keys.
         check_expiry:   If True, raises if ``claims.exp ≤ now`` (default False).

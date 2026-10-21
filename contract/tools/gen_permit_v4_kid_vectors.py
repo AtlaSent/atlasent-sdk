@@ -135,7 +135,14 @@ KEY_SET = {
         jwk("permit-2025-old", SEED_A, revoked=True),
         jwk("audit-a", SEED_A, role="R3_audit"),
         jwk("permit-future", SEED_A, valid_from="2099-01-01T00:00:00Z"),
-    ]
+        jwk("permit-open-ended", SEED_A, valid_from=None, valid_until=None),
+        # Revoked through the trust-root revocation ledger only (its own
+        # entry still says revoked: false), as atlasent-revocations.json does.
+        jwk("permit-ledger-revoked", SEED_A),
+    ],
+    "revoked_keys": [
+        {"kid": "permit-ledger-revoked", "revoked_at": "2026-10-01T00:00:00Z", "role": "R2_permit"}
+    ],
 }
 SINGLE_SET = {"keys": [jwk("permit-2026-a", SEED_A)]}
 
@@ -201,6 +208,19 @@ cases = [
         "token": sign(hdr_kid(b"permit-future"), payload, SEED_A),
         "key": "key_set",
         "expect": "key_not_valid_for_permit",
+    },
+    {
+        "name": "null_validity_bounds_are_unbounded",
+        "token": sign(hdr_kid(b"permit-open-ended"), payload, SEED_A),
+        "key": "key_set",
+        "expect": "ok",
+        "kid": "permit-open-ended",
+    },
+    {
+        "name": "kid_revoked_in_ledger_only",
+        "token": sign(hdr_kid(b"permit-ledger-revoked"), payload, SEED_A),
+        "key": "key_set",
+        "expect": "key_revoked",
     },
     {"name": "no_kid_ambiguous_key_set", "token": full["token"], "key": "key_set", "expect": "kid_required"},
     {

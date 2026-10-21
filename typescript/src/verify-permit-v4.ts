@@ -145,15 +145,28 @@ export interface PermitVerificationKey {
   crv?: string;
   role?: string;
   revoked?: boolean;
-  /** ISO-8601; when present the permit's iat must be inside the window. */
-  valid_from?: string;
-  valid_until?: string;
+  /**
+   * ISO-8601; when set, the permit's iat must be inside the window.
+   * `null` (an open-ended side, as the trust root publishes) is unbounded.
+   */
+  valid_from?: string | null;
+  valid_until?: string | null;
   [key: string]: unknown;
 }
 
-/** A key set: the trust root's verifier-keys document or any `{ keys }`. */
+/**
+ * A key set: the trust root's verifier-keys document or any `{ keys }`.
+ *
+ * Revocation is read from every place the trust root records it: an entry's
+ * own `revoked: true`, the revocation ledger's `revoked_keys: [{ kid }]`
+ * (atlasent-revocations.json / a trust-root snapshot), and a flat
+ * `revoked_kids` list (the `TrustSnapshot` shape). Merge the revocations
+ * document into the key set you pass; a kid revoked in ANY of them is refused.
+ */
 export interface PermitVerificationKeySet {
   keys: PermitVerificationKey[];
+  revoked_keys?: Array<{ kid: string; [key: string]: unknown }>;
+  revoked_kids?: string[];
   [key: string]: unknown;
 }
 
@@ -440,6 +453,12 @@ function isPermitKey(k: PermitVerificationKey): boolean {
   );
 }
 
+function isRevoked(set: PermitVerificationKeySet, k: PermitVerificationKey): boolean {
+  if (k.revoked === true) return true;
+  if (Array.isArray(set.revoked_kids) && set.revoked_kids.includes(k.kid)) return true;
+  return Array.isArray(set.revoked_keys) && set.revoked_keys.some((r) => r?.kid === k.kid);
+}
+
 function selectKey(
   set: PermitVerificationKeySet,
   kid: string | null,
@@ -453,7 +472,7 @@ function selectKey(
     entry = keys.find((k) => k.kid === wanted);
     if (!entry) throw new PermitV4VerifyError('unknown_kid', `no permit key with kid ${JSON.stringify(wanted)}`);
   } else {
-    const live = keys.filter((k) => k.revoked !== true);
+    const live = keys.filter((k) => !isRevoked(set, k));
     if (live.length !== 1) {
       throw new PermitV4VerifyError(
         'kid_required',
@@ -462,12 +481,14 @@ function selectKey(
     }
     entry = live[0]!;
   }
-  if (entry.revoked === true) {
+  if (isRevoked(set, entry)) {
     throw new PermitV4VerifyError('key_revoked', `permit key ${entry.kid} is revoked`);
   }
   const iatMs = iat * 1000;
-  const from = entry.valid_from !== undefined ? Date.parse(entry.valid_from) : undefined;
-  const until = entry.valid_until !== undefined ? Date.parse(entry.valid_until) : undefined;
+  const bound = (v: string | null | undefined) =>
+    v === undefined || v === null ? undefined : Date.parse(v);
+  const from = bound(entry.valid_from);
+  const until = bound(entry.valid_until);
   if (
     (from !== undefined && (Number.isNaN(from) || iatMs < from)) ||
     (until !== undefined && (Number.isNaN(until) || iatMs > until))

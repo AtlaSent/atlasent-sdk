@@ -16,7 +16,9 @@ without a `kid` (`{1:-8}` or `{1:-8, 4:bstr(kid)}`). The runtime still mints
 without breaking SDKs already in the field. `key` may be one pinned key
 (unchanged behaviour: it is used whatever the header says) or a key set: the
 trust root's `atlasent-verifier-keys.json` document or any `{ keys: [...] }`.
-With a key set, the header kid selects the `R2_permit` key. Revoked keys,
+With a key set, the header kid selects the `R2_permit` key. Revoked keys
+(an entry's own `revoked`, the ledger's `revoked_keys`, or a flat
+`revoked_kids`; a `null` validity bound is open-ended),
 keys whose validity window excludes the permit's `iat`, and non-permit roles
 are refused. A kid-less token uses the single usable key or
 `opts.defaultKid`; otherwise it fails with `kid_required`. New reasons:
