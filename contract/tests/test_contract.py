@@ -122,3 +122,29 @@ def test_policy_lint_passes_valid_and_rejects_invalid() -> None:
     assert (
         policy_lint.main([str(p) for p in invalid]) == 0
     )  # negatives expected to fail validation
+
+
+def test_verify_error_code_enum_agrees_across_contract_artifacts() -> None:
+    """The verify_error_code enum must be identical in the JSON Schema, the
+    OpenAPI description, and the pinned catalog vector (which the TS and
+    Python SDK lists are tested against), so no published description of
+    /v1-verify-permit disagrees with another."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    import yaml as _yaml
+
+    root = _Path(__file__).resolve().parents[1]
+    schema = _json.loads((root / "schemas" / "verify-permit-response.schema.json").read_text())
+    openapi = _yaml.safe_load((root / "openapi.yaml").read_text())
+    pinned = _json.loads((root / "vectors" / "verify-error-codes.json").read_text())
+
+    from_schema = schema["properties"]["verify_error_code"]["enum"]
+    from_openapi = openapi["components"]["schemas"]["VerifyPermitResponse"]["properties"][
+        "verify_error_code"
+    ]["enum"]
+    from_vector = pinned["emitted"] + pinned["legacy_documented_only"]
+
+    assert len(set(from_schema)) == len(from_schema)
+    assert sorted(from_schema) == sorted(from_openapi)
+    assert sorted(from_schema) == sorted(from_vector)
