@@ -1,7 +1,8 @@
 /**
- * The Stripe package writes the evidence log itself (EVIDENCE_LOG, see
- * stripe/src/evidence-log.ts) so it can install without this package. These
- * tests are what keep the two record definitions from drifting apart.
+ * The Stripe and Shopify packages write the evidence log themselves
+ * (EVIDENCE_LOG; see each package's src/evidence-log.ts) so they install
+ * without this package. These tests keep their record definitions and this
+ * package's parser from drifting apart.
  */
 
 import { mkdtempSync, readFileSync } from "node:fs";
@@ -9,13 +10,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { alarmRecord, appendEvidence } from "../../stripe/src/evidence-log.js";
+import { alarmRecord as shopifyAlarmRecord } from "../../shopify/src/evidence-log.js";
 import { asRecord, parseLog } from "../src/records.js";
 import { buildEvidenceReport } from "../src/report.js";
 
 const NOW = new Date("2026-10-21T12:00:00Z");
 const refund = { id: "re_1", status: "succeeded", amount: 8500, currency: "usd", charge: "ch_1", payment_intent: "pi_2002", metadata: {} };
 
-describe("the Stripe package's evidence log", () => {
+describe("the Stripe and Shopify packages' evidence logs", () => {
   it("every alarm verdict it writes is a record the report accepts", () => {
     const records = [
       alarmRecord({ verdict: "authorized", refundId: "re_1", paymentIntent: "pi_1", amountCents: 1899, gateRef: "g" }, refund, NOW),
@@ -23,6 +25,16 @@ describe("the Stripe package's evidence log", () => {
       alarmRecord({ verdict: "ignored", refundId: "re_3", reason: "refund status failed" }, refund, NOW),
     ];
     for (const r of records) expect(asRecord(JSON.parse(JSON.stringify(r)))).not.toBeNull();
+  });
+
+  it("every Shopify alarm verdict is a record the report accepts", () => {
+    const p = { id: 1, order_id: 2, transactions: [{ kind: "refund", amount: "18.99", currency: "USD" }] };
+    for (const r of [
+      shopifyAlarmRecord({ verdict: "authorized", refundId: "1", orderId: "2", amountCents: 1899, gateRef: "g" }, p, NOW),
+      shopifyAlarmRecord({ verdict: "unauthorized", refundId: "1", orderId: "2", amountCents: null, reason: "no gate reference" }, p, NOW),
+    ]) {
+      expect(asRecord(JSON.parse(JSON.stringify(r)))).not.toBeNull();
+    }
   });
 
   it("a log written by the CLI and the alarm builds the report", () => {

@@ -6,7 +6,8 @@
  *   npm run refund -- resume --approval <approval_request_id>   (after a manager decided it)
  *
  * Env: SHOPIFY_SHOP, SHOPIFY_ADMIN_TOKEN, ATLASENT_API_KEY, ATLASENT_ENVIRONMENT,
- * optional ATLASENT_BASE_URL, ATLASENT_ACTOR, LEDGER_PATH.
+ * optional ATLASENT_BASE_URL, ATLASENT_ACTOR, LEDGER_PATH, EVIDENCE_LOG (appends each
+ * decision to the evidence log; see evidence-log.ts).
  * `facts` reads Shopify only and never calls AtlaSent.
  */
 
@@ -17,6 +18,8 @@ import { centsToMoney, deriveRefundFacts, moneyToCents } from "./facts.js";
 import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "./guard.js";
 import { createApprovalsClient } from "./approvals.js";
 import { JsonFileLedger } from "./ledger.js";
+import { appendEvidence } from "./evidence-log.js";
+import type { RefundDecisionRecord } from "./decision-record.js";
 
 function env(name: string): string {
   const v = process.env[name];
@@ -40,6 +43,8 @@ async function main(): Promise<number> {
   }
   const shop = normalizeShopDomain(env("SHOPIFY_SHOP"));
   const shopify = createAdminClient({ shop, accessToken: env("SHOPIFY_ADMIN_TOKEN") });
+  const evidenceLog = process.env.EVIDENCE_LOG;
+  const logDecisions = evidenceLog ? { onDecision: (r: RefundDecisionRecord) => appendEvidence(evidenceLog, r) } : {};
 
   if (command === "resume") {
     const apiKey = env("ATLASENT_API_KEY");
@@ -54,6 +59,7 @@ async function main(): Promise<number> {
         environment: env("ATLASENT_ENVIRONMENT"),
         ledger: new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"),
         shop,
+        ...logDecisions,
       },
     );
     console.log(JSON.stringify(result, null, 2));
@@ -89,6 +95,7 @@ async function main(): Promise<number> {
       environment: env("ATLASENT_ENVIRONMENT"),
       ledger: new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"),
       shop,
+      ...logDecisions,
     },
   );
   console.log(JSON.stringify(result, null, 2));

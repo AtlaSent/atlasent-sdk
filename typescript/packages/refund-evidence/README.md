@@ -104,9 +104,9 @@ await guardedShopifyRefund(shopify, atlasent, request, { ...options, onDecision:
 ```
 
 Append alarm verdicts as `atlasent.refund_alarm.v1` records (see
-`src/demo.ts`). The Stripe package's CLI and webhook server do both for you
-when `EVIDENCE_LOG` is set; its records are tested against this package's
-parser. Then build the report for a period:
+`src/demo.ts`). The Stripe and Shopify packages' CLIs and servers do both
+for you when `EVIDENCE_LOG` is set; their records are tested against this
+package's parser. Then build the report for a period:
 
 ```sh
 npm run report -- --log decisions.jsonl --store "Pinecone Pet Supply" --from 2026-10-01 --to 2026-11-01
@@ -134,7 +134,7 @@ dropped.
 npm ci && npm run typecheck && npm test
 ```
 
-The 38 tests cover:
+The 39 tests cover:
 
 - the summary, the period filter and per-currency totals;
 - the simulated banner, present only when it applies;
@@ -143,8 +143,8 @@ The 38 tests cover:
 - manager-approved and manager-declined rows, their labels and approval
   references, and records written before approvals existed;
 - the pre-flight checks, each pass and each failure, over fakes;
-- that records written by the Stripe package's evidence log parse and build
-  a report;
+- that records written by the Stripe and Shopify packages' evidence logs
+  parse and build a report;
 - the whole demo end to end, including that no permit token reaches the log
   or the report.
 

@@ -7,7 +7,7 @@ manager, and every refund is checked against the permits the gate issued.
 
 `private: true`. This package is a demo and is not published to npm.
 
-> **Status:** 116 unit tests over fakes of Shopify and the AtlaSent runtime.
+> **Status:** 140 unit tests over fakes of Shopify and the AtlaSent runtime.
 > **Nothing here has been run against a live Shopify store or a live
 > AtlaSent org yet.** The Shopify field names, mutations, token exchange and
 > extension API follow Shopify's documented shapes as best known; check them
@@ -246,6 +246,17 @@ record per decision, refunded or not. If the callback fails, the result
 carries `logWarning`; the outcome never changes. The report and the
 three-system demo that read these records are in `@atlasent/refund-evidence`.
 
+Set `EVIDENCE_LOG` to one file for the refund CLI, the support agent and the
+server (`npm run serve`), and each writes it for you:
+- every gate decision becomes an `atlasent.refund_decision.v1` record,
+  including the admin button and resumed approvals;
+- every `refunds/create` verdict becomes an `atlasent.refund_alarm.v1`
+  record, with the currency only when the webhook states one.
+
+A failed write never changes a decision or the webhook response; the server
+logs a `verdict_not_logged` warning. Then, in `@atlasent/refund-evidence`:
+`npm run report -- --log "$EVIDENCE_LOG" --store "Pinecone Pet Supply (fictional)"`.
+
 ## Tests
 
 ```sh
@@ -286,6 +297,14 @@ The resume path was checked against ten more, and each made it fail:
 - verifying as the caller instead of the original actor;
 - not saving the escalation;
 - a resumed refund note without the gate reference.
+
+The evidence log was checked against five more, and each made it fail:
+
+- guessing a currency when the transactions disagree;
+- a lowercase currency;
+- no newline between records;
+- the server not passing verdicts on;
+- a failed log write breaking the webhook response.
 
 ## What has not been verified
 

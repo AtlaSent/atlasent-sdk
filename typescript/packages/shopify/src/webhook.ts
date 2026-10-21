@@ -29,7 +29,7 @@ export interface RefundWebhookPayload {
   id: number | string;
   order_id: number | string;
   note?: string | null;
-  transactions?: { kind?: string; status?: string; amount?: string }[];
+  transactions?: { kind?: string; status?: string; amount?: string; currency?: string }[];
 }
 
 export type RefundAuditVerdict =
