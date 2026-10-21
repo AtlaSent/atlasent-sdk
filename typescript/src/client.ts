@@ -378,6 +378,8 @@ interface EvaluateWire {
    */
   deny_code?: string;
   deny_reason?: string;
+  /** false = the caller's execution_payload_hash was dropped, not bound. */
+  execution_payload_hash_accepted?: boolean;
   /**
    * Optional sub-object — present iff the request URL carried
    * `?include=constraint_trace`. Older atlasent-api deployments
@@ -874,6 +876,9 @@ export class AtlaSentClient {
       reasons: reason ? [reason] : [],
       reason,
       deny_code: decision === "allow" ? null : denyCode,
+      ...(typeof wire.execution_payload_hash_accepted === "boolean" && {
+        execution_payload_hash_accepted: wire.execution_payload_hash_accepted,
+      }),
       auditHash: wire.audit_hash ?? "",
       timestamp: wire.timestamp ?? "",
       rateLimit,
@@ -1238,6 +1243,9 @@ export class AtlaSentClient {
       reasons: reason ? [reason] : [],
       reason,
       deny_code: decision === "allow" ? null : denyCode,
+      ...(typeof wire.execution_payload_hash_accepted === "boolean" && {
+        execution_payload_hash_accepted: wire.execution_payload_hash_accepted,
+      }),
       auditHash: wire.audit_hash ?? "",
       timestamp: wire.timestamp ?? "",
       rateLimit,
@@ -1334,6 +1342,11 @@ export class AtlaSentClient {
       timestamp: wire.timestamp ?? "",
       expiresAt: wire.expires_at ?? null,
       ...(typeof wire.consumed === "boolean" && { consumed: wire.consumed }),
+      verifyErrorCode:
+        typeof wire.verify_error_code === "string" && wire.verify_error_code.length > 0
+          ? wire.verify_error_code
+          : null,
+      verifyReason: typeof wire.reason === "string" ? wire.reason : null,
       rateLimit,
     };
   }

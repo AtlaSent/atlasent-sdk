@@ -8,8 +8,26 @@
  * The bytes signed by Ed25519 are the COSE Sig_Structure (RFC 9052 §4.4):
  *   ["Signature1", bstr(protected_header), bstr(""), bstr(permit_claims_cbor)]
  *
- * Protected header: { 1: -8 } = 0xa1 0x01 0x27 (COSE algorithm EdDSA, RFC 8037).
- * Permit claims: CBOR integer-keyed map (keys 4/6/7/–1..–7, see PermitClaimsV4).
+ * Protected header: { 1: -8 } (COSE algorithm EdDSA, RFC 8037), optionally with
+ * { 4: bstr(kid) } (COSE key identifier). The runtime mints `{1:-8}` today;
+ * accepting a kid now lets it start stamping one without breaking verifiers
+ * already in the field. Any other label, a duplicate label, an alg other than
+ * EdDSA, or a non-bstr kid is rejected (fail closed).
+ *
+ * Key selection: pass ONE pinned key (base64 raw Ed25519) and it is used
+ * whatever the header says; or pass a key set (the trust root's
+ * atlasent-verifier-keys.json document, or `{ keys: [...] }`) and the header
+ * kid selects the R2_permit key. With a key set and no kid, the single
+ * eligible key is used, or `defaultKid`; anything else is `kid_required`.
+ * A kid-less token is also bounded by the validity window of every R2_permit
+ * entry sharing the selected key's material. A key set whose revocation state
+ * cannot be read (malformed ledger, an entry without a boolean `revoked`, a
+ * duplicate kid, a revocation whose key material cannot be resolved) is
+ * refused as a whole with `key_set_untrustworthy`, the same rules as
+ * atlasent-api's `PERMIT_ED25519_PUBLIC_KEYS` (atlasent-api#4640).
+ * Permit claims: CBOR integer-keyed map (keys 4/6/7/–1..–35, see PermitClaimsV4).
+ * Cross-language parity: contract/vectors/permit-v4/vectors.json, generated from
+ * atlasent-api's own signPermitV4 (contract/tools/gen_permit_v4_vectors.ts).
  *
  * Offline by design: with a pinned Ed25519 public key this function needs no
  * network. It is the SDK mirror of the atlasent-api `_shared/cose.ts` decode path.
@@ -18,6 +36,16 @@
  * Deno, and Bun. No external dependencies.
  */
 
+import type { TrustSnapshot } from './trust.js';
+import type { TrustRootSnapshot } from './trustRoot.js';
+
+/**
+ * What `verifyPermitV4` accepts as a key set: a generic `{ keys }` document,
+ * or either SDK trust snapshot as-is (`bootstrapTrust()`'s `TrustSnapshot`,
+ * `TrustRootManager`'s `TrustRootSnapshot`). All are read the same way.
+ */
+export type PermitV4KeySetInput = PermitVerificationKeySet | TrustSnapshot | TrustRootSnapshot;
+
 export type PermitV4VerifyReason =
   | 'bad_format'
   | 'bad_prefix'
@@ -25,7 +53,14 @@ export type PermitV4VerifyReason =
   | 'wrong_protected_header'
   | 'claims_decode_failed'
   | 'signature_invalid'
-  | 'expired';
+  | 'expired'
+  | 'unknown_kid'
+  | 'key_revoked'
+  | 'key_not_valid_for_permit'
+  | 'kid_required'
+  | 'key_set_expired'
+  | 'key_role_conflict'
+  | 'key_set_untrustworthy';
 
 export class PermitV4VerifyError extends Error {
   readonly reason: PermitV4VerifyReason;
@@ -36,6 +71,28 @@ export class PermitV4VerifyError extends Error {
   }
 }
 
+/**
+ * Canonical `agent_runtime_identity.v1` evidence carried in claim key -24
+ * (a canonical-JSON text string the COSE signature covers).
+ */
+export interface AgentRuntimeIdentityClaim {
+  version: string;
+  binding_id: string;
+  agent_identity_id: string;
+  agent_registry_id: string;
+  agent_version: string;
+  agent_deployment_id: string;
+  deployment_digest: string;
+  provider_proof: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/**
+ * Every claim the runtime signs into a pt.v4 permit (atlasent-api
+ * `_shared/cose.ts` encodePermitClaimsV4, keys 4/6/7 and -1..-35). Optional
+ * claims are present only when the runtime bound them; absence means "not
+ * bound", never "bound to empty". Unknown future keys are skipped.
+ */
 export interface PermitClaimsV4 {
   permit_id: string;    // UUID (from key 7 / CWT cti — 16-byte bstr)
   exp: number;          // Unix epoch seconds (key 4)
@@ -47,11 +104,100 @@ export interface PermitClaimsV4 {
   environment: string;  // "live" | "test" (key -5)
   cdo_hash?: string;    // 64-char hex sha256 (key -6, optional)
   policy_hash?: string; // 64-char hex sha256 (key -7, optional)
+  // P4 delegation lineage (keys -8..-11)
+  parent_permit_hash?: string;   // 64-char hex (key -8)
+  parent_permit_id?: string;     // UUID (key -9)
+  delegation_depth?: number;     // uint (key -10)
+  delegating_actor_id?: string;  // tstr (key -11)
+  // Execution binding (keys -12, -13)
+  execution_hash_expected?: string; // 64-char hex (key -12)
+  envelope_hash?: string;           // 64-char hex (key -13)
+  // ADR-063 exceptional authority (keys -14, -15)
+  exception_id?: string;   // UUID (key -14)
+  exception_type?: string; // tstr (key -15)
+  // AWS locus (keys -16, -17)
+  aws_account_id?: string; // tstr (key -16)
+  aws_region?: string;     // tstr (key -17)
+  operation_intent_id?: string; // tstr (key -18)
+  // Change brief (keys -19, -20)
+  change_brief_id?: string;     // tstr (key -19)
+  change_brief_digest?: string; // tstr, "sha256:..." (key -20)
+  // H8 canonical authorization identity (keys -21..-23)
+  authorization_identity_id?: string; // UUID (key -21)
+  authorization_issuance_id?: string; // UUID (key -22)
+  authorization_generation?: number;  // uint (key -23)
+  agent_runtime_identity?: AgentRuntimeIdentityClaim; // canonical JSON tstr (key -24)
+  // Entra acceptance slice (keys -25..-32, -35)
+  entra_tenant_id?: string;               // tstr (key -25)
+  entra_org_binding_id?: string;          // UUID (key -26)
+  entra_request_mapping_id?: string;      // UUID (key -27)
+  entra_request_mapping_version?: number; // uint (key -28)
+  entra_approve_mapping_id?: string;      // UUID (key -29)
+  entra_approve_mapping_version?: number; // uint (key -30)
+  pep_audience_executor_id?: string;      // tstr (key -31)
+  entra_approve_principal_oid?: string;   // tstr (key -32)
+  // Azure locus (keys -33, -34)
+  azure_subscription_id?: string; // tstr (key -33)
+  azure_resource_group?: string;  // tstr (key -34)
+  entra_request_principal_oid?: string; // tstr (key -35)
 }
 
 export interface PermitV4VerifyResult {
   ok: true;
   claims: PermitClaimsV4;
+  /** kid from the COSE protected header; null when the header carries none. */
+  kid: string | null;
+  /** kid of the key-set entry that verified the token; null for a pinned key. */
+  verifiedWithKid: string | null;
+}
+
+/**
+ * One verification key, in the trust root's atlasent-verifier-keys.json
+ * shape. `x` is the raw 32-byte Ed25519 public key, base64url (JWK).
+ * Entries with a `role` other than `R2_permit`, or not OKP/Ed25519, are
+ * never used for permits.
+ */
+export interface PermitVerificationKey {
+  kid: string;
+  x: string;
+  kty?: string;
+  crv?: string;
+  role?: string;
+  alg?: string;
+  revoked?: boolean;
+  /**
+   * ISO-8601; when set, the permit's iat must be inside the window.
+   * `null` (an open-ended side, as the trust root publishes) is unbounded.
+   */
+  valid_from?: string | null;
+  valid_until?: string | null;
+  [key: string]: unknown;
+}
+
+/**
+ * A key set: the trust root's verifier-keys document or any `{ keys }`.
+ *
+ * Revocation is read from every place the trust root records it: an entry's
+ * own `revoked: true`, the revocation ledger's `revoked_keys: [{ kid }]`
+ * (atlasent-revocations.json / a trust-root snapshot), and a flat
+ * `revoked_kids` list (the `TrustSnapshot` shape). Merge the revocations
+ * document into the key set you pass; a kid revoked in ANY of them is refused.
+ */
+export interface PermitVerificationKeySet {
+  keys: PermitVerificationKey[];
+  revoked_keys?: Array<{ kid: string; [key: string]: unknown }>;
+  revoked_kids?: string[];
+  /** TrustSnapshot expiry (epoch ms). An expired set is refused. */
+  expires_at?: number;
+  /**
+   * TrustSnapshot fetch time (epoch ms). A set older than
+   * `TRUST_SNAPSHOT_MAX_AGE_MS` is refused even if `expires_at` is later,
+   * matching `isTrustSnapshotExpired()`'s independent age limit.
+   */
+  fetched_at?: number;
+  /** Trust-root document expiry (ISO-8601). An expired set is refused. */
+  valid_until?: string | null;
+  [key: string]: unknown;
 }
 
 // ─── CBOR primitives ──────────────────────────────────────────────────────────
@@ -70,7 +216,9 @@ class CborReader {
     if (add === 24) return this.readByte();
     if (add === 25) return (this.readByte() << 8) | this.readByte();
     if (add === 26) {
-      return ((this.readByte() << 24) >>> 0 | (this.readByte() << 16) | (this.readByte() << 8) | this.readByte());
+      // `>>> 0` on the WHOLE expression: `|` yields a signed int32, so
+      // without it 0xfffffff8 read back as -8 (an alg/label alias).
+      return ((this.readByte() << 24) | (this.readByte() << 16) | (this.readByte() << 8) | this.readByte()) >>> 0;
     }
     throw new Error('cbor: unsupported additional value ' + add);
   }
@@ -127,6 +275,8 @@ class CborReader {
 
   peekMajor(): number { return (this.b[this.pos]! >> 5) & 7; }
 
+  atEnd(): boolean { return this.pos === this.b.length; }
+
   readTagNum(): number {
     const { major, n } = this.readHead();
     if (major !== 6) throw new Error('cbor: expected tag, got major ' + major);
@@ -169,8 +319,6 @@ function uuidFromBytes(b: Uint8Array): string {
 }
 
 // ─── COSE Sign1 decode ────────────────────────────────────────────────────────
-
-const PROTECTED_HEADER_BYTES = Uint8Array.of(0xa1, 0x01, 0x27);
 
 function decodeCoseSign1(bytes: Uint8Array): {
   protectedBytes: Uint8Array;
@@ -251,6 +399,41 @@ function decodePermitClaims(bytes: Uint8Array): PermitClaimsV4 {
       case -5: result.environment = r.readTstr(); break;
       case -6: result.cdo_hash = bytesHex(r.readBstr()); break;
       case -7: result.policy_hash = bytesHex(r.readBstr()); break;
+      case -8: result.parent_permit_hash = bytesHex(r.readBstr()); break;
+      case -9: result.parent_permit_id = uuidFromBytes(r.readBstr()); break;
+      case -10: result.delegation_depth = r.readInt(); break;
+      case -11: result.delegating_actor_id = r.readTstr(); break;
+      case -12: result.execution_hash_expected = bytesHex(r.readBstr()); break;
+      case -13: result.envelope_hash = bytesHex(r.readBstr()); break;
+      case -14: result.exception_id = uuidFromBytes(r.readBstr()); break;
+      case -15: result.exception_type = r.readTstr(); break;
+      case -16: result.aws_account_id = r.readTstr(); break;
+      case -17: result.aws_region = r.readTstr(); break;
+      case -18: result.operation_intent_id = r.readTstr(); break;
+      case -19: result.change_brief_id = r.readTstr(); break;
+      case -20: result.change_brief_digest = r.readTstr(); break;
+      case -21: result.authorization_identity_id = uuidFromBytes(r.readBstr()); break;
+      case -22: result.authorization_issuance_id = uuidFromBytes(r.readBstr()); break;
+      case -23: result.authorization_generation = r.readInt(); break;
+      case -24: {
+        const parsed: unknown = JSON.parse(r.readTstr());
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('agent_runtime_identity claim is not a JSON object');
+        }
+        result.agent_runtime_identity = parsed as AgentRuntimeIdentityClaim;
+        break;
+      }
+      case -25: result.entra_tenant_id = r.readTstr(); break;
+      case -26: result.entra_org_binding_id = uuidFromBytes(r.readBstr()); break;
+      case -27: result.entra_request_mapping_id = uuidFromBytes(r.readBstr()); break;
+      case -28: result.entra_request_mapping_version = r.readInt(); break;
+      case -29: result.entra_approve_mapping_id = uuidFromBytes(r.readBstr()); break;
+      case -30: result.entra_approve_mapping_version = r.readInt(); break;
+      case -31: result.pep_audience_executor_id = r.readTstr(); break;
+      case -32: result.entra_approve_principal_oid = r.readTstr(); break;
+      case -33: result.azure_subscription_id = r.readTstr(); break;
+      case -34: result.azure_resource_group = r.readTstr(); break;
+      case -35: result.entra_request_principal_oid = r.readTstr(); break;
       default: r.skip();
     }
   }
@@ -259,6 +442,293 @@ function decodePermitClaims(bytes: Uint8Array): PermitClaimsV4 {
     if (result[f] === undefined) throw new Error(`missing required claim: ${f}`);
   }
   return result as PermitClaimsV4;
+}
+
+// ─── Protected header + key selection ────────────────────────────────────────
+
+/**
+ * Parse the COSE protected header. Accepts exactly `{1: -8}` or
+ * `{1: -8, 4: bstr(kid)}` in either order; returns the kid or null.
+ */
+function parseProtectedHeader(bytes: Uint8Array): string | null {
+  const r = new CborReader(bytes);
+  const n = r.readMapLen();
+  let alg: number | undefined;
+  let kid: string | null = null;
+  const seen = new Set<number>();
+  for (let i = 0; i < n; i++) {
+    const label = r.readInt();
+    if (seen.has(label)) throw new Error(`duplicate protected header label ${label}`);
+    seen.add(label);
+    if (label === 1) {
+      alg = r.readInt();
+    } else if (label === 4) {
+      const raw = r.readBstr();
+      if (raw.length === 0) throw new Error('empty kid');
+      kid = new TextDecoder('utf-8', { fatal: true }).decode(raw);
+    } else {
+      throw new Error(`unexpected protected header label ${label}`);
+    }
+  }
+  if (!r.atEnd()) throw new Error('trailing bytes after protected header');
+  if (alg !== -8) throw new Error('expected EdDSA protected header { 1: -8 }');
+  return kid;
+}
+
+function isPermitKey(k: PermitVerificationKey): boolean {
+  return (
+    typeof k?.kid === 'string' &&
+    typeof k.x === 'string' &&
+    // Explicit trust metadata only: an entry with no role (or no kty/crv)
+    // is never a permit key, so an audit key whose role was dropped cannot
+    // sign permits.
+    k.role === 'R2_permit' &&
+    k.kty === 'OKP' &&
+    k.crv === 'Ed25519' &&
+    k.alg === 'EdDSA'
+  );
+}
+
+function isRevokedKid(set: PermitVerificationKeySet, k: PermitVerificationKey): boolean {
+  if (k.revoked === true) return true;
+  if (Array.isArray(set.revoked_kids) && set.revoked_kids.includes(k.kid)) return true;
+  return Array.isArray(set.revoked_keys) && set.revoked_keys.some((r) => r?.kid === k.kid);
+}
+
+/** `s` without trailing `=` padding (a linear scan, not a backtracking regex). */
+function stripPadding(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 0x3d) end--;
+  return s.slice(0, end);
+}
+
+/** Canonical key material: the decoded bytes as hex (padding/alphabet-proof). */
+function materialOf(x: unknown): string | null {
+  if (typeof x !== 'string') return null;
+  const v = stripPadding(x).replace(/\+/g, '-').replace(/\//g, '_');
+  // Strict alphabet, the same in both SDKs: anything else (whitespace, '!')
+  // is unreadable, never silently skipped by a lenient decoder.
+  if (!/^[A-Za-z0-9_-]*$/.test(v) || v.length % 4 === 1) return null;
+  try {
+    const raw = fromB64url(v);
+    // Only a raw 32-byte Ed25519 key is material: "" or "AA" decodes, but
+    // names no key, so a revocation carrying it is unresolved, not resolved.
+    return raw.length === 32 ? bytesHex(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Revoked when the entry's kid is revoked OR any revoked entry in the set
+ * carries the same key material (compared as decoded bytes, so padding or
+ * base64 alphabet cannot hide an alias): otherwise the holder of a revoked
+ * private key could sign under a live alias kid.
+ */
+function isRevoked(set: PermitVerificationKeySet, k: PermitVerificationKey): boolean {
+  if (isRevokedKid(set, k)) return true;
+  const mine = materialOf(k.x);
+  if (mine === null) return true; // undecodable material is never usable
+  const all = Array.isArray(set?.keys) ? set.keys : [];
+  return all.some((o) => typeof o?.kid === 'string' && isRevokedKid(set, o) && materialOf(o.x) === mine);
+}
+
+/**
+ * Role eligibility is a property of the key MATERIAL, not of one entry: when
+ * any other entry in the set carries the same key bytes under a role other
+ * than R2_permit (an R3 audit key, or an entry with no role), the holder of
+ * that private key could sign permits, so the permit key is refused.
+ */
+function hasCrossRoleAlias(set: PermitVerificationKeySet, k: PermitVerificationKey): boolean {
+  const mine = materialOf(k.x);
+  if (mine === null) return false; // undecodable: already refused by isRevoked
+  const all = Array.isArray(set?.keys) ? set.keys : [];
+  return all.some((o) => o !== null && typeof o === 'object' && o.role !== 'R2_permit' && materialOf(o.x) === mine);
+}
+
+/** True when the permit's iat lies in the key's validity window (null = open). */
+function inWindow(k: PermitVerificationKey, iat: number): boolean {
+  const iatMs = iat * 1000;
+  // A non-string bound (a number, an object) is invalid, never coerced:
+  // Date.parse(123) would read it as the year 123.
+  const bound = (v: unknown) =>
+    v === undefined || v === null ? undefined : typeof v === 'string' ? Date.parse(v) : NaN;
+  const from = bound(k.valid_from);
+  const until = bound(k.valid_until);
+  return !(
+    (from !== undefined && (Number.isNaN(from) || iatMs < from)) ||
+    (until !== undefined && (Number.isNaN(until) || iatMs > until))
+  );
+}
+
+/**
+ * A key set that states its own expiry (a TrustSnapshot `expires_at` in ms,
+ * or a trust-root `valid_until`) is refused once expired: stale keys and
+ * stale revocation state must not keep authorizing permits.
+ */
+/**
+ * Maximum TrustSnapshot age, the same 24 h as trust.ts DEFAULT_TRUST_TTL_MS
+ * (a test pins the two equal; not imported, to keep this module standalone).
+ */
+export const TRUST_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function assertKeySetFresh(set: PermitVerificationKeySet, nowMs: number): void {
+  const fetched = set?.fetched_at;
+  if (fetched !== undefined && (typeof fetched !== 'number' || !(nowMs <= fetched + TRUST_SNAPSHOT_MAX_AGE_MS))) {
+    throw new PermitV4VerifyError('key_set_expired', 'the key set is older than the trust snapshot age limit (fetched_at)');
+  }
+  const exp = set?.expires_at;
+  if (exp !== undefined && (typeof exp !== 'number' || !(exp > nowMs))) {
+    throw new PermitV4VerifyError('key_set_expired', 'the key set has expired (expires_at)');
+  }
+  const until = set?.valid_until;
+  if (until !== undefined && until !== null) {
+    const ms = typeof until === 'string' ? Date.parse(until) : NaN;
+    if (!(ms > nowMs)) {
+      throw new PermitV4VerifyError('key_set_expired', 'the key set has expired (valid_until)');
+    }
+  }
+}
+
+/**
+ * A key set whose revocation state cannot be read is refused as a whole,
+ * for kid-bearing AND kid-less tokens alike (atlasent-api#4640's
+ * `PERMIT_ED25519_PUBLIC_KEYS` rules): a key the operator meant to revoke
+ * must not stay live because the record naming it was malformed. Refused:
+ * - `keys` that is not an array;
+ * - a `revoked_keys` ledger that is present but not an array of entries
+ *   each naming a non-empty string kid (a flat `revoked_kids` list that is
+ *   present but not an array of non-empty strings, likewise);
+ * - any entry that is not an object, or whose `revoked` is not a boolean
+ *   (missing, `"false"`, `0`, `null`);
+ * - a kid published twice (the document is ambiguous);
+ * - an inline revocation with neither a kid nor readable key material;
+ * - an UNRESOLVED revocation: a ledger kid with no entry carrying readable
+ *   material, or a `revoked: true` entry whose own material is unreadable.
+ *   Its material could be any live entry's (an alias under another kid
+ *   cannot be ruled out), so no key in the set is trusted.
+ */
+function assertKeySetTrustworthy(set: PermitVerificationKeySet): void {
+  const refuse = (why: string): never => {
+    throw new PermitV4VerifyError('key_set_untrustworthy', why);
+  };
+  // bootstrapTrust() marks a snapshot whose documents it could not read in
+  // full (a dropped entry, an unreadable ledger): it may hide a revocation.
+  if ((set as Record<string, unknown> | undefined)?.revocations_unreadable !== undefined) {
+    refuse('the trust snapshot was built from unreadable revocation data');
+  }
+  const keys: unknown = set?.keys;
+  if (!Array.isArray(keys)) refuse('the key set has no keys array');
+  const entries = keys as unknown[];
+  const ledger: unknown = set?.revoked_keys;
+  if (
+    ledger !== undefined &&
+    (!Array.isArray(ledger) ||
+      !ledger.every((r) => {
+        const kid = r !== null && typeof r === 'object' ? (r as Record<string, unknown>).kid : undefined;
+        return typeof kid === 'string' && kid.length > 0;
+      }))
+  ) {
+    refuse('revoked_keys is present but is not a list of entries each naming a kid');
+  }
+  const flat: unknown = set?.revoked_kids;
+  if (
+    flat !== undefined &&
+    (!Array.isArray(flat) || !flat.every((k) => typeof k === 'string' && k.length > 0))
+  ) {
+    refuse('revoked_kids is present but is not a list of kids');
+  }
+  if (entries.some((k) => k === null || typeof k !== 'object' || typeof (k as Record<string, unknown>).revoked !== 'boolean')) {
+    refuse('a key entry does not state revoked as a boolean');
+  }
+  const recs = entries as PermitVerificationKey[];
+  const kids = recs.map((k) => k.kid).filter((k): k is string => typeof k === 'string');
+  if (new Set(kids).size !== kids.length) refuse('a kid is published more than once');
+  if (recs.some((k) => k.revoked === true && materialOf(k.x) === null && !(typeof k.kid === 'string' && k.kid.length > 0))) {
+    refuse('a revocation names neither a kid nor readable key material');
+  }
+  const ledgerKids = [
+    ...((ledger as Array<{ kid: string }> | undefined) ?? []).map((r) => r.kid),
+    ...((flat as string[] | undefined) ?? []),
+  ];
+  const unresolved =
+    ledgerKids.some((kid) => !recs.some((k) => k.kid === kid && materialOf(k.x) !== null)) ||
+    recs.some((k) => k.revoked === true && materialOf(k.x) === null);
+  if (unresolved) {
+    refuse('a revocation\'s key material cannot be resolved, so no key in the set is trusted');
+  }
+}
+
+/**
+ * Kid-less fallback validity: the selected key is bounded by the window of
+ * EVERY R2_permit entry carrying its material (an alias under another kid
+ * included), so a retired entry for the same key stops it minting kid-less
+ * permits. An unreadable bound on any such entry refuses it (atlasent-api
+ * #4640, resolvePermitV4VerificationKey's kid-less branch).
+ */
+function inFallbackWindows(set: PermitVerificationKeySet, entry: PermitVerificationKey, iat: number): boolean {
+  const mine = materialOf(entry.x);
+  return set.keys.every(
+    (o) => !(o === entry || (o.role === 'R2_permit' && mine !== null && materialOf(o.x) === mine)) || inWindow(o, iat),
+  );
+}
+
+function selectKey(
+  set: PermitVerificationKeySet,
+  kid: string | null,
+  iat: number,
+  defaultKid: string | undefined,
+): PermitVerificationKey {
+  assertKeySetFresh(set, Date.now());
+  assertKeySetTrustworthy(set);
+  const keys = Array.isArray(set?.keys) ? set.keys.filter(isPermitKey) : [];
+  let entry: PermitVerificationKey | undefined;
+  const wanted = kid ?? defaultKid ?? null;
+  if (wanted !== null) {
+    const matches = keys.filter((k) => k.kid === wanted);
+    if (matches.length !== 1) {
+      throw new PermitV4VerifyError(
+        'unknown_kid',
+        matches.length === 0
+          ? `no permit key with kid ${JSON.stringify(wanted)}`
+          : `kid ${JSON.stringify(wanted)} is ambiguous in the key set`,
+      );
+    }
+    entry = matches[0]!;
+  } else {
+    // Kid-less fallback: exactly one key that is unrevoked AND valid for this
+    // permit's iat, so a staged next key or a retired one does not block it.
+    const usable = keys.filter((k) => !isRevoked(set, k) && inWindow(k, iat));
+    if (usable.length !== 1) {
+      throw new PermitV4VerifyError(
+        'kid_required',
+        `token carries no kid and the key set has ${usable.length} permit keys valid for it`,
+      );
+    }
+    entry = usable[0]!;
+  }
+  if (hasCrossRoleAlias(set, entry)) {
+    throw new PermitV4VerifyError(
+      'key_role_conflict',
+      `permit key ${entry.kid} shares key material with a non-permit entry`,
+    );
+  }
+  if (isRevoked(set, entry)) {
+    throw new PermitV4VerifyError('key_revoked', `permit key ${entry.kid} is revoked`);
+  }
+  if (!inWindow(entry, iat)) {
+    throw new PermitV4VerifyError(
+      'key_not_valid_for_permit',
+      `permit issued outside the validity window of key ${entry.kid}`,
+    );
+  }
+  if (kid === null && !inFallbackWindows(set, entry, iat)) {
+    throw new PermitV4VerifyError(
+      'key_not_valid_for_permit',
+      `kid-less permit issued outside the validity window of an entry for key ${entry.kid}'s material`,
+    );
+  }
+  return entry;
 }
 
 // ─── Main API ─────────────────────────────────────────────────────────────────
@@ -274,13 +744,16 @@ function decodePermitClaims(bytes: Uint8Array): PermitClaimsV4 {
  * The permit may still be revoked server-side even when this returns `ok: true`.
  *
  * @param token       - Full pt.v4.* token string
- * @param publicKeyB64 - Raw 32-byte Ed25519 public key, standard base64
+ * @param key         - Either one pinned key (raw 32-byte Ed25519, standard
+ *                      base64) or a key set (trust-root verifier-keys document)
  * @param opts.checkExpiry - If true, throws if claims.exp ≤ now (default false)
+ * @param opts.defaultKid  - With a key set, the kid to use when the token's
+ *                      header carries none and the set has several permit keys
  */
 export async function verifyPermitV4(
   token: string,
-  publicKeyB64: string,
-  opts?: { checkExpiry?: boolean },
+  key: string | PermitV4KeySetInput,
+  opts?: { checkExpiry?: boolean; defaultKid?: string },
 ): Promise<PermitV4VerifyResult> {
   if (typeof token !== 'string') {
     throw new PermitV4VerifyError('bad_format', 'token must be a string');
@@ -304,14 +777,11 @@ export async function verifyPermitV4(
     throw new PermitV4VerifyError('cose_decode_failed', (e as Error).message);
   }
 
-  // Verify the protected header is exactly { 1: -8 } = 0xa1 0x01 0x27.
-  if (
-    protectedBytes.length !== PROTECTED_HEADER_BYTES.length ||
-    protectedBytes[0] !== PROTECTED_HEADER_BYTES[0] ||
-    protectedBytes[1] !== PROTECTED_HEADER_BYTES[1] ||
-    protectedBytes[2] !== PROTECTED_HEADER_BYTES[2]
-  ) {
-    throw new PermitV4VerifyError('wrong_protected_header', 'expected EdDSA protected header { 1: -8 }');
+  let headerKid: string | null;
+  try {
+    headerKid = parseProtectedHeader(protectedBytes);
+  } catch (e) {
+    throw new PermitV4VerifyError('wrong_protected_header', (e as Error).message);
   }
 
   let claims: PermitClaimsV4;
@@ -321,9 +791,22 @@ export async function verifyPermitV4(
     throw new PermitV4VerifyError('claims_decode_failed', (e as Error).message);
   }
 
+  // Select the key: a pinned key is used as-is; a key set is indexed by kid.
+  let rawKey: Uint8Array;
+  let verifiedWithKid: string | null = null;
+  if (typeof key === 'string') {
+    rawKey = fromB64(key);
+  } else {
+    // The selector re-checks every field at runtime (an entry without `x`,
+    // role or curve mismatch is never selected), so the snapshot shapes are
+    // read through the generic type.
+    const entry = selectKey(key as PermitVerificationKeySet, headerKid, claims.iat, opts?.defaultKid);
+    rawKey = fromB64url(entry.x);
+    verifiedWithKid = entry.kid;
+  }
+
   // Build Sig_Structure and verify Ed25519 signature.
   const toVerify = buildSigStructure(protectedBytes, payloadBytes);
-  const rawKey = fromB64(publicKeyB64);
   let cryptoKey: CryptoKey;
   try {
     cryptoKey = await crypto.subtle.importKey(
@@ -354,5 +837,5 @@ export async function verifyPermitV4(
     }
   }
 
-  return { ok: true, claims };
+  return { ok: true, claims, kid: headerKid, verifiedWithKid };
 }

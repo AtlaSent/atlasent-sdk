@@ -9,8 +9,12 @@ The bytes signed by Ed25519 are the COSE Sig_Structure (RFC 9052 §4.4)::
 
     ["Signature1", bstr(protected_header), bstr(""), bstr(permit_claims_cbor)]
 
-Protected header: ``{ 1: -8 }`` = ``0xa1 0x01 0x27`` (EdDSA, RFC 8037).
-Permit claims: CBOR integer-keyed map with keys 4, 6, 7, -1 .. -7.
+Protected header: ``{ 1: -8 }`` (EdDSA, RFC 8037), optionally with
+``{ 4: bstr(kid) }``; see ``_parse_protected_header``.
+Permit claims: CBOR integer-keyed map with keys 4, 6, 7, -1 .. -35 (every key
+atlasent-api's ``_shared/cose.ts`` encodes). Cross-language parity vectors:
+``contract/vectors/permit-v4/vectors.json``, generated from the runtime's own
+``signPermitV4`` (``contract/tools/gen_permit_v4_vectors.ts``).
 
 Offline by design: with a pinned Ed25519 public key (raw 32 bytes,
 standard base64) this function needs no network.  It is the Python mirror of
@@ -22,8 +26,13 @@ Requires the ``cryptography`` library (already a dependency of the SDK).
 from __future__ import annotations
 
 import base64
+import dataclasses
+import json
+import re
 import uuid as _uuid_module
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any, NoReturn
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -37,6 +46,16 @@ REASON_WRONG_PROTECTED_HEADER = "wrong_protected_header"
 REASON_CLAIMS_DECODE_FAILED = "claims_decode_failed"
 REASON_SIGNATURE_INVALID = "signature_invalid"
 REASON_EXPIRED = "expired"
+REASON_UNKNOWN_KID = "unknown_kid"
+REASON_KEY_REVOKED = "key_revoked"
+REASON_KEY_NOT_VALID_FOR_PERMIT = "key_not_valid_for_permit"
+REASON_KID_REQUIRED = "kid_required"
+REASON_KEY_SET_EXPIRED = "key_set_expired"
+REASON_KEY_ROLE_CONFLICT = "key_role_conflict"
+REASON_KEY_SET_UNTRUSTWORTHY = "key_set_untrustworthy"
+
+#: Maximum TrustSnapshot age (ms), the TypeScript SDK's DEFAULT_TRUST_TTL_MS.
+TRUST_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
 
 class PermitV4VerifyError(Exception):
@@ -62,12 +81,57 @@ class PermitClaimsV4:
     environment: str  # "live" | "test" (key -5)
     cdo_hash: str | None = None  # 64-char hex sha256 (key -6, optional)
     policy_hash: str | None = None  # 64-char hex sha256 (key -7, optional)
+    # P4 delegation lineage (keys -8 .. -11)
+    parent_permit_hash: str | None = None  # 64-char hex (key -8)
+    parent_permit_id: str | None = None  # UUID (key -9)
+    delegation_depth: int | None = None  # uint (key -10)
+    delegating_actor_id: str | None = None  # tstr (key -11)
+    # Execution binding (keys -12, -13)
+    execution_hash_expected: str | None = None  # 64-char hex (key -12)
+    envelope_hash: str | None = None  # 64-char hex (key -13)
+    # ADR-063 exceptional authority (keys -14, -15)
+    exception_id: str | None = None  # UUID (key -14)
+    exception_type: str | None = None  # tstr (key -15)
+    # AWS locus (keys -16, -17)
+    aws_account_id: str | None = None  # tstr (key -16)
+    aws_region: str | None = None  # tstr (key -17)
+    operation_intent_id: str | None = None  # tstr (key -18)
+    # Change brief (keys -19, -20)
+    change_brief_id: str | None = None  # tstr (key -19)
+    change_brief_digest: str | None = None  # tstr "sha256:..." (key -20)
+    # H8 canonical authorization identity (keys -21 .. -23)
+    authorization_identity_id: str | None = None  # UUID (key -21)
+    authorization_issuance_id: str | None = None  # UUID (key -22)
+    authorization_generation: int | None = None  # uint (key -23)
+    # agent_runtime_identity.v1 evidence, canonical-JSON tstr (key -24)
+    agent_runtime_identity: dict[str, Any] | None = None
+    # Entra acceptance slice (keys -25 .. -32, -35)
+    entra_tenant_id: str | None = None  # tstr (key -25)
+    entra_org_binding_id: str | None = None  # UUID (key -26)
+    entra_request_mapping_id: str | None = None  # UUID (key -27)
+    entra_request_mapping_version: int | None = None  # uint (key -28)
+    entra_approve_mapping_id: str | None = None  # UUID (key -29)
+    entra_approve_mapping_version: int | None = None  # uint (key -30)
+    pep_audience_executor_id: str | None = None  # tstr (key -31)
+    entra_approve_principal_oid: str | None = None  # tstr (key -32)
+    # Azure locus (keys -33, -34)
+    azure_subscription_id: str | None = None  # tstr (key -33)
+    azure_resource_group: str | None = None  # tstr (key -34)
+    entra_request_principal_oid: str | None = None  # tstr (key -35)
+
+    def present_claims(self) -> dict[str, Any]:
+        """Only the claims the token actually carries (absent = not bound)."""
+        return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
 @dataclass
 class PermitV4VerifyResult:
     ok: bool
     claims: PermitClaimsV4
+    #: kid from the COSE protected header; ``None`` when the header has none.
+    kid: str | None = None
+    #: kid of the key-set entry that verified the token; ``None`` for a pinned key.
+    verified_with_kid: str | None = None
 
 
 # ─── Minimal CBOR reader ──────────────────────────────────────────────────────
@@ -161,6 +225,9 @@ class _CborReader:
             return
         raise ValueError(f"cbor: unsupported major {major}")
 
+    def at_end(self) -> bool:
+        return self._pos == len(self._b)
+
     def peek_major(self) -> int:
         return (self._b[self._pos] >> 5) & 7
 
@@ -205,7 +272,338 @@ def _cbor_array(items: list[bytes]) -> bytes:
 
 # ─── Protected header ─────────────────────────────────────────────────────────
 
-_PROTECTED_HEADER = bytes([0xA1, 0x01, 0x27])  # { 1: -8 } = EdDSA
+# Accepted: { 1: -8 } (EdDSA) alone, or with { 4: bstr(kid) }, in either order.
+# Anything else (another label, a duplicate, a non-EdDSA alg, a tstr kid) is
+# rejected: the runtime mints { 1: -8 } today, and accepting a kid now lets it
+# start stamping one without breaking verifiers already in the field.
+
+
+def _parse_protected_header(data: bytes) -> str | None:
+    r = _CborReader(data)
+    n = r.read_map_len()
+    alg: int | None = None
+    kid: str | None = None
+    seen: set[int] = set()
+    for _ in range(n):
+        label = r.read_int()
+        if label in seen:
+            raise ValueError(f"duplicate protected header label {label}")
+        seen.add(label)
+        if label == 1:
+            alg = r.read_int()
+        elif label == 4:
+            raw = r.read_bstr()
+            if not raw:
+                raise ValueError("empty kid")
+            kid = raw.decode("utf-8")
+        else:
+            raise ValueError(f"unexpected protected header label {label}")
+    if not r.at_end():
+        raise ValueError("trailing bytes after protected header")
+    if alg != -8:
+        raise ValueError("expected EdDSA protected header { 1: -8 }")
+    return kid
+
+
+def _as_dict(v: Any) -> dict[str, Any] | None:
+    """A key or revocation entry as a dict (accepts trust-root dataclasses)."""
+    if isinstance(v, dict):
+        return v
+    if dataclasses.is_dataclass(v) and not isinstance(v, type):
+        return dataclasses.asdict(v)
+    return None
+
+
+def _is_permit_key(k: dict[str, Any]) -> bool:
+    return (
+        isinstance(k.get("kid"), str)
+        and isinstance(k.get("x"), str)
+        # Explicit trust metadata only: an entry with no role (or no
+        # kty/crv) is never a permit key, so an audit key whose role was
+        # dropped cannot sign permits.
+        and k.get("role") == "R2_permit"
+        and k.get("kty") == "OKP"
+        and k.get("crv") == "Ed25519"
+        and k.get("alg") == "EdDSA"
+    )
+
+
+def _parse_iso(value: Any) -> float:
+    from datetime import datetime
+
+    if not isinstance(value, str):
+        raise ValueError("not a timestamp")
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+
+
+def _key_set_parts(key_set: Any) -> tuple[list[Any], set[str]]:
+    """(keys, revoked kids) from a mapping or a TrustRootSnapshot-like object.
+
+    Revocation is read from every place the trust root records it: an entry's
+    own ``revoked``, the ledger's ``revoked_keys`` (atlasent-revocations.json
+    / ``TrustRootSnapshot.revoked_keys``) and a flat ``revoked_kids`` list.
+    """
+    if isinstance(key_set, Mapping):
+        raw_keys = key_set.get("keys")
+        ledger = key_set.get("revoked_keys")
+        flat = key_set.get("revoked_kids")
+    else:
+        raw_keys = getattr(key_set, "keys", None)
+        ledger = getattr(key_set, "revoked_keys", None)
+        flat = getattr(key_set, "revoked_kids", None)
+    revoked: set[str] = set()
+    for r in ledger if isinstance(ledger, list) else []:
+        d = _as_dict(r)
+        if d is not None and isinstance(d.get("kid"), str):
+            revoked.add(d["kid"])
+    for kid in flat if isinstance(flat, list) else []:
+        if isinstance(kid, str):
+            revoked.add(kid)
+    return (raw_keys if isinstance(raw_keys, list) else []), revoked
+
+
+_ABSENT = object()
+_B64URL_RE = re.compile(r"[A-Za-z0-9_-]*")
+
+
+def _field(key_set: Any, name: str) -> Any:
+    """A key-set field, or ``_ABSENT`` (distinct from an explicit ``None``)."""
+    if isinstance(key_set, Mapping):
+        return key_set[name] if name in key_set else _ABSENT
+    return getattr(key_set, name, _ABSENT)
+
+
+def _assert_key_set_trustworthy(key_set: Any) -> None:
+    """Refuse, as a whole, a key set whose revocation state cannot be read.
+
+    Applies to kid-bearing AND kid-less tokens (atlasent-api#4640's
+    ``PERMIT_ED25519_PUBLIC_KEYS`` rules): a key the operator meant to revoke
+    must not stay live because the record naming it was malformed. Refused:
+    ``keys`` that is not a list; a ``revoked_keys`` ledger present but not a
+    list of entries each naming a non-empty string kid (a present
+    ``revoked_kids`` that is not a list of non-empty strings, likewise); any
+    entry that is not an object or whose ``revoked`` is not a bool; a kid
+    published twice; an inline revocation with neither a kid nor readable
+    material; and an UNRESOLVED revocation (a ledger kid with no entry
+    carrying readable material, or a ``revoked: true`` entry whose own
+    material is unreadable), whose material could be any live entry's.
+    """
+
+    def refuse(why: str) -> NoReturn:
+        raise PermitV4VerifyError(REASON_KEY_SET_UNTRUSTWORTHY, why)
+
+    # Same marker the TypeScript bootstrapTrust() sets on a snapshot whose
+    # documents could not be read in full: it may hide a revocation.
+    if _field(key_set, "revocations_unreadable") is not _ABSENT:
+        refuse("the trust snapshot was built from unreadable revocation data")
+    raw_keys = _field(key_set, "keys")
+    if not isinstance(raw_keys, list):
+        refuse("the key set has no keys array")
+    ledger = _field(key_set, "revoked_keys")
+    ledger_kids: list[str] = []
+    if ledger is not _ABSENT:
+        if not isinstance(ledger, list):
+            refuse("revoked_keys is present but is not a list")
+        for r in ledger:
+            d = _as_dict(r)
+            kid = d.get("kid") if d is not None else None
+            if not (isinstance(kid, str) and kid):
+                refuse("a revoked_keys entry does not name a kid")
+            ledger_kids.append(kid)
+    flat = _field(key_set, "revoked_kids")
+    if flat is not _ABSENT:
+        if not isinstance(flat, list) or not all(
+            isinstance(k, str) and k for k in flat
+        ):
+            refuse("revoked_kids is present but is not a list of kids")
+        ledger_kids.extend(flat)
+    entries = [_as_dict(k) for k in raw_keys]
+    if any(d is None or not isinstance(d.get("revoked"), bool) for d in entries):
+        refuse("a key entry does not state revoked as a boolean")
+    recs = [d for d in entries if d is not None]
+    kids = [d["kid"] for d in recs if isinstance(d.get("kid"), str)]
+    if len(set(kids)) != len(kids):
+        refuse("a kid is published more than once")
+    if any(
+        d["revoked"] is True
+        and _material(d.get("x")) is None
+        and not (isinstance(d.get("kid"), str) and d["kid"])
+        for d in recs
+    ):
+        refuse("a revocation names neither a kid nor readable key material")
+    unresolved = any(
+        not any(d.get("kid") == kid and _material(d.get("x")) is not None for d in recs)
+        for kid in ledger_kids
+    ) or any(d["revoked"] is True and _material(d.get("x")) is None for d in recs)
+    if unresolved:
+        refuse(
+            "a revocation's key material cannot be resolved, "
+            "so no key in the set is trusted"
+        )
+
+
+def _material(x: Any) -> str | None:
+    """Canonical key material: decoded bytes as hex (padding/alphabet-proof)."""
+    if not isinstance(x, str):
+        return None
+    v = x.rstrip("=").replace("+", "-").replace("/", "_")
+    # Strict alphabet, the same in both SDKs: Python's decoder otherwise
+    # silently DISCARDS characters outside it, so "AAAA!" would read as a key.
+    if _B64URL_RE.fullmatch(v) is None or len(v) % 4 == 1:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(v + "=" * (-len(v) % 4))
+    except Exception:
+        return None
+    # Only a raw 32-byte Ed25519 key is material: "" or "AA" decodes, but
+    # names no key, so a revocation carrying it is unresolved, not resolved.
+    return raw.hex() if len(raw) == 32 else None
+
+
+def _in_window(k: dict[str, Any], iat: int) -> bool:
+    """True when the permit's iat lies in the key's window (a null bound is open)."""
+    try:
+        if k.get("valid_from") is not None and iat < _parse_iso(k["valid_from"]):
+            return False
+        if k.get("valid_until") is not None and iat > _parse_iso(k["valid_until"]):
+            return False
+    except ValueError:
+        return False
+    return True
+
+
+def _assert_key_set_fresh(key_set: Any) -> None:
+    """Refuse a key set whose own ``valid_until`` (or ``expires_at``) has passed.
+
+    A ``TrustRootSnapshot`` (or a trust-root document) carries its expiry;
+    stale keys and stale revocation state must not keep authorizing permits.
+    """
+    import time as _time
+
+    if isinstance(key_set, Mapping):
+        until = key_set.get("valid_until")
+        exp_ms = key_set.get("expires_at")
+        fetched_ms = key_set.get("fetched_at")
+    else:
+        until = getattr(key_set, "valid_until", None)
+        exp_ms = getattr(key_set, "expires_at", None)
+        fetched_ms = getattr(key_set, "fetched_at", None)
+    now = _time.time()
+    # A TrustSnapshot-shaped set (``fetched_at`` in epoch ms) is also refused
+    # once older than the snapshot age limit, even if ``expires_at`` is later
+    # (same rule as the TypeScript SDK's isTrustSnapshotExpired()).
+    if fetched_ms is not None and not (
+        isinstance(fetched_ms, (int, float))
+        and not isinstance(fetched_ms, bool)
+        and now * 1000 <= fetched_ms + TRUST_SNAPSHOT_MAX_AGE_MS
+    ):
+        raise PermitV4VerifyError(
+            REASON_KEY_SET_EXPIRED,
+            "the key set is older than the trust snapshot age limit (fetched_at)",
+        )
+    if exp_ms is not None and not (
+        isinstance(exp_ms, (int, float)) and exp_ms / 1000 > now
+    ):
+        raise PermitV4VerifyError(REASON_KEY_SET_EXPIRED, "the key set has expired")
+    if until is not None:
+        try:
+            ok = _parse_iso(until) > now
+        except ValueError:
+            ok = False
+        if not ok:
+            raise PermitV4VerifyError(
+                REASON_KEY_SET_EXPIRED, "the key set has expired (valid_until)"
+            )
+
+
+def _select_key(
+    key_set: Any, kid: str | None, iat: int, default_kid: str | None
+) -> dict[str, Any]:
+    _assert_key_set_fresh(key_set)
+    _assert_key_set_trustworthy(key_set)
+    raw_keys, ledger_revoked = _key_set_parts(key_set)
+    keys = [
+        d
+        for d in (_as_dict(k) for k in raw_keys)
+        if d is not None and _is_permit_key(d)
+    ]
+
+    def revoked_kid(k: dict[str, Any]) -> bool:
+        return k.get("revoked") is True or k.get("kid") in ledger_revoked
+
+    # Revoked key material, compared as decoded bytes: any entry sharing a
+    # revoked entry's key is revoked too, so a revoked private key cannot sign
+    # under a live alias (however its x is padded or encoded).
+    all_entries = [d for d in (_as_dict(k) for k in raw_keys) if d is not None]
+    revoked_material = {
+        m for d in all_entries if revoked_kid(d) and (m := _material(d.get("x")))
+    }
+
+    def revoked(k: dict[str, Any]) -> bool:
+        m = _material(k.get("x"))
+        return revoked_kid(k) or m is None or m in revoked_material
+
+    # Role eligibility is a property of the key MATERIAL: if any entry carries
+    # the same key bytes under a role other than R2_permit (an R3 audit key,
+    # or an entry with no role), whoever holds that private key could sign
+    # permits, so the permit key is refused.
+    non_permit_material = {
+        m
+        for d in all_entries
+        if d.get("role") != "R2_permit" and (m := _material(d.get("x")))
+    }
+
+    wanted = kid if kid is not None else default_kid
+    if wanted is not None:
+        matches = [k for k in keys if k["kid"] == wanted]
+        entry = matches[0] if len(matches) == 1 else None
+        if entry is None:
+            raise PermitV4VerifyError(
+                REASON_UNKNOWN_KID, f"no permit key with kid {wanted!r}"
+            )
+    else:
+        # Exactly one key that is unrevoked AND valid for this permit's iat,
+        # so a staged next key or a retired one does not block the fallback.
+        usable = [k for k in keys if not revoked(k) and _in_window(k, iat)]
+        if len(usable) != 1:
+            raise PermitV4VerifyError(
+                REASON_KID_REQUIRED,
+                "token carries no kid and the key set has "
+                f"{len(usable)} permit keys valid for it",
+            )
+        entry = usable[0]
+    if _material(entry.get("x")) in non_permit_material:
+        raise PermitV4VerifyError(
+            REASON_KEY_ROLE_CONFLICT,
+            f"permit key {entry['kid']} shares key material with a non-permit entry",
+        )
+    if revoked(entry):
+        raise PermitV4VerifyError(
+            REASON_KEY_REVOKED, f"permit key {entry['kid']} is revoked"
+        )
+    if not _in_window(entry, iat):
+        raise PermitV4VerifyError(
+            REASON_KEY_NOT_VALID_FOR_PERMIT,
+            f"permit issued outside the validity window of key {entry['kid']}",
+        )
+    # Kid-less fallback validity (atlasent-api#4640): the selected key is
+    # bounded by the window of EVERY R2_permit entry carrying its material (an
+    # alias under another kid included); an unreadable bound refuses it.
+    if kid is None:
+        mine = _material(entry.get("x"))
+        for d in all_entries:
+            if (
+                d.get("role") == "R2_permit"
+                and mine is not None
+                and _material(d.get("x")) == mine
+                and not _in_window(d, iat)
+            ):
+                raise PermitV4VerifyError(
+                    REASON_KEY_NOT_VALID_FOR_PERMIT,
+                    "kid-less permit issued outside the validity window of an "
+                    f"entry for key {entry['kid']}'s material",
+                )
+    return entry
 
 
 # ─── COSE Sign1 decode ────────────────────────────────────────────────────────
@@ -245,6 +643,44 @@ def _bytes_to_uuid(b: bytes) -> str:
     return str(_uuid_module.UUID(bytes=b))
 
 
+# Optional claim keys -8 .. -35, by CBOR value type (atlasent-api _shared/cose.ts).
+_HEX_KEYS = {
+    -8: "parent_permit_hash",
+    -12: "execution_hash_expected",
+    -13: "envelope_hash",
+}
+_UUID_KEYS = {
+    -9: "parent_permit_id",
+    -14: "exception_id",
+    -21: "authorization_identity_id",
+    -22: "authorization_issuance_id",
+    -26: "entra_org_binding_id",
+    -27: "entra_request_mapping_id",
+    -29: "entra_approve_mapping_id",
+}
+_UINT_KEYS = {
+    -10: "delegation_depth",
+    -23: "authorization_generation",
+    -28: "entra_request_mapping_version",
+    -30: "entra_approve_mapping_version",
+}
+_TSTR_KEYS = {
+    -11: "delegating_actor_id",
+    -15: "exception_type",
+    -16: "aws_account_id",
+    -17: "aws_region",
+    -18: "operation_intent_id",
+    -19: "change_brief_id",
+    -20: "change_brief_digest",
+    -25: "entra_tenant_id",
+    -31: "pep_audience_executor_id",
+    -32: "entra_approve_principal_oid",
+    -33: "azure_subscription_id",
+    -34: "azure_resource_group",
+    -35: "entra_request_principal_oid",
+}
+
+
 def _decode_permit_claims(data: bytes) -> PermitClaimsV4:
     r = _CborReader(data)
     length = r.read_map_len()
@@ -271,6 +707,19 @@ def _decode_permit_claims(data: bytes) -> PermitClaimsV4:
             result["cdo_hash"] = r.read_bstr().hex()
         elif key == -7:
             result["policy_hash"] = r.read_bstr().hex()
+        elif key in _HEX_KEYS:
+            result[_HEX_KEYS[key]] = r.read_bstr().hex()
+        elif key in _UUID_KEYS:
+            result[_UUID_KEYS[key]] = _bytes_to_uuid(r.read_bstr())
+        elif key in _UINT_KEYS:
+            result[_UINT_KEYS[key]] = r.read_int()
+        elif key in _TSTR_KEYS:
+            result[_TSTR_KEYS[key]] = r.read_tstr()
+        elif key == -24:
+            parsed = json.loads(r.read_tstr())
+            if not isinstance(parsed, dict):
+                raise ValueError("agent_runtime_identity claim is not a JSON object")
+            result["agent_runtime_identity"] = parsed
         else:
             r.skip()
 
@@ -288,18 +737,7 @@ def _decode_permit_claims(data: bytes) -> PermitClaimsV4:
         if f not in result:
             raise ValueError(f"missing required claim: {f}")
 
-    return PermitClaimsV4(
-        permit_id=result["permit_id"],
-        exp=result["exp"],
-        iat=result["iat"],
-        decision_id=result["decision_id"],
-        org_id=result["org_id"],
-        action_type=result["action_type"],
-        actor_id=result["actor_id"],
-        environment=result["environment"],
-        cdo_hash=result.get("cdo_hash"),
-        policy_hash=result.get("policy_hash"),
-    )
+    return PermitClaimsV4(**result)
 
 
 # ─── Main API ─────────────────────────────────────────────────────────────────
@@ -307,9 +745,10 @@ def _decode_permit_claims(data: bytes) -> PermitClaimsV4:
 
 def verify_permit_v4(
     token: str,
-    public_key_b64: str,
+    public_key_b64: str | Mapping[str, Any] | Any,
     *,
     check_expiry: bool = False,
+    default_kid: str | None = None,
 ) -> PermitV4VerifyResult:
     """Verify a pt.v4.* COSE Sign1 permit token offline.
 
@@ -322,7 +761,14 @@ def verify_permit_v4(
 
     Args:
         token:          Full ``pt.v4.*`` token string.
-        public_key_b64: Raw 32-byte Ed25519 public key, standard base64.
+        public_key_b64: Either one pinned key (raw 32-byte Ed25519, standard
+                        base64), used whatever the header says, or a key set
+                        (the trust root's atlasent-verifier-keys.json document
+                        merged with its revocations, any ``{"keys": [...]}``, or
+                        a :class:`~atlasent.trust_root.TrustRootSnapshot`)
+                        indexed by the header kid.
+        default_kid:    With a key set, the kid to use when the token's header
+                        carries none and the set has several permit keys.
         check_expiry:   If True, raises if ``claims.exp ≤ now`` (default False).
 
     Returns:
@@ -356,20 +802,31 @@ def verify_permit_v4(
     except Exception as exc:
         raise PermitV4VerifyError(REASON_COSE_DECODE_FAILED, str(exc)) from exc
 
-    if protected_bytes != _PROTECTED_HEADER:
-        raise PermitV4VerifyError(
-            REASON_WRONG_PROTECTED_HEADER,
-            "expected EdDSA protected header { 1: -8 } = 0xa1 0x01 0x27",
-        )
+    try:
+        header_kid = _parse_protected_header(protected_bytes)
+    except Exception as exc:
+        raise PermitV4VerifyError(REASON_WRONG_PROTECTED_HEADER, str(exc)) from exc
 
     try:
         claims = _decode_permit_claims(payload_bytes)
     except Exception as exc:
         raise PermitV4VerifyError(REASON_CLAIMS_DECODE_FAILED, str(exc)) from exc
 
+    verified_with_kid: str | None = None
+    if isinstance(public_key_b64, str):
+        key_b64 = public_key_b64
+        decode_key = base64.b64decode
+    else:
+        entry = _select_key(public_key_b64, header_kid, claims.iat, default_kid)
+        verified_with_kid = entry["kid"]
+        key_b64 = entry["x"]
+
+        def decode_key(v: str) -> bytes:
+            return base64.urlsafe_b64decode(v + "=" * (-len(v) % 4))
+
     to_verify = _build_sig_structure(protected_bytes, payload_bytes)
     try:
-        raw_key = base64.b64decode(public_key_b64)
+        raw_key = decode_key(key_b64)
         pub_key = Ed25519PublicKey.from_public_bytes(raw_key)
         pub_key.verify(sig, to_verify)
     except InvalidSignature:
@@ -389,4 +846,6 @@ def verify_permit_v4(
             exp_str = datetime.fromtimestamp(claims.exp, tz=timezone.utc).isoformat()
             raise PermitV4VerifyError(REASON_EXPIRED, f"permit expired at {exp_str}")
 
-    return PermitV4VerifyResult(ok=True, claims=claims)
+    return PermitV4VerifyResult(
+        ok=True, claims=claims, kid=header_kid, verified_with_kid=verified_with_kid
+    )

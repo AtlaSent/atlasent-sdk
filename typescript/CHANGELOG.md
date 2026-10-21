@@ -19,6 +19,86 @@ because enforced limits are per plan (read them from `rateLimit`, parsed from
 contract schema was widened first. Type-level change: code that treated the
 field as always a number needs a null check.
 
+### Changed: key-set verification matches atlasent-api#4640 (fail closed, unreleased surface)
+
+The key-set path of `verifyPermitV4` (added below, not yet released) now
+follows atlasent-api's `PERMIT_ED25519_PUBLIC_KEYS` rules exactly. A key set
+whose revocation state cannot be read is refused as a whole, for kid-bearing
+and kid-less tokens alike, with the new reason `key_set_untrustworthy`:
+
+- a revocation whose key material cannot be resolved: a `revoked_keys` /
+  `revoked_kids` kid that no entry carries with readable material, or a
+  `revoked: true` entry whose own `x` is unreadable (its material could be
+  any live entry's, so no key in the set is trusted);
+- any entry without a boolean `revoked` (missing, `"false"`, `0`, `null`),
+  or an entry that is not an object;
+- a duplicate kid (on any entry, whatever its role), a `keys` that is not an
+  array, and a `revoked_keys` / `revoked_kids` that is present but malformed
+  (formerly ignored);
+- an inline revocation with neither a kid nor readable material.
+
+A kid-less token (the auto-selected key or `defaultKid`) is now also bounded
+by the validity window of every `R2_permit` entry sharing the selected key's
+material, so a retired or staged alias entry for the same key refuses it; an
+unreadable bound on such an entry refuses it too. A token naming a kid is
+still checked against its own entry's window only. Key material must use the
+base64 / base64url alphabet strictly, and a non-string `valid_from` /
+`valid_until` is invalid rather than coerced. Pinned-key verification is
+unchanged. The published trust root (atlasent-keys `.well-known`) satisfies
+every rule.
+
+Only a raw 32-byte Ed25519 key counts as readable material: a revocation
+whose `x` decodes to anything else (`""`, `"AA"`) is unresolved.
+`bootstrapTrust()` keeps its lenient parsing, but when it drops a key entry
+or meets a present-but-unreadable `revoked_keys` it now sets
+`revocations_unreadable: true` on the `TrustSnapshot`, and the verifier
+refuses such a snapshot. `TrustRootManager`'s refresh keeps its current
+snapshot when the fetched ledger is present but unreadable.
+
+### Added: kid-aware pt.v4 verification (reading side only, additive)
+
+`verifyPermitV4(token, key)` now accepts a COSE protected header with or
+without a `kid` (`{1:-8}` or `{1:-8, 4:bstr(kid)}`). The runtime still mints
+`{1:-8}`. Accepting a kid now means the runtime can start stamping one later
+without breaking SDKs already in the field. `key` may be one pinned key
+(unchanged behaviour: it is used whatever the header says) or a key set: the
+trust root's `atlasent-verifier-keys.json` document or any `{ keys: [...] }`.
+With a key set, the header kid selects the `R2_permit` key. Revoked keys
+(an entry's own `revoked`, the ledger's `revoked_keys`, or a flat
+`revoked_kids`; a `null` validity bound is open-ended),
+keys whose validity window excludes the permit's `iat`, and non-permit roles
+are refused. A kid-less token uses the single usable key or
+`opts.defaultKid`; otherwise it fails with `kid_required`. New reasons:
+`unknown_kid`, `key_revoked`, `key_not_valid_for_permit`, `kid_required`,
+`key_set_expired` (a set whose own `expires_at`/`valid_until` has passed).
+Revocation propagates to every entry with the same key bytes. A permit key
+whose bytes also appear on an entry with any role other than `R2_permit` (an
+audit key, or no role) is refused with `key_role_conflict`. The kid-less
+fallback counts only keys valid for the permit's `iat`.
+The result adds `kid` and `verifiedWithKid`. Any other header label, a
+duplicate label, a non-EdDSA alg or a text-string kid still fails with
+`wrong_protected_header`.
+
+### Added: full pt.v4 claim decode, typed verify error codes, `execution_payload_hash_accepted` (additive)
+
+- `verifyPermitV4()` now decodes every claim key the runtime signs (4, 6, 7
+  and -1 to -35): delegation lineage, execution binding, exceptional
+  authority, AWS/Azure locus, operation intent, change brief, H8 identity,
+  agent runtime identity and the Entra slice. Before this it decoded only -1
+  to -7 and skipped the rest. `PermitClaimsV4` gains the matching optional
+  fields. Absent means "not bound".
+- Cross-language parity vectors (`contract/vectors/permit-v4/vectors.json`)
+  are generated from atlasent-api's own `signPermitV4`. The TS and Python
+  decoders must both reproduce the runtime's claim bag exactly.
+- `VERIFY_ERROR_CODES`, `LEGACY_VERIFY_ERROR_CODES`,
+  `TRANSIENT_VERIFY_ERROR_CODES`, `isVerifyErrorCode()` and the
+  `VerifyErrorCode` type (plain `as const` arrays, side-effect free), mirroring atlasent-api's verify error-code catalog.
+  `verifyPermit()` now returns `verifyErrorCode` and `verifyReason`; both are
+  optional and the code is an open string.
+- `evaluate()` and `evaluatePreflight()` surface
+  `execution_payload_hash_accepted`. `false` means your digest was dropped and
+  verify will return `PAYLOAD_MISMATCH`.
+
 ### Added: `approvalRequestId` on evaluate responses (additive, contract-conforming)
 
 `/v1-evaluate` returns `approval_request_id` on hold and escalate decisions

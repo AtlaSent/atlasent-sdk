@@ -11,6 +11,69 @@ that it did not exist and `key_self()` always failed. The runtime reports
 limits are per plan and are on `rate_limit`. The contract schema was widened
 first.
 
+### Changed: key-set verification matches atlasent-api#4640 (fail closed, unreleased surface)
+
+The key-set path of `verify_permit_v4()` (added below, not yet released) now
+follows atlasent-api's `PERMIT_ED25519_PUBLIC_KEYS` rules exactly. A key set
+whose revocation state cannot be read is refused as a whole, for kid-bearing
+and kid-less tokens alike, with the new reason `key_set_untrustworthy`:
+
+- a revocation whose key material cannot be resolved: a `revoked_keys` /
+  `revoked_kids` kid that no entry carries with readable material, or a
+  `revoked: true` entry whose own `x` is unreadable (its material could be
+  any live entry's, so no key in the set is trusted);
+- any entry without a boolean `revoked` (missing, `"false"`, `0`, `None`),
+  or an entry that is not an object;
+- a duplicate kid (on any entry, whatever its role), a `keys` that is not a
+  list, and a `revoked_keys` / `revoked_kids` that is present but malformed
+  (formerly ignored);
+- an inline revocation with neither a kid nor readable material.
+
+A kid-less token (the auto-selected key or `default_kid=`) is now also bounded
+by the validity window of every `R2_permit` entry sharing the selected key's
+material, so a retired or staged alias entry for the same key refuses it; an
+unreadable bound on such an entry refuses it too. A token naming a kid is
+still checked against its own entry's window only. Key material must use the
+base64 / base64url alphabet strictly, and a non-string `valid_from` /
+`valid_until` is invalid rather than coerced. Pinned-key verification is
+unchanged. The published trust root (atlasent-keys `.well-known`) satisfies
+every rule.
+
+Only a raw 32-byte Ed25519 key counts as readable material: a revocation
+whose `x` decodes to anything else (`""`, `"AA"`) is unresolved. The
+trust-root loader no longer turns a missing or non-boolean `revoked` into
+`TrustRootKey.revoked = False`; it keeps `None`, so the verifier refuses the
+snapshot. A key set carrying the `revocations_unreadable` marker (set by the
+TypeScript `bootstrapTrust()`) is refused too.
+
+### Added: kid-aware pt.v4 verification (reading side only, additive)
+
+`verify_permit_v4()` accepts a protected header with or without a `kid`.
+Its key argument may be one pinned key (as before) or a key set: the trust
+root's verifier-keys document (merged with its `revoked_keys` ledger), any
+`{"keys": [...]}`, or the SDK's own `TrustRootSnapshot`. The header kid
+selects the `R2_permit` key, with the same rules and reasons as the
+TypeScript SDK (`unknown_kid`, `key_revoked`, `key_not_valid_for_permit`,
+`kid_required`, `key_set_expired`, `key_role_conflict`; `default_kid=` for kid-less tokens). The result adds `kid`
+and `verified_with_kid`. A permit key whose material also appears on any
+entry with a role other than `R2_permit` (an audit key, or no role) is
+refused with `key_role_conflict`: role eligibility belongs to the key
+material, not to one entry.
+
+### Added: full pt.v4 claim decode, typed verify error codes, `execution_payload_hash_accepted` (additive)
+
+- `verify_permit_v4()` decodes every claim key the runtime signs (4, 6, 7 and
+  -1 to -35). `PermitClaimsV4` gains the matching optional fields plus
+  `present_claims()`. The decoder is checked against vectors generated from
+  atlasent-api's own `signPermitV4`.
+- `atlasent.verify_error_codes`: a `VerifyErrorCode` Literal,
+  `VERIFY_ERROR_CODES`, `LEGACY_VERIFY_ERROR_CODES`,
+  `TRANSIENT_VERIFY_ERROR_CODES` and `is_verify_error_code()`. They mirror
+  atlasent-api's verify error-code catalog.
+- `EvaluateResult.execution_payload_hash_accepted`. `False` means your digest
+  was dropped and verify will return `PAYLOAD_MISMATCH`. `None` means the
+  runtime did not report it.
+
 ### Added: `EvaluateResult.approval_request_id` (additive, contract-conforming)
 
 Parsed from `/v1-evaluate`'s `approval_request_id`, present on hold and

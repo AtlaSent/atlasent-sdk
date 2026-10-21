@@ -390,6 +390,13 @@ class EvaluateResult(BaseModel):
     # top-level ``deny_code`` with a fallback to the legacy ``denial.code``
     # shape. Branch on this, not on the human-readable ``reason``.
     deny_code: str | None = None
+    # Whether the runtime bound the permit to the caller's own
+    # ``execution_payload_hash`` (wire ``execution_payload_hash_accepted``).
+    # ``False`` means the digest was DROPPED (wrong shape, e.g. a ``sha256:``
+    # prefix or nested under ``context``) and the permit is bound to the
+    # runtime's own proof hash, so re-presenting your digest at verify fails
+    # with ``PAYLOAD_MISMATCH``. ``None`` when the runtime did not report it.
+    execution_payload_hash_accepted: bool | None = None
     # Mirrors TypeScript SDK's ``reasons: string[]``. For deny/hold/escalate
     # decisions contains the policy engine's explanation(s); for allow often
     # empty. ``reason`` (singular) is the first element and kept for compat.
@@ -733,7 +740,11 @@ class VerifyResult(BaseModel):
             un-revoked, and un-consumed.
         outcome: Server-side ``"allow"`` or ``"deny"``.
         verify_error_code: Stable code populated when ``outcome=="deny"``
-            (e.g. ``"PERMIT_EXPIRED"``, ``"PERMIT_ALREADY_USED"``).
+            (e.g. ``"PERMIT_EXPIRED"``, ``"PERMIT_ALREADY_USED"``). The known
+            set is :data:`atlasent.verify_error_codes.VerifyErrorCode`; the
+            field stays an open string, so check it with
+            :func:`atlasent.verify_error_codes.is_verify_error_code` and treat
+            an unknown code as a denial.
         reason: Human-readable explanation. Safe to surface to operators.
         rate_limit: Per-key rate-limit state from ``X-RateLimit-*``
             headers. ``None`` when the server didn't emit them.
