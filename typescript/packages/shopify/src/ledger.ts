@@ -223,7 +223,9 @@ export function removeLockIfHeldBy(lockPath: string, token: string): boolean {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
   }
-  untrack();
+  // An unreadable token means ownership is unknown: the lock went back in
+  // place, so stay tracked and let a later release or the exit hook retry.
+  if (moved !== undefined) untrack();
   unlinkSync(aside);
   return moved === token;
 }
