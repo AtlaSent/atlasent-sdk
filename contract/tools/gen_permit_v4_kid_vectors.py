@@ -151,9 +151,6 @@ KEY_SET = {
         # Revoked through the trust-root revocation ledger only (its own
         # entry still says revoked: false), as atlasent-revocations.json does.
         jwk("permit-ledger-revoked", SEED_D),
-        # The same kid published twice: ambiguous, so never selected.
-        jwk("permit-dup", SEED_A),
-        jwk("permit-dup", SEED_B),
     ],
     "revoked_keys": [
         {"kid": "permit-ledger-revoked", "revoked_at": "2026-10-01T00:00:00Z", "role": "R2_permit"}
@@ -187,6 +184,64 @@ ROLELESS_ALIAS_SET = {
 }
 # A key set that states its own expiry, already passed.
 EXPIRED_SET = {**SINGLE_SET, "valid_until": "2020-01-01T00:00:00Z"}
+
+# ── Untrustworthy key sets (atlasent-api#4640) ──────────────────────────────
+# Each holds the live permit-2026-a key, so the ONLY reason to refuse is that
+# the set's revocation state cannot be read. Kid-bearing and kid-less tokens
+# are both refused (key_set_untrustworthy), so an unreadable revocation can
+# never leave the key it might name live.
+_A = jwk("permit-2026-a", SEED_A)
+_B = jwk("permit-2026-b", SEED_B)
+UNTRUSTWORTHY_SETS = {
+    # The same kid published twice: the whole document is ambiguous.
+    "duplicate_kid_set": {"keys": [_A, jwk("permit-dup", SEED_A), jwk("permit-dup", SEED_B)]},
+    # A ledger kid that no entry in `keys` carries: its material is unknown.
+    "unresolved_ledger_set": {
+        "keys": [_A],
+        "revoked_keys": [{"kid": "permit-gone", "revoked_at": "2026-10-01T00:00:00Z"}],
+    },
+    # The same, through the flat TrustSnapshot `revoked_kids` list.
+    "unresolved_flat_ledger_set": {"keys": [_A], "revoked_kids": ["permit-gone"]},
+    # A ledger kid whose entry is present but carries no key material.
+    "ledger_kid_without_material_set": {
+        "keys": [_A, {k: v for k, v in jwk("permit-gone", SEED_D).items() if k != "x"}],
+        "revoked_keys": [{"kid": "permit-gone", "revoked_at": "2026-10-01T00:00:00Z"}],
+    },
+    # An inline revocation whose own material is unreadable.
+    "revoked_unreadable_material_set": {
+        "keys": [_A, {**jwk("permit-gone", SEED_D, revoked=True), "x": "not base64!"}]
+    },
+    # An inline revocation with neither a kid nor material.
+    "anonymous_revocation_set": {
+        "keys": [_A, {k: v for k, v in jwk("_", SEED_D, revoked=True).items() if k not in ("kid", "x")}]
+    },
+    # An entry with no `revoked` at all.
+    "missing_revoked_set": {"keys": [_A, {k: v for k, v in _B.items() if k != "revoked"}]},
+    # An entry whose `revoked` is not a boolean.
+    "string_revoked_set": {"keys": [_A, {**_B, "revoked": "false"}]},
+    # The selected key's OWN entry with no boolean `revoked`.
+    "own_revoked_null_set": {"keys": [{**_A, "revoked": None}]},
+    # A ledger that is not a list.
+    "malformed_ledger_set": {"keys": [_A], "revoked_keys": {"kid": "permit-gone"}},
+    # A ledger row that names no kid.
+    "kidless_ledger_row_set": {"keys": [_A], "revoked_keys": [{"revoked_at": "2026-10-01T00:00:00Z"}]},
+    # A flat ledger that is not a list of kids.
+    "malformed_flat_ledger_set": {"keys": [_A], "revoked_kids": "permit-gone"},
+    # `keys` that is not a list.
+    "keys_not_a_list_set": {"keys": {"permit-2026-a": _A}},
+}
+
+# Kid-less fallback validity window (atlasent-api#4640): the selected key is
+# bounded by every R2_permit entry carrying its material. A retired entry for
+# permit-2026-a's material (under another kid) ends kid-less use of the key;
+# a kid naming permit-2026-a still selects only its own entry's window.
+RETIRED_ALIAS_SET = {
+    "keys": [_A, jwk("permit-2026-a-retired", SEED_A, valid_until="2026-02-01T00:00:00Z")]
+}
+# The same alias with an unreadable bound (a number, not an ISO-8601 string).
+INVALID_BOUND_ALIAS_SET = {
+    "keys": [_A, jwk("permit-2026-a-bad-bound", SEED_A, valid_from=1767225600)]
+}
 
 cases = [
     # Accept
@@ -250,12 +305,6 @@ cases = [
         "token": sign(bytes([0xA1, 0x01, 0x1A, 0xFF, 0xFF, 0xFF, 0xF8]), payload, SEED_A),
         "key": "pinned",
         "expect": "wrong_protected_header",
-    },
-    {
-        "name": "duplicate_kid_is_ambiguous",
-        "token": sign(hdr_kid(b"permit-dup"), payload, SEED_B),
-        "key": "key_set",
-        "expect": "unknown_kid",
     },
     {
         "name": "kid_of_non_permit_role",
@@ -330,6 +379,39 @@ cases = [
     },
 ]
 
+_KID_A = sign(hdr_kid(b"permit-2026-a"), payload, SEED_A)
+for _set in UNTRUSTWORTHY_SETS:
+    _stem = _set[: -len("_set")]
+    cases.append({"name": f"kid_with_{_stem}", "token": _KID_A, "key": _set, "expect": "key_set_untrustworthy"})
+    cases.append({"name": f"no_kid_with_{_stem}", "token": full["token"], "key": _set, "expect": "key_set_untrustworthy"})
+cases += [
+    {
+        "name": "duplicate_kid_named_by_token",
+        "token": sign(hdr_kid(b"permit-dup"), payload, SEED_B),
+        "key": "duplicate_kid_set",
+        "expect": "key_set_untrustworthy",
+    },
+    {
+        "name": "no_kid_bounded_by_retired_alias_window",
+        "token": full["token"],
+        "key": "retired_alias_set",
+        "expect": "key_not_valid_for_permit",
+    },
+    {
+        "name": "kid_selects_own_window_despite_retired_alias",
+        "token": _KID_A,
+        "key": "retired_alias_set",
+        "expect": "ok",
+        "kid": "permit-2026-a",
+    },
+    {
+        "name": "no_kid_bounded_by_alias_with_invalid_bound",
+        "token": full["token"],
+        "key": "invalid_bound_alias_set",
+        "expect": "key_not_valid_for_permit",
+    },
+]
+
 json.dump(
     {
         "schema": "atlasent.permit_v4_kid_vectors.v1",
@@ -342,6 +424,9 @@ json.dump(
         "expired_set": EXPIRED_SET,
         "alias_set": ALIAS_SET,
         "roleless_alias_set": ROLELESS_ALIAS_SET,
+        "retired_alias_set": RETIRED_ALIAS_SET,
+        "invalid_bound_alias_set": INVALID_BOUND_ALIAS_SET,
+        **UNTRUSTWORTHY_SETS,
         "expected_claims": full["expected_claims"],
         "cases": cases,
     },

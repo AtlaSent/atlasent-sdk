@@ -28,10 +28,11 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
+import re
 import uuid as _uuid_module
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NoReturn
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -51,6 +52,7 @@ REASON_KEY_NOT_VALID_FOR_PERMIT = "key_not_valid_for_permit"
 REASON_KID_REQUIRED = "kid_required"
 REASON_KEY_SET_EXPIRED = "key_set_expired"
 REASON_KEY_ROLE_CONFLICT = "key_role_conflict"
+REASON_KEY_SET_UNTRUSTWORTHY = "key_set_untrustworthy"
 
 #: Maximum TrustSnapshot age (ms), the TypeScript SDK's DEFAULT_TRUST_TTL_MS.
 TRUST_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000
@@ -360,15 +362,102 @@ def _key_set_parts(key_set: Any) -> tuple[list[Any], set[str]]:
     return (raw_keys if isinstance(raw_keys, list) else []), revoked
 
 
+_ABSENT = object()
+_B64URL_RE = re.compile(r"[A-Za-z0-9_-]*")
+
+
+def _field(key_set: Any, name: str) -> Any:
+    """A key-set field, or ``_ABSENT`` (distinct from an explicit ``None``)."""
+    if isinstance(key_set, Mapping):
+        return key_set[name] if name in key_set else _ABSENT
+    return getattr(key_set, name, _ABSENT)
+
+
+def _assert_key_set_trustworthy(key_set: Any) -> None:
+    """Refuse, as a whole, a key set whose revocation state cannot be read.
+
+    Applies to kid-bearing AND kid-less tokens (atlasent-api#4640's
+    ``PERMIT_ED25519_PUBLIC_KEYS`` rules): a key the operator meant to revoke
+    must not stay live because the record naming it was malformed. Refused:
+    ``keys`` that is not a list; a ``revoked_keys`` ledger present but not a
+    list of entries each naming a non-empty string kid (a present
+    ``revoked_kids`` that is not a list of non-empty strings, likewise); any
+    entry that is not an object or whose ``revoked`` is not a bool; a kid
+    published twice; an inline revocation with neither a kid nor readable
+    material; and an UNRESOLVED revocation (a ledger kid with no entry
+    carrying readable material, or a ``revoked: true`` entry whose own
+    material is unreadable), whose material could be any live entry's.
+    """
+
+    def refuse(why: str) -> NoReturn:
+        raise PermitV4VerifyError(REASON_KEY_SET_UNTRUSTWORTHY, why)
+
+    # Same marker the TypeScript bootstrapTrust() sets on a snapshot whose
+    # documents could not be read in full: it may hide a revocation.
+    if _field(key_set, "revocations_unreadable") is not _ABSENT:
+        refuse("the trust snapshot was built from unreadable revocation data")
+    raw_keys = _field(key_set, "keys")
+    if not isinstance(raw_keys, list):
+        refuse("the key set has no keys array")
+    ledger = _field(key_set, "revoked_keys")
+    ledger_kids: list[str] = []
+    if ledger is not _ABSENT:
+        if not isinstance(ledger, list):
+            refuse("revoked_keys is present but is not a list")
+        for r in ledger:
+            d = _as_dict(r)
+            kid = d.get("kid") if d is not None else None
+            if not (isinstance(kid, str) and kid):
+                refuse("a revoked_keys entry does not name a kid")
+            ledger_kids.append(kid)
+    flat = _field(key_set, "revoked_kids")
+    if flat is not _ABSENT:
+        if not isinstance(flat, list) or not all(
+            isinstance(k, str) and k for k in flat
+        ):
+            refuse("revoked_kids is present but is not a list of kids")
+        ledger_kids.extend(flat)
+    entries = [_as_dict(k) for k in raw_keys]
+    if any(d is None or not isinstance(d.get("revoked"), bool) for d in entries):
+        refuse("a key entry does not state revoked as a boolean")
+    recs = [d for d in entries if d is not None]
+    kids = [d["kid"] for d in recs if isinstance(d.get("kid"), str)]
+    if len(set(kids)) != len(kids):
+        refuse("a kid is published more than once")
+    if any(
+        d["revoked"] is True
+        and _material(d.get("x")) is None
+        and not (isinstance(d.get("kid"), str) and d["kid"])
+        for d in recs
+    ):
+        refuse("a revocation names neither a kid nor readable key material")
+    unresolved = any(
+        not any(d.get("kid") == kid and _material(d.get("x")) is not None for d in recs)
+        for kid in ledger_kids
+    ) or any(d["revoked"] is True and _material(d.get("x")) is None for d in recs)
+    if unresolved:
+        refuse(
+            "a revocation's key material cannot be resolved, "
+            "so no key in the set is trusted"
+        )
+
+
 def _material(x: Any) -> str | None:
     """Canonical key material: decoded bytes as hex (padding/alphabet-proof)."""
     if not isinstance(x, str):
         return None
     v = x.rstrip("=").replace("+", "-").replace("/", "_")
+    # Strict alphabet, the same in both SDKs: Python's decoder otherwise
+    # silently DISCARDS characters outside it, so "AAAA!" would read as a key.
+    if _B64URL_RE.fullmatch(v) is None or len(v) % 4 == 1:
+        return None
     try:
-        return base64.urlsafe_b64decode(v + "=" * (-len(v) % 4)).hex()
+        raw = base64.urlsafe_b64decode(v + "=" * (-len(v) % 4))
     except Exception:
         return None
+    # Only a raw 32-byte Ed25519 key is material: "" or "AA" decodes, but
+    # names no key, so a revocation carrying it is unresolved, not resolved.
+    return raw.hex() if len(raw) == 32 else None
 
 
 def _in_window(k: dict[str, Any], iat: int) -> bool:
@@ -431,6 +520,7 @@ def _select_key(
     key_set: Any, kid: str | None, iat: int, default_kid: str | None
 ) -> dict[str, Any]:
     _assert_key_set_fresh(key_set)
+    _assert_key_set_trustworthy(key_set)
     raw_keys, ledger_revoked = _key_set_parts(key_set)
     keys = [
         d
@@ -496,6 +586,23 @@ def _select_key(
             REASON_KEY_NOT_VALID_FOR_PERMIT,
             f"permit issued outside the validity window of key {entry['kid']}",
         )
+    # Kid-less fallback validity (atlasent-api#4640): the selected key is
+    # bounded by the window of EVERY R2_permit entry carrying its material (an
+    # alias under another kid included); an unreadable bound refuses it.
+    if kid is None:
+        mine = _material(entry.get("x"))
+        for d in all_entries:
+            if (
+                d.get("role") == "R2_permit"
+                and mine is not None
+                and _material(d.get("x")) == mine
+                and not _in_window(d, iat)
+            ):
+                raise PermitV4VerifyError(
+                    REASON_KEY_NOT_VALID_FOR_PERMIT,
+                    "kid-less permit issued outside the validity window of an "
+                    f"entry for key {entry['kid']}'s material",
+                )
     return entry
 
 

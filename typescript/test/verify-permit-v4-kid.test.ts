@@ -26,15 +26,20 @@ interface KidFile {
   alias_set: PermitVerificationKeySet;
   roleless_alias_set: PermitVerificationKeySet;
   expected_claims: Record<string, unknown>;
-  cases: Array<{ name: string; token: string; key: "pinned" | "key_set" | "single_set" | "rotation_set" | "expired_set" | "alias_set" | "roleless_alias_set"; expect: string; kid?: string }>;
+  cases: Array<{ name: string; token: string; key: string; expect: string; kid?: string }>;
+  [set: string]: unknown;
 }
 
 const file = JSON.parse(
   readFileSync(new URL("../../contract/vectors/permit-v4/kid-vectors.json", import.meta.url), "utf8"),
 ) as KidFile;
 
-const keyFor = (k: KidFile["cases"][number]["key"]) =>
-  k === "pinned" ? file.pinned_key_b64 : file[k];
+const keyFor = (k: string) => {
+  if (k === "pinned") return file.pinned_key_b64;
+  const set = file[k];
+  if (set === undefined) throw new Error(`vector names an unknown key set: ${k}`);
+  return set as PermitVerificationKeySet;
+};
 
 describe("kid-aware pt.v4 verification vectors", () => {
   for (const c of file.cases) {
@@ -55,8 +60,14 @@ describe("kid-aware pt.v4 verification vectors", () => {
 
   it("defaultKid resolves a kid-less token against a multi-key set", async () => {
     const c = file.cases.find((x) => x.name === "no_kid_ambiguous_key_set")!;
-    const res = await verifyPermitV4(c.token, file.key_set, { defaultKid: "permit-2026-a" });
+    // permit-future re-publishes permit-2026-a's material with a 2099 window,
+    // which bounds the kid-less fallback (atlasent-api#4640); without it the
+    // default kid resolves.
+    const set = { ...file.key_set, keys: file.key_set.keys.filter((k) => k.kid !== "permit-future") };
+    const res = await verifyPermitV4(c.token, set, { defaultKid: "permit-2026-a" });
     expect(res.verifiedWithKid).toBe("permit-2026-a");
+    const err = await verifyPermitV4(c.token, file.key_set, { defaultKid: "permit-2026-a" }).catch((e: unknown) => e);
+    expect((err as PermitV4VerifyError).reason).toBe("key_not_valid_for_permit");
   });
 
   it("defaultKid never overrides a kid the token names", async () => {

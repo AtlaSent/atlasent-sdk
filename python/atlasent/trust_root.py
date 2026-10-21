@@ -81,7 +81,10 @@ class TrustRootKey:
     valid_from: str | None = None
     valid_until: str | None = None
     replaced_by: str | None = None
-    revoked: bool = False
+    # ``None`` only when a loaded document's entry did not state ``revoked``
+    # as a boolean: kept visible so verify_permit_v4 refuses the set
+    # (key_set_untrustworthy, atlasent-api#4640) instead of reading False.
+    revoked: bool | None = False
     tenant: str | None = None
 
 
@@ -103,7 +106,12 @@ class TrustRootSnapshot:
 
 
 def _make_trust_root_key(d: dict[str, Any]) -> TrustRootKey:
-    return TrustRootKey(**{k: v for k, v in d.items() if k in _TRUST_ROOT_KEY_FIELDS})
+    fields = {k: v for k, v in d.items() if k in _TRUST_ROOT_KEY_FIELDS}
+    # A missing or non-boolean ``revoked`` must not become the dataclass
+    # default False: that would read an unknown revocation as "not revoked".
+    if not isinstance(d.get("revoked"), bool):
+        fields["revoked"] = None
+    return TrustRootKey(**fields)
 
 
 def _make_revocation_entry(d: dict[str, Any]) -> TrustRootRevocationEntry:

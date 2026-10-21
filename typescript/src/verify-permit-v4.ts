@@ -19,6 +19,12 @@
  * atlasent-verifier-keys.json document, or `{ keys: [...] }`) and the header
  * kid selects the R2_permit key. With a key set and no kid, the single
  * eligible key is used, or `defaultKid`; anything else is `kid_required`.
+ * A kid-less token is also bounded by the validity window of every R2_permit
+ * entry sharing the selected key's material. A key set whose revocation state
+ * cannot be read (malformed ledger, an entry without a boolean `revoked`, a
+ * duplicate kid, a revocation whose key material cannot be resolved) is
+ * refused as a whole with `key_set_untrustworthy`, the same rules as
+ * atlasent-api's `PERMIT_ED25519_PUBLIC_KEYS` (atlasent-api#4640).
  * Permit claims: CBOR integer-keyed map (keys 4/6/7/–1..–35, see PermitClaimsV4).
  * Cross-language parity: contract/vectors/permit-v4/vectors.json, generated from
  * atlasent-api's own signPermitV4 (contract/tools/gen_permit_v4_vectors.ts).
@@ -53,7 +59,8 @@ export type PermitV4VerifyReason =
   | 'key_not_valid_for_permit'
   | 'kid_required'
   | 'key_set_expired'
-  | 'key_role_conflict';
+  | 'key_role_conflict'
+  | 'key_set_untrustworthy';
 
 export class PermitV4VerifyError extends Error {
   readonly reason: PermitV4VerifyReason;
@@ -498,8 +505,15 @@ function stripPadding(s: string): string {
 /** Canonical key material: the decoded bytes as hex (padding/alphabet-proof). */
 function materialOf(x: unknown): string | null {
   if (typeof x !== 'string') return null;
+  const v = stripPadding(x).replace(/\+/g, '-').replace(/\//g, '_');
+  // Strict alphabet, the same in both SDKs: anything else (whitespace, '!')
+  // is unreadable, never silently skipped by a lenient decoder.
+  if (!/^[A-Za-z0-9_-]*$/.test(v) || v.length % 4 === 1) return null;
   try {
-    return bytesHex(fromB64url(stripPadding(x).replace(/\+/g, '-').replace(/\//g, '_')));
+    const raw = fromB64url(v);
+    // Only a raw 32-byte Ed25519 key is material: "" or "AA" decodes, but
+    // names no key, so a revocation carrying it is unresolved, not resolved.
+    return raw.length === 32 ? bytesHex(raw) : null;
   } catch {
     return null;
   }
@@ -535,8 +549,10 @@ function hasCrossRoleAlias(set: PermitVerificationKeySet, k: PermitVerificationK
 /** True when the permit's iat lies in the key's validity window (null = open). */
 function inWindow(k: PermitVerificationKey, iat: number): boolean {
   const iatMs = iat * 1000;
-  const bound = (v: string | null | undefined) =>
-    v === undefined || v === null ? undefined : Date.parse(v);
+  // A non-string bound (a number, an object) is invalid, never coerced:
+  // Date.parse(123) would read it as the year 123.
+  const bound = (v: unknown) =>
+    v === undefined || v === null ? undefined : typeof v === 'string' ? Date.parse(v) : NaN;
   const from = bound(k.valid_from);
   const until = bound(k.valid_until);
   return !(
@@ -574,6 +590,89 @@ function assertKeySetFresh(set: PermitVerificationKeySet, nowMs: number): void {
   }
 }
 
+/**
+ * A key set whose revocation state cannot be read is refused as a whole,
+ * for kid-bearing AND kid-less tokens alike (atlasent-api#4640's
+ * `PERMIT_ED25519_PUBLIC_KEYS` rules): a key the operator meant to revoke
+ * must not stay live because the record naming it was malformed. Refused:
+ * - `keys` that is not an array;
+ * - a `revoked_keys` ledger that is present but not an array of entries
+ *   each naming a non-empty string kid (a flat `revoked_kids` list that is
+ *   present but not an array of non-empty strings, likewise);
+ * - any entry that is not an object, or whose `revoked` is not a boolean
+ *   (missing, `"false"`, `0`, `null`);
+ * - a kid published twice (the document is ambiguous);
+ * - an inline revocation with neither a kid nor readable key material;
+ * - an UNRESOLVED revocation: a ledger kid with no entry carrying readable
+ *   material, or a `revoked: true` entry whose own material is unreadable.
+ *   Its material could be any live entry's (an alias under another kid
+ *   cannot be ruled out), so no key in the set is trusted.
+ */
+function assertKeySetTrustworthy(set: PermitVerificationKeySet): void {
+  const refuse = (why: string): never => {
+    throw new PermitV4VerifyError('key_set_untrustworthy', why);
+  };
+  // bootstrapTrust() marks a snapshot whose documents it could not read in
+  // full (a dropped entry, an unreadable ledger): it may hide a revocation.
+  if ((set as Record<string, unknown> | undefined)?.revocations_unreadable !== undefined) {
+    refuse('the trust snapshot was built from unreadable revocation data');
+  }
+  const keys: unknown = set?.keys;
+  if (!Array.isArray(keys)) refuse('the key set has no keys array');
+  const entries = keys as unknown[];
+  const ledger: unknown = set?.revoked_keys;
+  if (
+    ledger !== undefined &&
+    (!Array.isArray(ledger) ||
+      !ledger.every((r) => {
+        const kid = r !== null && typeof r === 'object' ? (r as Record<string, unknown>).kid : undefined;
+        return typeof kid === 'string' && kid.length > 0;
+      }))
+  ) {
+    refuse('revoked_keys is present but is not a list of entries each naming a kid');
+  }
+  const flat: unknown = set?.revoked_kids;
+  if (
+    flat !== undefined &&
+    (!Array.isArray(flat) || !flat.every((k) => typeof k === 'string' && k.length > 0))
+  ) {
+    refuse('revoked_kids is present but is not a list of kids');
+  }
+  if (entries.some((k) => k === null || typeof k !== 'object' || typeof (k as Record<string, unknown>).revoked !== 'boolean')) {
+    refuse('a key entry does not state revoked as a boolean');
+  }
+  const recs = entries as PermitVerificationKey[];
+  const kids = recs.map((k) => k.kid).filter((k): k is string => typeof k === 'string');
+  if (new Set(kids).size !== kids.length) refuse('a kid is published more than once');
+  if (recs.some((k) => k.revoked === true && materialOf(k.x) === null && !(typeof k.kid === 'string' && k.kid.length > 0))) {
+    refuse('a revocation names neither a kid nor readable key material');
+  }
+  const ledgerKids = [
+    ...((ledger as Array<{ kid: string }> | undefined) ?? []).map((r) => r.kid),
+    ...((flat as string[] | undefined) ?? []),
+  ];
+  const unresolved =
+    ledgerKids.some((kid) => !recs.some((k) => k.kid === kid && materialOf(k.x) !== null)) ||
+    recs.some((k) => k.revoked === true && materialOf(k.x) === null);
+  if (unresolved) {
+    refuse('a revocation\'s key material cannot be resolved, so no key in the set is trusted');
+  }
+}
+
+/**
+ * Kid-less fallback validity: the selected key is bounded by the window of
+ * EVERY R2_permit entry carrying its material (an alias under another kid
+ * included), so a retired entry for the same key stops it minting kid-less
+ * permits. An unreadable bound on any such entry refuses it (atlasent-api
+ * #4640, resolvePermitV4VerificationKey's kid-less branch).
+ */
+function inFallbackWindows(set: PermitVerificationKeySet, entry: PermitVerificationKey, iat: number): boolean {
+  const mine = materialOf(entry.x);
+  return set.keys.every(
+    (o) => !(o === entry || (o.role === 'R2_permit' && mine !== null && materialOf(o.x) === mine)) || inWindow(o, iat),
+  );
+}
+
 function selectKey(
   set: PermitVerificationKeySet,
   kid: string | null,
@@ -581,6 +680,7 @@ function selectKey(
   defaultKid: string | undefined,
 ): PermitVerificationKey {
   assertKeySetFresh(set, Date.now());
+  assertKeySetTrustworthy(set);
   const keys = Array.isArray(set?.keys) ? set.keys.filter(isPermitKey) : [];
   let entry: PermitVerificationKey | undefined;
   const wanted = kid ?? defaultKid ?? null;
@@ -620,6 +720,12 @@ function selectKey(
     throw new PermitV4VerifyError(
       'key_not_valid_for_permit',
       `permit issued outside the validity window of key ${entry.kid}`,
+    );
+  }
+  if (kid === null && !inFallbackWindows(set, entry, iat)) {
+    throw new PermitV4VerifyError(
+      'key_not_valid_for_permit',
+      `kid-less permit issued outside the validity window of an entry for key ${entry.kid}'s material`,
     );
   }
   return entry;
