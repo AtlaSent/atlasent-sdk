@@ -8,6 +8,34 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Changed: key-set verification matches atlasent-api#4640 (fail closed, unreleased surface)
+
+The key-set path of `verifyPermitV4` (added below, not yet released) now
+follows atlasent-api's `PERMIT_ED25519_PUBLIC_KEYS` rules exactly. A key set
+whose revocation state cannot be read is refused as a whole, for kid-bearing
+and kid-less tokens alike, with the new reason `key_set_untrustworthy`:
+
+- a revocation whose key material cannot be resolved: a `revoked_keys` /
+  `revoked_kids` kid that no entry carries with readable material, or a
+  `revoked: true` entry whose own `x` is unreadable (its material could be
+  any live entry's, so no key in the set is trusted);
+- any entry without a boolean `revoked` (missing, `"false"`, `0`, `null`),
+  or an entry that is not an object;
+- a duplicate kid (on any entry, whatever its role), a `keys` that is not an
+  array, and a `revoked_keys` / `revoked_kids` that is present but malformed
+  (formerly ignored);
+- an inline revocation with neither a kid nor readable material.
+
+A kid-less token (the auto-selected key or `defaultKid`) is now also bounded
+by the validity window of every `R2_permit` entry sharing the selected key's
+material, so a retired or staged alias entry for the same key refuses it; an
+unreadable bound on such an entry refuses it too. A token naming a kid is
+still checked against its own entry's window only. Key material must use the
+base64 / base64url alphabet strictly, and a non-string `valid_from` /
+`valid_until` is invalid rather than coerced. Pinned-key verification is
+unchanged. The published trust root (atlasent-keys `.well-known`) satisfies
+every rule.
+
 ### Added: kid-aware pt.v4 verification (reading side only, additive)
 
 `verifyPermitV4(token, key)` now accepts a COSE protected header with or

@@ -40,5 +40,14 @@ with the stated reason:
 - TypeScript: `typescript/test/verify-permit-v4-kid.test.ts`
 - Python: `python/tests/test_verify_permit_v4_kid.py`
 
+The `*_set` documents named in `cases` without a matching accept case
+(`duplicate_kid_set`, `unresolved_ledger_set`, `missing_revoked_set`, ...)
+are untrustworthy key sets: each still holds the live `permit-2026-a` key, and
+both a kid-bearing and a kid-less token must be refused with
+`key_set_untrustworthy` (atlasent-api#4640's `PERMIT_ED25519_PUBLIC_KEYS`
+rules). `retired_alias_set` and `invalid_bound_alias_set` pin the kid-less
+fallback window rule: the selected key is bounded by every `R2_permit` entry
+sharing its material, while a token naming a kid uses its own entry's window.
+
 Regenerate with `python3 contract/tools/gen_permit_v4_kid_vectors.py >
 contract/vectors/permit-v4/kid-vectors.json`.

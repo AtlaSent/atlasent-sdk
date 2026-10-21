@@ -25,15 +25,7 @@ _F = json.loads(
 
 
 def _key(name: str):
-    return {
-        "pinned": _F["pinned_key_b64"],
-        "key_set": _F["key_set"],
-        "single_set": _F["single_set"],
-        "rotation_set": _F["rotation_set"],
-        "expired_set": _F["expired_set"],
-        "alias_set": _F["alias_set"],
-        "roleless_alias_set": _F["roleless_alias_set"],
-    }[name]
+    return _F["pinned_key_b64"] if name == "pinned" else _F[name]
 
 
 @pytest.mark.parametrize("case", _F["cases"], ids=lambda c: c["name"])
@@ -54,8 +46,18 @@ def test_kid_vectors(case: dict) -> None:
 
 def test_default_kid_resolves_kidless_token() -> None:
     case = next(c for c in _F["cases"] if c["name"] == "no_kid_ambiguous_key_set")
-    res = verify_permit_v4(case["token"], _F["key_set"], default_kid="permit-2026-a")
+    # permit-future re-publishes permit-2026-a's material with a 2099 window,
+    # which bounds the kid-less fallback (atlasent-api#4640); without it the
+    # default kid resolves.
+    key_set = {
+        **_F["key_set"],
+        "keys": [k for k in _F["key_set"]["keys"] if k["kid"] != "permit-future"],
+    }
+    res = verify_permit_v4(case["token"], key_set, default_kid="permit-2026-a")
     assert res.verified_with_kid == "permit-2026-a"
+    with pytest.raises(PermitV4VerifyError) as exc:
+        verify_permit_v4(case["token"], _F["key_set"], default_kid="permit-2026-a")
+    assert exc.value.reason == "key_not_valid_for_permit"
 
 
 def test_default_kid_never_overrides_header_kid() -> None:
