@@ -158,6 +158,15 @@ describe("POST /webhooks/stripe", () => {
     expect(seen).toEqual([`authorized:${refund().id}`, "unauthorized:re_dash"]);
   });
 
+  it("alerts once per refund made outside the gate, not again on its lifecycle events", async () => {
+    const s = await start();
+    const dash = refund({ id: "re_dash", metadata: {}, amount: 12900, payment_intent: "pi_1002", status: "pending" });
+    await s.deliver({ id: "evt_c", type: "refund.created", data: { object: dash } });
+    expect(await (await s.deliver({ id: "evt_u", type: "refund.updated", data: { object: { ...dash, status: "succeeded" } } })).json()).toEqual({ recorded: true });
+    await s.deliver({ id: "evt_f", type: "refund.failed", data: { object: { ...dash, status: "failed" } } });
+    expect(s.alerts).toHaveLength(1);
+  });
+
   it("ignores other event types", async () => {
     const s = await start();
     expect(await (await s.deliver({ type: "charge.succeeded", data: { object: {} } })).json()).toEqual({ ignored: true });

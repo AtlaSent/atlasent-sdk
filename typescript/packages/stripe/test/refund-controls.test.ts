@@ -26,6 +26,11 @@ describe("refund payment evidence safety", () => {
     const result=await s.run();
     expect(result.refunded).toBe(false);
     expect(result.refunded ? '' : result.reason).toContain("reconcile before retrying");
+    // A live refund exists: the entry stays open and the payment reserved.
+    expect(result.refunded ? '' : result.decision).toBe("unconfirmed");
+    const e=await s.options.ledger.get(result.gateRef);
+    expect(e?.aborted_reason).toBeUndefined();
+    expect((await s.options.ledger.getReservation(result.gateRef))?.state).toBe("active");
   });
   it.each(["pending", "requires_action", "unrecognized"])("blocks an existing %s refund before evaluation", async status => {
     const s=setup();s.stripe.existingRefunds=[existing(status)];

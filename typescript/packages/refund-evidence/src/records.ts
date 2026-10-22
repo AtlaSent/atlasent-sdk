@@ -13,7 +13,8 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 export const REFUND_DECISION_SCHEMA = "atlasent.refund_decision.v1" as const;
 export const REFUND_ALARM_SCHEMA = "atlasent.refund_alarm.v1" as const;
 
-export type RefundOutcome = "refunded" | "escalated" | "held" | "denied" | "stopped" | "refused";
+/** `unconfirmed`: submitted, processor outcome not yet confirmed. Never counted as refunded or as nothing refunded. */
+export type RefundOutcome = "refunded" | "escalated" | "held" | "denied" | "stopped" | "refused" | "unconfirmed";
 
 export interface RefundDecisionRecord {
   schema: typeof REFUND_DECISION_SCHEMA;
@@ -54,7 +55,7 @@ export interface RefundAlarmRecord {
 
 export type EvidenceRecord = RefundDecisionRecord | RefundAlarmRecord;
 
-const OUTCOMES = new Set(["refunded", "escalated", "held", "denied", "stopped", "refused"]);
+const OUTCOMES = new Set(["refunded", "escalated", "held", "denied", "stopped", "refused", "unconfirmed"]);
 const VERDICTS = new Set(["authorized", "unauthorized", "ignored"]);
 const isStr = (v: unknown): v is string => typeof v === "string";
 const strOrNull = (v: unknown) => v === null || typeof v === "string";

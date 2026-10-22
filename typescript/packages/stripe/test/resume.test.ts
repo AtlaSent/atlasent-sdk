@@ -208,14 +208,29 @@ describe("resumeApprovedStripeRefund", () => {
     expect(s.stripe.refunds).toHaveLength(0);
   });
 
-  it("a Stripe refund failure cancels the ledger entry", async () => {
+  it("a definite Stripe refund rejection cancels the ledger entry", async () => {
     const s = setup();
     const id = await s.escalate();
     s.runtime.decide(id, "approved");
-    s.stripe.failRefund = true;
+    s.stripe.failRefund = 402;
     const r = await s.resume(id);
     expect(r).toMatchObject({ refunded: false, decision: "error" });
     expect((await s.ledger.get(r.gateRef))?.aborted_reason).toBe("error");
+  });
+
+  it("an uncertain refund after approval stays unconfirmed, not cancelled, and cannot be resumed again", async () => {
+    const s = setup();
+    const id = await s.escalate();
+    s.runtime.decide(id, "approved");
+    s.stripe.loseResponseAfterCreate = true;
+    const r = await s.resume(id);
+    expect(r).toMatchObject({ refunded: false, decision: "unconfirmed" });
+    const e = await s.ledger.get(r.gateRef);
+    expect(e?.aborted_reason).toBeUndefined();
+    expect(e?.submission?.state).toBe("unconfirmed");
+    expect((await s.ledger.getPendingApproval(id))?.resolved?.outcome).toBe("unconfirmed");
+    expect(await s.resume(id)).toMatchObject({ refunded: false, decision: "invalid_request" });
+    expect(s.stripe.refunds).toHaveLength(1);
   });
 
   it("pending approvals survive a restart (JSON file ledger)", async () => {

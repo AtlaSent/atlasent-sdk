@@ -9,7 +9,8 @@
 
 export const REFUND_DECISION_SCHEMA = "atlasent.refund_decision.v1" as const;
 
-export type RefundOutcome = "refunded" | "escalated" | "held" | "denied" | "stopped" | "refused";
+/** `unconfirmed`: the refund was submitted and nobody has confirmed whether the processor created it. Never read it as refunded or as nothing refunded. */
+export type RefundOutcome = "refunded" | "escalated" | "held" | "denied" | "stopped" | "refused" | "unconfirmed";
 
 export interface RefundDecisionRecord {
   schema: typeof REFUND_DECISION_SCHEMA;
@@ -46,5 +47,6 @@ export function outcomeOf(refunded: boolean, decision: string): RefundOutcome {
   if (decision === "hold") return "held";
   if (decision === "deny") return "denied";
   if (decision === "invalid_request") return "refused";
+  if (decision === "unconfirmed") return "unconfirmed";
   return "stopped";
 }

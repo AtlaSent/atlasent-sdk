@@ -114,6 +114,72 @@ export async function auditStripeRefund(refund: StripeRefund, ledger: PermitLedg
   return { verdict: "authorized", refundId, paymentIntent: refund.payment_intent, amountCents: refund.amount, gateRef };
 }
 
+/** Refund events whose status the ledger records as an observation. */
+export const REFUND_OUTCOME_EVENTS: ReadonlySet<string> = new Set(["refund.created", "refund.updated", "refund.failed"]);
+
+export interface StripeRefundEvent {
+  /** Null when the event carries no well-formed id: the alarm still audits it, but no outcome is recorded from it. */
+  eventId: string | null;
+  type: string;
+  refund: StripeRefund;
+}
+
+/** Parses a VERIFIED event body; returns refund.created / refund.updated / refund.failed, else null. */
+export function refundEventFromBody(rawBody: Buffer | string): StripeRefundEvent | null {
+  const event = JSON.parse(typeof rawBody === "string" ? rawBody : rawBody.toString("utf8")) as {
+    id?: unknown;
+    type?: unknown;
+    data?: { object?: StripeRefund };
+  };
+  if (typeof event.type !== "string" || !REFUND_OUTCOME_EVENTS.has(event.type)) return null;
+  const r = event.data?.object;
+  if (!r || typeof r.id !== "string" || typeof r.amount !== "number") return null;
+  const eventId = typeof event.id === "string" && /^evt_[A-Za-z0-9]+$/.test(event.id) ? event.id : null;
+  return { eventId, type: event.type, refund: r };
+}
+
+/**
+ * Records a verified refund event's status against its ledger entry, only
+ * when the refund carries the entry's gate reference and matches it (payment,
+ * amount, refund id). A refund the gate did not authorize is never recorded
+ * as an outcome: that is the alarm's job. An event confirming an unconfirmed
+ * submission marks it accepted and releases the payment's reservation.
+ */
+export async function recordRefundEvent(
+  ev: StripeRefundEvent,
+  ledger: PermitLedger,
+  at: Date,
+): Promise<{ recorded: boolean; reason: string }> {
+  const refund = ev.refund;
+  if (ev.eventId === null) return { recorded: false, reason: "the event has no id, so it cannot be recorded once" };
+  if (typeof refund.status !== "string") return { recorded: false, reason: "the event carries no refund status" };
+  const gateRef = refund.metadata?.atlasent_gate_ref;
+  if (typeof gateRef !== "string" || gateRef.length === 0) return { recorded: false, reason: "no gate reference" };
+  const entry = await ledger.get(gateRef);
+  if (entry === undefined) return { recorded: false, reason: "not in the ledger" };
+  if (entry.aborted_reason !== undefined) return { recorded: false, reason: "the gate stopped this reference" };
+  if (entry.payment_intent !== refund.payment_intent || entry.amount_cents !== refund.amount) {
+    return { recorded: false, reason: "does not match the authorized refund" };
+  }
+  const id = entry.refund_id ?? entry.matched_refund_id;
+  if (id !== undefined && id !== refund.id) return { recorded: false, reason: "the entry accounts for another refund" };
+  // Only refund.created (after the alarm's claim) can establish which refund an
+  // entry accounts for; a lifecycle event for an unknown refund id is not one.
+  if (id === undefined && ev.type !== "refund.created") return { recorded: false, reason: "no refund is established for this entry yet" };
+  await ledger.recordObservation(gateRef, { source: "event", event_id: ev.eventId, refund_id: refund.id, status: refund.status, at: at.toISOString() });
+  if (entry.submission?.state === "submitting" || entry.submission?.state === "unconfirmed") {
+    await ledger.recordSubmission(gateRef, { state: "accepted", at: at.toISOString(), detail: `confirmed by event ${ev.eventId}: ${refund.status}` });
+    await ledger.releaseReservation(gateRef, `confirmed_by_event:${refund.status}`);
+  }
+  return { recorded: true, reason: `recorded ${ev.type} (${refund.status})` };
+}
+
+/** The latest provider status recorded for an entry, or null when none was observed. */
+export function latestProviderStatus(entry: LedgerEntry): string | null {
+  const list = entry.observations ?? [];
+  return list.length ? list[list.length - 1]!.status : null;
+}
+
 /** Parses a verified event body; returns the refund for `refund.created`, else null. */
 export function refundFromEvent(rawBody: Buffer | string): StripeRefund | null {
   const event = JSON.parse(typeof rawBody === "string" ? rawBody : rawBody.toString("utf8")) as {
