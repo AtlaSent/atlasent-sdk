@@ -105,7 +105,10 @@ resumed, only once, and only for the Stripe account it was escalated on.
 
 Stripe has no hook to approve a refund before it is created, so
 `refund.created` **detects** refunds made around the gate, from the
-Dashboard or with another API key. It does not stop them:
+Dashboard or with another API key. It does not stop them. Subscribe the
+endpoint to `refund.updated` and `refund.failed` too: for a gated refund those
+record the provider's status as an outcome observation (see the execution
+contract below); they never vouch for a refund the gate did not authorize.
 
 - The signature is verified: `Stripe-Signature`, HMAC-SHA256 of
   `t.payload`, any `v1`, and a 5-minute replay window.
@@ -294,9 +297,10 @@ This remains a demo adapter, not the complete refund-controls.v1 product.
 It does not yet collect customer/order ownership, line-item tax/discount
 allocation, credits outside Stripe, policy-specific return/service evidence,
 budget reservations or a durable business-request identity across new calls.
-A new guardedStripeRefund call still creates a new gateRef; do not retry an
-uncertain outcome as a new operation. The final read reduces races but is not
-an atomic reservation against other refund paths. JsonFileLedger is local
+A call without `businessRequestId` still creates a new gateRef; do not retry an
+uncertain outcome that way (superseded for callers that pass one: see the
+execution contract below). The final read reduces races but is not an atomic
+reservation against refund paths that bypass this ledger. JsonFileLedger is local
 demo storage. Dashboard refunds are detected by the alarm, not prevented.
 
 The existing demo uses finance.payment.authorize; the Action Catalog uses
@@ -308,4 +312,93 @@ The detailed control profile is in the console's Issue refund catalog entry.
 Its review-only policy builder lives in atlasent-api at
 examples/fake-store-refunds/control-policy-builder.ts. That template never
 allows, and is not silently installed by this adapter.
+
+# Refund execution contract (2026-10-22, atlasent-api#4656)
+
+What the adapter now enforces at the execution boundary, and what it still
+does not. Proof level: local tests against fakes (`test/execution-contract.test.ts`,
+29 cases) and six mutations that each make them fail. No Stripe test-mode
+account and no AtlaSent org has run it.
+
+## Durable business request identity
+
+Pass `businessRequestId` (a ticket and line, a return authorization: 8-128 of
+`A-Z a-z 0-9 . _ : -`). The gate reference, and so Stripe's Idempotency-Key, is
+`gateRefForBusinessRequest(account, businessRequestId)`, the same in every
+process. A later call with the same id never evaluates or submits again:
+
+| Ledger state for that id | Answer |
+|---|---|
+| submitted and accepted | `duplicate_request`, with `existingRefundId` |
+| submitted, outcome unknown | `unconfirmed`; reconcile, never a new request |
+| escalated, approval open | `hold`, with the same `approvalRequestId` |
+| authorized, then stopped | `duplicate_request`: a new decision needs a new id |
+| denied or failed before authorization | decided again (nothing was authorized) |
+| different payment or amount | `invalid_request` |
+
+Repeats are not written to the decision log: they are not decisions.
+
+## One in-flight refund per payment
+
+`ledger.reserve` runs before anything is read or evaluated, under the file
+lock for `JsonFileLedger`. A second refund on the same payment is refused
+(`in_progress`) while the first is reserved: until it is accepted or stopped,
+while its approval is open, or for as long as its submission is unconfirmed.
+This serializes refunds that go through this ledger. It is not the
+cross-payment cumulative budget (a runtime reservation, not built), and it
+does not see refunds made with another key or in the Dashboard.
+
+## Uncertain submissions are unconfirmed, not failed
+
+`submitting` is recorded before `POST /v1/refunds`. Only HTTP 400/401/402/403/404
+count as definitely not created (`submissionErrorIsDefinite`). A timeout, a lost
+connection, 409, 429, 5xx, or a 2xx whose body cannot be read gives
+`decision: "unconfirmed"`: the entry is NOT cancelled, the reservation stays,
+and a `refund.created` for it is reported as authorized, because it is the
+authorized refund. The decision log records outcome `unconfirmed`, which the
+evidence report shows in its own tile, never as refunded or as nothing refunded.
+
+## Reading the outcome back
+
+`reconcileStripeRefund(stripe, gateRef, options, { resubmit? })` lists the
+payment's refunds and finds the one carrying the gate reference (never matching
+by amount alone). It records Stripe's status as a `readback` observation and
+returns `succeeded`, `pending`, `requires_action`, `failed`, `canceled`,
+`unconfirmed`, `not_issued`, `mismatch` (two refunds, another amount or payment,
+or none after acceptance: an incident) or `read_failed`.
+
+With `resubmit: true`, an unconfirmed refund that Stripe does not show is sent
+again with the same Idempotency-Key and byte-identical parameters, only within
+`RESUBMIT_WINDOW_MS` (1 h) of authorization and only if the payment and order
+still carry exactly the authorized refund (same digest, not disputed, enough
+left). Stripe returns the original refund if the first request created it. If
+the charge balance already dropped, it is not resent, even if the list lags.
+Outside those limits it stays unconfirmed for an operator.
+
+Signature-verified `refund.created`/`refund.updated`/`refund.failed` events are
+recorded once per event id as `event` observations, only for a refund that
+matches its entry. Observations keep every status in arrival order;
+`latestProviderStatus` returns the last one. Stripe can report a refund as
+failed after it succeeded, so read the observations, not one flag.
+
+## Which action is evaluated
+
+`actionType` defaults to `finance.payment.authorize`, with the digest unchanged
+(binding v1), so existing approvals and permits are untouched. Set
+`actionType: CUSTOMER_REFUND_ISSUE` only for an org whose installed action
+class is `customer.refund.issue` (us-forprofit-baseline USFP-ACT-008). In the
+Canon that slug is a proposed candidate (PAC-0045), not a minted CAR. With it,
+evaluate and verify both use it and the digest is binding v2 (also binds the
+business request id). An escalated refund resumes only under the action it was
+escalated for. The adapter never maps one action onto the other.
+
+## Still not covered here
+
+- Order/customer ownership, return or service evidence, line-item
+  tax/discount/shipping allocation and credits outside Stripe: not collected.
+  The review-only policy in atlasent-api holds without them.
+- Cumulative budgets across payments and a runtime-owned reservation: not built
+  (runtime work). This ledger is local demo storage.
+- Accounting and tax adjustments, and correlation to them.
+- Any run against a Stripe test-mode account or an AtlaSent org.
 

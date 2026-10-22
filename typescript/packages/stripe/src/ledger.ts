@@ -35,6 +35,82 @@ export interface LedgerEntry {
   matched_refund_id?: string;
   /** Set when the gate stopped after recording, so the entry can never vouch for a refund. */
   aborted_reason?: string;
+  /** The caller's durable business request id, when one was given. Absent on entries written before it existed. */
+  business_request_id?: string;
+  /** The AtlaSent action the permit was issued for. Absent means finance.payment.authorize (entries written before this field). */
+  action_type?: string;
+  /** The authorized refund, frozen. Needed to resubmit an unconfirmed refund; absent on older entries. */
+  snapshot?: Record<string, unknown>;
+  digest?: string;
+  /** The order status the authorization was decided on; a resubmission requires it unchanged. */
+  order_status?: string;
+  /** What happened to POST /v1/refunds. Absent on entries written before this field. */
+  submission?: RefundSubmission;
+  /** Every provider status seen for this refund, oldest first (submission response, readback, authenticated events). */
+  observations?: ProviderObservation[];
+}
+
+/**
+ * The state of the one POST /v1/refunds an entry may make.
+ *
+ * - `submitting`: written immediately before the request. Still set after a
+ *   crash, so it means the same as `unconfirmed`.
+ * - `accepted`: Stripe answered with a refund that matches the authorization.
+ *   Accepted is not completed: read the observations.
+ * - `rejected`: Stripe definitively did not create it (a 4xx it does not
+ *   process, or a returned refund in a failed state).
+ * - `unconfirmed`: the request may have created a refund (timeout, connection
+ *   lost, 5xx, 409, 429, an unreadable 2xx). Never treated as failed: reconcile
+ *   by reading Stripe back, and retry only with the same Idempotency-Key.
+ */
+export type RefundSubmissionState = "submitting" | "accepted" | "rejected" | "unconfirmed";
+
+export interface RefundSubmission {
+  state: RefundSubmissionState;
+  at: string;
+  detail?: string;
+  /** How many times POST /v1/refunds was sent with this entry's Idempotency-Key. */
+  attempts?: number;
+  /** The exact metadata sent. A resubmission must send identical parameters, or Stripe refuses the key. */
+  metadata?: Record<string, string>;
+}
+
+export interface ProviderObservation {
+  /** submission: the POST response; readback: GET /v1/refunds; event: a signature-verified webhook. */
+  source: "submission" | "readback" | "event";
+  refund_id: string;
+  status: string;
+  at: string;
+  event_id?: string;
+}
+
+/**
+ * One in-flight refund on a payment. `reserve` takes it atomically before
+ * anything is evaluated, so two calls for the same business request, or two
+ * refunds on the same payment, cannot both proceed.
+ */
+export interface RefundReservation {
+  gate_ref: string;
+  payment_intent: string;
+  amount_cents: number;
+  business_request_id?: string;
+  created_at: string;
+  /** active until released; an unconfirmed submission keeps it active. */
+  state: "active" | "released";
+  released_reason?: string;
+  released_at?: string;
+}
+
+export type ReserveResult =
+  | { reserved: true }
+  /** This gate reference (the same business request) already has a reservation or an entry. */
+  | { reserved: false; conflict: "same_request"; reservation?: RefundReservation; entry?: LedgerEntry }
+  /** Another refund on this payment is reserved, or its submission is not yet confirmed. */
+  | { reserved: false; conflict: "payment_in_flight"; gateRef: string };
+
+/** An entry whose submission may have created a refund that nothing has confirmed yet. */
+export function isUnresolvedSubmission(e: LedgerEntry): boolean {
+  return e.aborted_reason === undefined && (e.submission?.state === "submitting" || e.submission?.state === "unconfirmed");
 }
 
 /**
@@ -55,7 +131,7 @@ export interface PendingApproval {
   reason?: string;
   created_at: string;
   /** Set once the approval is final (refunded, not approved, or stopped). */
-  resolved?: { outcome: "refunded" | "not_approved" | "stopped"; at: string; detail: string };
+  resolved?: { outcome: "refunded" | "not_approved" | "stopped" | "unconfirmed"; at: string; detail: string };
 }
 
 export interface PermitLedger {
@@ -69,15 +145,90 @@ export interface PermitLedger {
   recordPendingApproval(pending: PendingApproval): Promise<void>;
   getPendingApproval(approvalRequestId: string): Promise<PendingApproval | undefined>;
   resolvePendingApproval(approvalRequestId: string, resolved: NonNullable<PendingApproval["resolved"]>): Promise<void>;
+  /** Atomically reserves one refund; see {@link ReserveResult}. A released reservation for the same reference with no entry is re-activated. */
+  reserve(reservation: Omit<RefundReservation, "state">): Promise<ReserveResult>;
+  releaseReservation(gateRef: string, reason: string): Promise<void>;
+  getReservation(gateRef: string): Promise<RefundReservation | undefined>;
+  /** Pending approvals by the escalated attempt's gate reference. */
+  findPendingApprovalByGateRef(gateRef: string): Promise<PendingApproval | undefined>;
+  recordSubmission(gateRef: string, submission: RefundSubmission): Promise<void>;
+  /** Appends one provider observation (duplicates by source+event id are ignored). */
+  recordObservation(gateRef: string, observation: ProviderObservation): Promise<void>;
 }
 
 export class InMemoryLedger implements PermitLedger {
   protected entries = new Map<string, LedgerEntry>();
   protected pending = new Map<string, PendingApproval>();
+  protected reservations = new Map<string, RefundReservation>();
 
   async recordAuthorized(entry: LedgerEntry): Promise<void> {
     if (this.entries.has(entry.gate_ref)) throw new Error(`duplicate ledger entry ${entry.gate_ref}`);
-    this.entries.set(entry.gate_ref, { ...entry });
+    this.entries.set(entry.gate_ref, JSON.parse(JSON.stringify(entry)) as LedgerEntry);
+    this.persist();
+  }
+
+  async reserve(r: Omit<RefundReservation, "state">): Promise<ReserveResult> {
+    const existing = this.reservations.get(r.gate_ref);
+    const entry = this.entries.get(r.gate_ref);
+    if (entry !== undefined || existing?.state === "active") {
+      return {
+        reserved: false,
+        conflict: "same_request",
+        ...(existing ? { reservation: { ...existing } } : {}),
+        ...(entry ? { entry: JSON.parse(JSON.stringify(entry)) as LedgerEntry } : {}),
+      };
+    }
+    for (const other of this.reservations.values()) {
+      if (other.state === "active" && other.payment_intent === r.payment_intent) {
+        return { reserved: false, conflict: "payment_in_flight", gateRef: other.gate_ref };
+      }
+    }
+    for (const e of this.entries.values()) {
+      if (e.payment_intent === r.payment_intent && isUnresolvedSubmission(e)) {
+        return { reserved: false, conflict: "payment_in_flight", gateRef: e.gate_ref };
+      }
+    }
+    this.reservations.set(r.gate_ref, { ...r, state: "active" });
+    this.persist();
+    return { reserved: true };
+  }
+
+  async releaseReservation(gateRef: string, reason: string): Promise<void> {
+    const r = this.reservations.get(gateRef);
+    if (!r || r.state === "released") return;
+    r.state = "released";
+    r.released_reason = reason;
+    r.released_at = new Date().toISOString();
+    this.persist();
+  }
+
+  async getReservation(gateRef: string): Promise<RefundReservation | undefined> {
+    const r = this.reservations.get(gateRef);
+    return r ? { ...r } : undefined;
+  }
+
+  async findPendingApprovalByGateRef(gateRef: string): Promise<PendingApproval | undefined> {
+    for (const p of this.pending.values()) {
+      if (p.gate_ref === gateRef) return JSON.parse(JSON.stringify(p)) as PendingApproval;
+    }
+    return undefined;
+  }
+
+  async recordSubmission(gateRef: string, submission: RefundSubmission): Promise<void> {
+    const e = this.entries.get(gateRef);
+    if (!e) throw new Error(`no ledger entry ${gateRef}`);
+    const attempts = (e.submission?.attempts ?? 0) + (submission.state === "submitting" ? 1 : 0);
+    const metadata = submission.metadata ?? e.submission?.metadata;
+    e.submission = { ...submission, attempts, ...(metadata ? { metadata: { ...metadata } } : {}) };
+    this.persist();
+  }
+
+  async recordObservation(gateRef: string, o: ProviderObservation): Promise<void> {
+    const e = this.entries.get(gateRef);
+    if (!e) throw new Error(`no ledger entry ${gateRef}`);
+    const list = (e.observations ??= []);
+    if (o.event_id !== undefined && list.some((x) => x.source === o.source && x.event_id === o.event_id)) return;
+    list.push({ ...o });
     this.persist();
   }
 
@@ -335,6 +486,7 @@ export class JsonFileLedger extends InMemoryLedger {
   private load(): void {
     this.entries.clear();
     this.pending.clear();
+    this.reservations.clear();
     let text: string;
     try {
       text = readFileSync(this.path, "utf8");
@@ -342,11 +494,16 @@ export class JsonFileLedger extends InMemoryLedger {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       throw err;
     }
-    const data = JSON.parse(text) as LedgerEntry[] | { entries: LedgerEntry[]; pending?: PendingApproval[] };
+    const data = JSON.parse(text) as
+      | LedgerEntry[]
+      | { entries: LedgerEntry[]; pending?: PendingApproval[]; reservations?: RefundReservation[] };
     // An array is the file format before pending approvals existed.
     const rows = Array.isArray(data) ? data : data.entries;
     for (const r of rows) this.entries.set(r.gate_ref, r);
-    if (!Array.isArray(data)) for (const p of data.pending ?? []) this.pending.set(p.approval_request_id, p);
+    if (!Array.isArray(data)) {
+      for (const p of data.pending ?? []) this.pending.set(p.approval_request_id, p);
+      for (const r of data.reservations ?? []) this.reservations.set(r.gate_ref, r);
+    }
   }
 
   /** Lock, reload, run one operation (which persists), unlock. */
@@ -381,6 +538,19 @@ export class JsonFileLedger extends InMemoryLedger {
   override resolvePendingApproval(id: string, resolved: NonNullable<PendingApproval["resolved"]>): Promise<void> {
     return this.locked(() => super.resolvePendingApproval(id, resolved));
   }
+  // reserve is the check-and-set that serializes refunds across processes, so it runs under the lock.
+  override reserve(r: Omit<RefundReservation, "state">): Promise<ReserveResult> {
+    return this.locked(() => super.reserve(r));
+  }
+  override releaseReservation(gateRef: string, reason: string): Promise<void> {
+    return this.locked(() => super.releaseReservation(gateRef, reason));
+  }
+  override recordSubmission(gateRef: string, submission: RefundSubmission): Promise<void> {
+    return this.locked(() => super.recordSubmission(gateRef, submission));
+  }
+  override recordObservation(gateRef: string, o: ProviderObservation): Promise<void> {
+    return this.locked(() => super.recordObservation(gateRef, o));
+  }
 
   // Reads take no lock: writes replace the file by rename, so a read sees a
   // whole old or whole new ledger, never a partial one.
@@ -392,6 +562,14 @@ export class JsonFileLedger extends InMemoryLedger {
     this.load();
     return super.getPendingApproval(id);
   }
+  override async getReservation(gateRef: string): Promise<RefundReservation | undefined> {
+    this.load();
+    return super.getReservation(gateRef);
+  }
+  override async findPendingApprovalByGateRef(gateRef: string): Promise<PendingApproval | undefined> {
+    this.load();
+    return super.findPendingApprovalByGateRef(gateRef);
+  }
 
   protected override persist(): void {
     // Every write runs inside locked(); refuse one that does not, or whose
@@ -399,7 +577,14 @@ export class JsonFileLedger extends InMemoryLedger {
     if (!this.heldLock) throw new LedgerLockError(`write to the permit ledger ${this.path} without its lock; nothing was written`);
     assertLockHeld(this.heldLock.path, this.heldLock.token, this.path);
     const tmp = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ entries: [...this.entries.values()], pending: [...this.pending.values()] }, null, 2));
+    writeFileSync(
+      tmp,
+      JSON.stringify(
+        { entries: [...this.entries.values()], pending: [...this.pending.values()], reservations: [...this.reservations.values()] },
+        null,
+        2,
+      ),
+    );
     renameSync(tmp, this.path);
   }
 }

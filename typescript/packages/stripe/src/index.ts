@@ -22,10 +22,19 @@ export {
 export {
   guardedStripeRefund,
   resumeApprovedStripeRefund,
+  reconcileStripeRefund,
   computeStripeRefundDigest,
+  gateRefForBusinessRequest,
+  submissionErrorIsDefinite,
   policyContext,
   FINANCE_PAYMENT_AUTHORIZE,
+  CUSTOMER_REFUND_ISSUE,
   STRIPE_REFUND_BINDING_VERSION,
+  STRIPE_REFUND_BINDING_VERSION_V2,
+  RESUBMIT_WINDOW_MS,
+  type RefundActionType,
+  type StripeReconcileResult,
+  type StripeReconcileState,
   type StripeRefundRequest,
   type StripeRefundGuardOptions,
   type StripeRefundResult,
@@ -52,7 +61,23 @@ export {
   type PermitLedger,
   type LedgerEntry,
   type PendingApproval,
+  type RefundReservation,
+  type RefundSubmission,
+  type RefundSubmissionState,
+  type ProviderObservation,
+  type ReserveResult,
+  isUnresolvedSubmission,
 } from "./ledger.js";
-export { verifyStripeSignature, auditStripeRefund, refundFromEvent, type StripeRefundAuditVerdict } from "./webhook.js";
+export {
+  verifyStripeSignature,
+  auditStripeRefund,
+  refundFromEvent,
+  refundEventFromBody,
+  recordRefundEvent,
+  latestProviderStatus,
+  REFUND_OUTCOME_EVENTS,
+  type StripeRefundAuditVerdict,
+  type StripeRefundEvent,
+} from "./webhook.js";
 export { createStripeWebhookHandler, type StripeWebhookDeps } from "./webhook-server.js";
 export { REFUND_DECISION_SCHEMA, outcomeOf, type RefundDecisionRecord, type RefundOutcome } from "./decision-record.js";

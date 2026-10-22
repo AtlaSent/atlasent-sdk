@@ -13,7 +13,7 @@
 
 import { createHash } from "node:crypto";
 import { AtlaSentClient } from "@atlasent/sdk";
-import type { CreateRefundInput, StripeApi, StripePaymentIntent, StripeRefund } from "../src/stripe.js";
+import { StripeApiError, type CreateRefundInput, type StripeApi, type StripePaymentIntent, type StripeRefund } from "../src/stripe.js";
 import type { DeliveryFacts } from "../src/facts.js";
 import type { ApprovalClaim, ApprovalsApi, ApprovalStatus } from "../src/approvals.js";
 
@@ -175,7 +175,10 @@ export class FakeStripe implements StripeApi {
     return structuredClone([...this.existingRefunds, ...this.byKey.values()].filter(r => r.payment_intent === id));
   }
   failGet = false;
-  failRefund = false;
+  /** true: an uncertain transport error. A number: Stripe answered with that HTTP status. */
+  failRefund: boolean | number = false;
+  /** Create the refund, then lose the response (the timeout-after-commit case). */
+  loseResponseAfterCreate = false;
   refundStatus = "succeeded";
   onRead?: (n: number, fake: FakeStripe) => void;
 
@@ -193,7 +196,8 @@ export class FakeStripe implements StripeApi {
   }
 
   async createRefund(input: CreateRefundInput, key: string): Promise<StripeRefund> {
-    if (this.failRefund) throw new Error("Stripe API HTTP 500");
+    if (typeof this.failRefund === "number") throw new StripeApiError(`Stripe API HTTP ${this.failRefund}`, this.failRefund);
+    if (this.failRefund) throw new Error("fetch failed: socket hang up");
     const prior = this.byKey.get(key);
     if (prior) return prior;
     this.refunds.push({ input: JSON.parse(JSON.stringify(input)), key });
@@ -209,6 +213,7 @@ export class FakeStripe implements StripeApi {
       metadata: { ...input.metadata },
     };
     this.byKey.set(key, refund);
+    if (this.loseResponseAfterCreate) throw new Error("The operation was aborted due to timeout");
     return refund;
   }
 }

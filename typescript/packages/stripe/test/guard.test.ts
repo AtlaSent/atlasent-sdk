@@ -142,7 +142,9 @@ describe("fails closed", () => {
     ["verified but not consumed", { consumed: false }, () => {}, "verify_failed"],
     ["verified with consumed omitted", { consumed: null }, () => {}, "verify_failed"],
     ["Stripe read fails", {}, (s) => (s.stripe.failGet = true), "error"],
-    ["refund request fails", {}, (s) => (s.stripe.failRefund = true), "error"],
+    ["refund request rejected by Stripe (400)", {}, (s) => (s.stripe.failRefund = 400), "error"],
+    ["refund request outcome unknown (transport error)", {}, (s) => (s.stripe.failRefund = true), "unconfirmed"],
+    ["refund request outcome unknown (Stripe 500)", {}, (s) => (s.stripe.failRefund = 500), "unconfirmed"],
     ["Stripe returns the refund as failed", {}, (s) => (s.stripe.refundStatus = "failed"), "error"],
   ];
   for (const [name, rt, arrange, decision] of cases) {
@@ -181,9 +183,9 @@ describe("fails closed", () => {
     expect(await s.refund("pi_1001", 1899)).toMatchObject({ refunded: false, decision: "payment_changed" });
   });
 
-  it("every stop after recording cancels the entry, so a copied gateRef is flagged", async () => {
+  it("every definite stop after recording cancels the entry, so a copied gateRef is flagged", async () => {
     const s = setup();
-    s.stripe.failRefund = true;
+    s.stripe.failRefund = 400;
     const r = await s.refund("pi_1001", 1899);
     expect((await s.ledger.get(r.gateRef))?.aborted_reason).toBe("error");
     const copied = {

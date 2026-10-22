@@ -37,6 +37,8 @@ export interface EvidenceSummary {
   escalated: MoneyTotal;
   declined: MoneyTotal;
   stopped: MoneyTotal;
+  /** Submitted, outcome not confirmed by the processor: neither refunded nor nothing refunded. */
+  unconfirmed: MoneyTotal;
   outsideGate: MoneyTotal;
   alarmAccountedFor: number;
   /** Refunds issued after a manager approved them (also counted in `refunded`). */
@@ -57,6 +59,7 @@ export const OUTCOME_LABEL: Record<RefundOutcome, string> = {
   denied: "Declined by policy",
   refused: "Refused: invalid request",
   stopped: "Stopped: could not complete safely",
+  unconfirmed: "Submitted: outcome not yet confirmed",
 };
 
 const SYSTEM_LABEL = { shopify: "Shopify", stripe: "Stripe" } as const;
@@ -117,6 +120,7 @@ export const RULE_LABEL: Record<string, string> = {
   allow_after_approval: "Approved by a manager",
   approval_stopped: "Approved, but could not complete safely",
   approval_not_found: "Approval request not found",
+  approval_unconfirmed: "Approved; refund outcome not yet confirmed",
 };
 
 /** The outcome as a reader says it: a manager's "no" is not the policy's. */
@@ -156,6 +160,7 @@ export function buildEvidenceReport(input: EvidenceReportInput): EvidenceReport 
     escalated: total(by(["escalated", "held"])),
     declined: total(by(["denied", "refused"])),
     stopped: total(by(["stopped"])),
+    unconfirmed: total(by(["unconfirmed"])),
     outsideGate: total(outsideRows),
     alarmAccountedFor: alarms.filter((a) => a.verdict === "authorized").length,
     approvedByManager: decisions.filter(approvedByManager).length,
@@ -216,6 +221,7 @@ ${tile("Refunded", summary.refunded, `Within policy${summary.approvedByManager >
 ${tile("Sent to a manager", summary.escalated, "Over the automatic limit; the manager's decision, once made, is its own row below", "", true)}
 ${tile("Declined", summary.declined, "Outside policy, declined by a manager, or invalid; nothing refunded", "", true)}
 ${tile("Stopped", summary.stopped, "Could not complete safely; nothing refunded", "", true)}
+${summary.unconfirmed.count > 0 ? tile("Outcome unconfirmed", summary.unconfirmed, "Submitted to the processor; whether the refund was created is not yet confirmed. Reconcile each one", "alert") : ""}
 ${tile("Refunds made outside the gate", summary.outsideGate, "Made in an admin or dashboard, or with another key", summary.outsideGate.count > 0 ? "alert" : "")}
 </div>
 <h2>Refunds made outside the gate</h2>

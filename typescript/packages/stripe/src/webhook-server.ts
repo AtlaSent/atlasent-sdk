@@ -4,7 +4,8 @@
  *   POST /webhooks/stripe   Stripe-Signature auth -> auditStripeRefund
  *   GET  /healthz
  *
- * Subscribe the endpoint to `refund.created` in the Stripe Dashboard
+ * Subscribe the endpoint to `refund.created`, `refund.updated` and
+ * `refund.failed` in the Stripe Dashboard
  * (Developers → Webhooks) and set STRIPE_WEBHOOK_SECRET to its signing secret.
  * Set EVIDENCE_LOG to append every verdict to the evidence log (see
  * evidence-log.ts); use the same path as the CLI.
@@ -13,7 +14,7 @@
 import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 import { JsonFileLedger, type PermitLedger } from "./ledger.js";
-import { auditStripeRefund, refundFromEvent, verifyStripeSignature, type StripeRefundAuditVerdict } from "./webhook.js";
+import { auditStripeRefund, recordRefundEvent, refundEventFromBody, verifyStripeSignature, type StripeRefundAuditVerdict } from "./webhook.js";
 import { alarmRecord, appendEvidence } from "./evidence-log.js";
 import type { StripeRefund } from "./stripe.js";
 
@@ -58,14 +59,24 @@ export function createStripeWebhookHandler(deps: StripeWebhookDeps): RequestList
     });
     if (!ok) return send(res, 400, { error: "bad signature" });
 
-    let refund;
+    let ev;
     try {
-      refund = refundFromEvent(raw);
+      ev = refundEventFromBody(raw);
     } catch {
       return send(res, 400, { error: "invalid JSON" });
     }
-    if (refund === null) return send(res, 200, { ignored: true });
+    if (ev === null) return send(res, 200, { ignored: true });
+    const refund = ev.refund;
     const verdict = await auditStripeRefund(refund, deps.ledger);
+    if (verdict.verdict !== "unauthorized") {
+      try {
+        await recordRefundEvent(ev, deps.ledger, deps.now ? deps.now() : new Date());
+      } catch (err) {
+        // The outcome stays unrecorded and readback (reconcileStripeRefund) still finds it; never a 2xx that hides it.
+        console.error(JSON.stringify({ warning: "refund_outcome_not_recorded", eventId: ev.eventId, error: err instanceof Error ? err.message : String(err) }));
+        return send(res, 500, { error: "outcome not recorded" });
+      }
+    }
     if (verdict.verdict === "unauthorized") await deps.onUnauthorizedRefund?.(verdict);
     try {
       await deps.onVerdict?.(verdict, refund);

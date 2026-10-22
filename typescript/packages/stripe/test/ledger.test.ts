@@ -217,6 +217,12 @@ describe("claim re-checks the entry under the lock", () => {
       recordPendingApproval: (p) => server.recordPendingApproval(p),
       getPendingApproval: (id) => server.getPendingApproval(id),
       resolvePendingApproval: (id, r) => server.resolvePendingApproval(id, r),
+      reserve: (r) => server.reserve(r),
+      releaseReservation: (r, why) => server.releaseReservation(r, why),
+      getReservation: (r) => server.getReservation(r),
+      findPendingApprovalByGateRef: (r) => server.findPendingApprovalByGateRef(r),
+      recordSubmission: (r, sub) => server.recordSubmission(r, sub),
+      recordObservation: (r, o) => server.recordObservation(r, o),
     };
     const verdict = await auditStripeRefund(refund(), racing);
     expect(verdict.verdict).toBe("unauthorized");
