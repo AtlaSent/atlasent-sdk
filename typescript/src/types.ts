@@ -945,8 +945,11 @@ export interface ApiKeySelfResponse {
    * when the key is unrestricted.
    */
   allowedCidrs: string[] | null;
-  /** Server-enforced per-minute rate limit for this key. */
-  rateLimitPerMinute: number;
+  /**
+   * The key's stored per-minute rate limit, or `null` when none is set.
+   * Enforced limits are per plan; read them from {@link rateLimit}.
+   */
+  rateLimitPerMinute: number | null;
   /** Client IP as the server observed it (first hop of X-Forwarded-For). */
   clientIp: string | null;
   /** Server-stored expiry; `null` means the key does not auto-expire. */

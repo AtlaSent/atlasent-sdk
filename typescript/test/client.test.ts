@@ -1268,6 +1268,37 @@ describe("keySelf()", () => {
     });
   });
 
+  it("accepts the runtime's body for a key with no stored rate limit", async () => {
+    // What atlasent-api's v1-api-key-self returns: rate_limit_per_minute is
+    // null rather than a made-up number, and organization_id rides along.
+    const body = {
+        key_id: "0f0e0d0c-0000-4000-8000-0000000000b1",
+        org_id: "0f0e0d0c-0000-4000-8000-0000000000a1",
+        organization_id: "0f0e0d0c-0000-4000-8000-0000000000a1",
+        environment: "test",
+        scopes: ["evaluate:write", "verify:execute"],
+        allowed_cidrs: null,
+        rate_limit_per_minute: null,
+        client_ip: "203.0.113.5",
+        expires_at: null,
+    };
+    const client = makeClient(mockFetch(() => jsonResponse(body)));
+    const result = await client.keySelf();
+    expect(result.rateLimitPerMinute).toBeNull();
+    expect(result.orgId).toBe(body.org_id);
+    expect(result.allowedCidrs).toBeNull();
+    expect(result.expiresAt).toBeNull();
+  });
+
+  it("reads a missing or non-numeric rate limit as null", async () => {
+    for (const rate of [undefined, "60", true]) {
+      const client = makeClient(
+        mockFetch(() => jsonResponse({ key_id: "k", org_id: "o", environment: "test", rate_limit_per_minute: rate })),
+      );
+      expect((await client.keySelf()).rateLimitPerMinute).toBeNull();
+    }
+  });
+
   it("defaults allowed_cidrs to null and expires_at to null when absent", async () => {
     const fetchImpl = mockFetch(() =>
       jsonResponse({

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed: `key_self()` accepts a key with no stored rate limit (contract-conforming)
+
+`GET /v1-api-key-self` is now served by the runtime (atlasent-api#4632); before
+that it did not exist and `key_self()` always failed. The runtime reports
+`rate_limit_per_minute` as `null` when the key has no stored limit, which made
+`ApiKeySelfResult` fail validation. The field is now `int | None`; enforced
+limits are per plan and are on `rate_limit`. The contract schema was widened
+first.
+
 ### Changed: key-set verification matches atlasent-api#4640 (fail closed, unreleased surface)
 
 The key-set path of `verify_permit_v4()` (added below, not yet released) now
