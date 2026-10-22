@@ -274,3 +274,38 @@ The evidence log was checked against five more, and each made it fail:
   If it returns no `approval_request_id`, there is nothing to resume.
 - PaymentIntents with more than one charge: only `latest_charge` is used.
 - Account credits (see the note at the top).
+
+# Refund control hardening (2026-10-22)
+
+The adapter now refuses missing/malformed charge amounts or dispute state,
+inconsistent currency, a provider response for another payment, incomplete
+refund-history reads, and existing pending/requires-action/unknown refunds.
+The history read follows every page (bounded at 10,000 records, then refuses)
+and runs again immediately before execution, including approval resumption.
+Custom StripeApi implementations must implement listRefunds; a missing method
+fails closed. Restricted keys need Refunds read as well as write.
+
+The result's legacy refunded=true means Stripe accepted the request.
+Use completion (succeeded, pending, requires_action) for its observed status.
+Decision evidence now includes processor_status. Neither acceptance nor an
+authorization proves final customer receipt; use authenticated events/readback.
+
+This remains a demo adapter, not the complete refund-controls.v1 product.
+It does not yet collect customer/order ownership, line-item tax/discount
+allocation, credits outside Stripe, policy-specific return/service evidence,
+budget reservations or a durable business-request identity across new calls.
+A new guardedStripeRefund call still creates a new gateRef; do not retry an
+uncertain outcome as a new operation. The final read reduces races but is not
+an atomic reservation against other refund paths. JsonFileLedger is local
+demo storage. Dashboard refunds are detected by the alarm, not prevented.
+
+The existing demo uses finance.payment.authorize; the Action Catalog uses
+customer.refund.issue. This change intentionally does not rename either or
+invalidate existing policy/approval bindings. A production adapter must target
+the customer's actual installed action and prove its gate flags and evidence.
+
+The detailed control profile is in the console's Issue refund catalog entry.
+Its review-only policy builder lives in atlasent-api at
+examples/fake-store-refunds/control-policy-builder.ts. That template never
+allows, and is not silently installed by this adapter.
+

@@ -194,6 +194,10 @@ export class SimStripe implements StripeApi {
     return p ? (JSON.parse(JSON.stringify(p)) as StripePaymentIntent) : null;
   }
 
+  async listRefunds(id: string): Promise<StripeRefund[]> {
+    return structuredClone(this.events.filter(r => r.payment_intent === id));
+  }
+
   private record(pi: string, amount: number, metadata: Record<string, string>): StripeRefund {
     const p = this.pis.get(pi)!;
     p.latest_charge!.amount_refunded += amount;
@@ -215,3 +219,4 @@ export class SimStripe implements StripeApi {
     return this.record(pi, amount, {});
   }
 }
+
