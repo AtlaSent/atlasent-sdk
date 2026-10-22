@@ -52,6 +52,22 @@ export function deriveStripeRefundFacts(
   now: Date,
 ): StripeRefundFacts {
   const charge = pi.latest_charge;
+  // Provider data is an external trust boundary. Missing values are unknown,
+  // not zero or false; NaN must never bypass a remaining-balance comparison.
+  if (!Number.isFinite(now.getTime())) throw new Error("invalid observation time");
+  if (typeof pi.id !== "string" || !/^pi_[A-Za-z0-9]+$/.test(pi.id) ||
+      typeof pi.currency !== "string" || !/^[a-zA-Z]{3}$/.test(pi.currency)) {
+    throw new Error("malformed payment identity or currency");
+  }
+  if (charge !== null && (typeof charge !== "object" ||
+      typeof charge.id !== "string" || !/^ch_[A-Za-z0-9]+$/.test(charge.id) ||
+      typeof charge.disputed !== "boolean" ||
+      typeof charge.currency !== "string" || charge.currency.toUpperCase() !== pi.currency.toUpperCase() ||
+      !Number.isSafeInteger(charge.amount_captured) || charge.amount_captured < 0 ||
+      !Number.isSafeInteger(charge.amount_refunded) || charge.amount_refunded < 0 ||
+      charge.amount_refunded > charge.amount_captured)) {
+    throw new Error("incomplete or inconsistent charge facts");
+  }
   const refundable = charge ? Math.max(0, charge.amount_captured - charge.amount_refunded) : 0;
 
   let days: number | undefined;
@@ -99,3 +115,4 @@ export function centsToMoney(cents: number): string {
   if (!Number.isSafeInteger(cents) || cents < 0) throw new RangeError(`not a cent amount: ${cents}`);
   return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
 }
+

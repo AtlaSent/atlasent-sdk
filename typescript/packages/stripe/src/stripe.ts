@@ -48,6 +48,8 @@ export interface CreateRefundInput {
 /** What the guard needs from Stripe. Tests substitute a fake. */
 export interface StripeApi {
   getPaymentIntent(id: string): Promise<StripePaymentIntent | null>;
+  /** Complete refund history for this payment; throw if pagination is incomplete. */
+  listRefunds(paymentIntentId: string): Promise<StripeRefund[]>;
   /** `idempotencyKey` makes a retried call return the first refund instead of creating a second. */
   createRefund(input: CreateRefundInput, idempotencyKey: string): Promise<StripeRefund>;
 }
@@ -111,6 +113,33 @@ export function createStripeClient(opts: StripeClientOptions): StripeApi {
   }
 
   return {
+    async listRefunds(paymentIntentId) {
+      const pi = assertPaymentIntentId(paymentIntentId);
+      const refunds: StripeRefund[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      for (let page = 0; page < 100; page++) {
+        const query = new URLSearchParams({ payment_intent: pi, limit: "100" });
+        if (cursor) query.set("starting_after", cursor);
+        const res = await doFetch(`${base}/v1/refunds?${query}`, {
+          headers: headers(), signal: AbortSignal.timeout(timeoutMs),
+        });
+        const body = await parse<{ data: StripeRefund[]; has_more: boolean }>(res);
+        if (!Array.isArray(body.data) || typeof body.has_more !== "boolean") throw new StripeApiError("incomplete refund history");
+        for (const refund of body.data) {
+          if (typeof refund?.id !== "string" || !/^re_[A-Za-z0-9]+$/.test(refund.id) || seen.has(refund.id)) {
+            throw new StripeApiError("invalid or repeated refund history entry");
+          }
+          seen.add(refund.id);
+          refunds.push(refund);
+        }
+        if (!body.has_more) return refunds;
+        const last = body.data.at(-1);
+        if (!last) throw new StripeApiError("refund history pagination made no progress");
+        cursor = last.id;
+      }
+      throw new StripeApiError("refund history exceeds pagination limit; refusing incomplete evidence");
+    },
     async getPaymentIntent(id) {
       const pi = assertPaymentIntentId(id);
       const res = await doFetch(`${base}/v1/payment_intents/${pi}?expand%5B%5D=latest_charge`, {
@@ -131,3 +160,4 @@ export function createStripeClient(opts: StripeClientOptions): StripeApi {
     },
   };
 }
+

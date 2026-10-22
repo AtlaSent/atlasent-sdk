@@ -34,6 +34,8 @@ export interface RefundDecisionRecord {
   /** AtlaSent's audit reference for the evaluation, when it got that far. */
   audit_hash: string | null;
   refund_id: string | null;
+  /** Provider status at submission. A legacy outcome of refunded means accepted, not settled. */
+  processor_status?: string | null;
   order_status: string | null;
   days_since_delivery: number | null;
   /** The approval request behind an escalation, or behind a refund a manager approved. Absent in records written before approvals. */
@@ -48,3 +50,4 @@ export function outcomeOf(refunded: boolean, decision: string): RefundOutcome {
   if (decision === "invalid_request") return "refused";
   return "stopped";
 }
+

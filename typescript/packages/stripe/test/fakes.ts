@@ -170,6 +170,10 @@ export class FakeStripe implements StripeApi {
   refunds: { input: CreateRefundInput; key: string }[] = [];
   private byKey = new Map<string, StripeRefund>();
   reads = 0;
+  existingRefunds: StripeRefund[] = [];
+  async listRefunds(id: string): Promise<StripeRefund[]> {
+    return structuredClone([...this.existingRefunds, ...this.byKey.values()].filter(r => r.payment_intent === id));
+  }
   failGet = false;
   failRefund = false;
   refundStatus = "succeeded";
@@ -228,3 +232,4 @@ export function demoPayments() {
     } as Record<string, DeliveryFacts>,
   };
 }
+

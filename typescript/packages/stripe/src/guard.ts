@@ -100,7 +100,9 @@ export interface StripeRefundDenial {
 }
 
 export interface StripeRefundSuccess {
+  /** Legacy flag means accepted by Stripe, not necessarily completed. Read completion. */
   refunded: true;
+  completion: "succeeded" | "pending" | "requires_action";
   refund: StripeRefund;
   amountCents: number;
   gateRef: string;
@@ -161,6 +163,8 @@ function bookkeepingProblem(f: StripeRefundFacts, amountCents: number): string |
 function stillSupports(current: StripeRefundFacts | null, snapshot: StripeRefundSnapshot, orderStatus: string): boolean {
   return (
     current !== null &&
+    current.payment_intent === snapshot.payment_intent &&
+    current.currency === snapshot.currency &&
     current.payment_succeeded &&
     !current.disputed &&
     current.charge === snapshot.charge &&
@@ -178,6 +182,24 @@ async function readFacts(
 ): Promise<StripeRefundFacts | null> {
   const pi = await stripe.getPaymentIntent(piId);
   if (pi === null) return null;
+  if (pi.id !== piId) throw new Error("provider returned a different payment");
+  const refunds = await stripe.listRefunds(piId);
+  let completedRefundCents = 0;
+  for (const refund of refunds) {
+    if (refund.payment_intent !== piId || refund.charge !== pi.latest_charge?.id ||
+        typeof refund.currency !== "string" || refund.currency.toUpperCase() !== pi.currency.toUpperCase() ||
+        !Number.isSafeInteger(refund.amount) || refund.amount <= 0) {
+      throw new Error("refund history does not match the payment");
+    }
+    if (!["succeeded", "failed", "canceled"].includes(refund.status)) {
+      throw new Error("an existing refund is pending, requires action, or has an unknown status; reconcile it before another refund");
+    }
+    if (refund.status === "succeeded") completedRefundCents += refund.amount;
+    if (!Number.isSafeInteger(completedRefundCents)) throw new Error("refund history amount is out of range");
+  }
+  if (completedRefundCents > (pi.latest_charge?.amount_refunded ?? 0)) {
+    throw new Error("refund history and charge balance disagree; reconcile before another refund");
+  }
   const raw = pi.metadata?.[options.orderRefKey ?? "order_id"];
   const orderRef = typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
   const delivery = orderRef === null ? null : await options.delivery.getDeliveryFacts(orderRef);
@@ -222,6 +244,7 @@ async function emitDecision<T extends StripeRefundResult>(
     reason: approval?.reason ?? (result.refunded ? "within policy" : result.reason),
     audit_hash: result.auditHash || null,
     refund_id: result.refunded ? result.refund.id : null,
+    processor_status: result.refunded ? result.refund.status : null,
     order_status: facts?.order_status ?? null,
     days_since_delivery: facts?.days_since_delivery ?? null,
     approval_request_id: approvalRequestId ?? null,
@@ -399,6 +422,10 @@ async function decideStripeRefund(
   if (!ACCEPTED_REFUND_STATUSES.has(refund.status)) {
     return abort("error", `Stripe returned the refund as ${refund.status}`);
   }
+  if (refund.payment_intent !== snapshot.payment_intent || refund.charge !== snapshot.charge ||
+      refund.amount !== snapshot.amount_cents || refund.currency?.toUpperCase() !== snapshot.currency) {
+    return abort("error", "Stripe returned a refund that does not match the authorized action; reconcile before retrying");
+  }
 
   let ledgerWarning: string | undefined;
   try {
@@ -409,6 +436,7 @@ async function decideStripeRefund(
 
   return {
     refunded: true,
+    completion: refund.status as StripeRefundSuccess["completion"],
     refund,
     amountCents,
     gateRef,
@@ -605,6 +633,10 @@ export async function resumeApprovedStripeRefund(
   if (!ACCEPTED_REFUND_STATUSES.has(refund.status)) {
     return abort("error", `Stripe returned the refund as ${refund.status}`);
   }
+  if (refund.payment_intent !== snap.payment_intent || refund.charge !== snap.charge ||
+      refund.amount !== snap.amount_cents || refund.currency?.toUpperCase() !== snap.currency) {
+    return abort("error", "Stripe returned a refund that does not match the approved action; reconcile before retrying");
+  }
   let ledgerWarning: string | undefined;
   try {
     await options.ledger.recordExecuted(gateRef, refund.id);
@@ -613,8 +645,9 @@ export async function resumeApprovedStripeRefund(
   }
   await close("refunded", refund.id);
   return finish(
-    { refunded: true, refund, amountCents: p.amount_cents, gateRef, auditHash: "", digest: p.digest, facts, ...(ledgerWarning ? { ledgerWarning } : {}) },
+    { refunded: true, completion: refund.status as StripeRefundSuccess["completion"], refund, amountCents: p.amount_cents, gateRef, auditHash: "", digest: p.digest, facts, ...(ledgerWarning ? { ledgerWarning } : {}) },
     "allow_after_approval",
     "approved by a manager",
   );
 }
+
