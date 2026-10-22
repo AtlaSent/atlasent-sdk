@@ -163,6 +163,9 @@ export async function recordRefundEvent(
   }
   const id = entry.refund_id ?? entry.matched_refund_id;
   if (id !== undefined && id !== refund.id) return { recorded: false, reason: "the entry accounts for another refund" };
+  // Only refund.created (after the alarm's claim) can establish which refund an
+  // entry accounts for; a lifecycle event for an unknown refund id is not one.
+  if (id === undefined && ev.type !== "refund.created") return { recorded: false, reason: "no refund is established for this entry yet" };
   await ledger.recordObservation(gateRef, { source: "event", event_id: ev.eventId, refund_id: refund.id, status: refund.status, at: at.toISOString() });
   if (entry.submission?.state === "submitting" || entry.submission?.state === "unconfirmed") {
     await ledger.recordSubmission(gateRef, { state: "accepted", at: at.toISOString(), detail: `confirmed by event ${ev.eventId}: ${refund.status}` });

@@ -198,6 +198,28 @@ function bindingExtras(actionType: RefundActionType, businessRequestId: string |
   };
 }
 
+/**
+ * After a lost response: if a verified event (or readback) already confirmed the
+ * submission, return the matching refund read back from Stripe. Never guesses.
+ */
+async function confirmedMeanwhile(
+  stripe: StripeApi,
+  ledger: PermitLedger,
+  gateRef: string,
+  snapshot: StripeRefundSnapshot,
+): Promise<StripeRefund | null> {
+  try {
+    if ((await ledger.get(gateRef))?.submission?.state !== "accepted") return null;
+    const tagged = (await stripe.listRefunds(snapshot.payment_intent)).filter((r) => r.metadata?.atlasent_gate_ref === gateRef);
+    const r = tagged.length === 1 ? tagged[0]! : null;
+    if (r === null || !ACCEPTED_REFUND_STATUSES.has(r.status) || r.amount !== snapshot.amount_cents ||
+        r.charge !== snapshot.charge || r.currency?.toUpperCase() !== snapshot.currency) return null;
+    return r;
+  } catch {
+    return null;
+  }
+}
+
 type SubmissionOutcome =
   | { kind: "accepted"; refund: StripeRefund }
   /** Stripe answered and did not create a matching, live refund. */
@@ -255,7 +277,8 @@ async function submitRefund(
     }
     const reason = `the refund request's outcome is unknown (${errorText(err)}); Stripe may have created it. Reconcile with reconcileStripeRefund; do not retry as a new request`;
     await settle("unconfirmed", errorText(err));
-    return { kind: "unconfirmed", reason };
+    const confirmed = await confirmedMeanwhile(stripe, ledger, gateRef, snapshot);
+    return confirmed ? { kind: "accepted", refund: confirmed } : { kind: "unconfirmed", reason };
   }
   if (typeof refund?.id === "string" && typeof refund.status === "string") {
     try {
@@ -270,8 +293,13 @@ async function submitRefund(
   }
   if (refund.payment_intent !== snapshot.payment_intent || refund.charge !== snapshot.charge ||
       refund.amount !== snapshot.amount_cents || refund.currency?.toUpperCase() !== snapshot.currency) {
-    await settle("rejected", "response does not match the authorization");
-    return { kind: "rejected", reason: "Stripe returned a refund that does not match the authorized action; reconcile before retrying" };
+    // A live refund exists that is not the authorized one. Not rejected: the entry
+    // stays open and the payment reserved, and the alarm flags the refund itself.
+    await settle("unconfirmed", `mismatch: Stripe returned ${refund.id}, which does not match the authorization`);
+    return {
+      kind: "unconfirmed",
+      reason: `Stripe returned refund ${refund.id}, which does not match the authorized action; treat it as an incident and reconcile before retrying`,
+    };
   }
   await settle("accepted", refund.status);
   return { kind: "accepted", refund };

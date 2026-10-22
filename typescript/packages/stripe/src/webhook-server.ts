@@ -67,16 +67,24 @@ export function createStripeWebhookHandler(deps: StripeWebhookDeps): RequestList
     }
     if (ev === null) return send(res, 200, { ignored: true });
     const refund = ev.refund;
-    const verdict = await auditStripeRefund(refund, deps.ledger);
-    if (verdict.verdict !== "unauthorized") {
+    const record = async (): Promise<boolean> => {
       try {
         await recordRefundEvent(ev, deps.ledger, deps.now ? deps.now() : new Date());
+        return true;
       } catch (err) {
         // The outcome stays unrecorded and readback (reconcileStripeRefund) still finds it; never a 2xx that hides it.
         console.error(JSON.stringify({ warning: "refund_outcome_not_recorded", eventId: ev.eventId, error: err instanceof Error ? err.message : String(err) }));
-        return send(res, 500, { error: "outcome not recorded" });
+        return false;
       }
+    };
+    // Lifecycle events record an outcome only. The alarm runs once per refund,
+    // on refund.created, so an updated refund is never alerted or counted twice.
+    if (ev.type !== "refund.created") {
+      if (!(await record())) return send(res, 500, { error: "outcome not recorded" });
+      return send(res, 200, { recorded: true });
     }
+    const verdict = await auditStripeRefund(refund, deps.ledger);
+    if (verdict.verdict !== "unauthorized" && !(await record())) return send(res, 500, { error: "outcome not recorded" });
     if (verdict.verdict === "unauthorized") await deps.onUnauthorizedRefund?.(verdict);
     try {
       await deps.onVerdict?.(verdict, refund);

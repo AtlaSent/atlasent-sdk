@@ -321,6 +321,32 @@ describe("authenticated refund outcome events", () => {
   });
 });
 
+describe("review findings (PR #609)", () => {
+  it("a verified event that confirms the refund before a late local error is not regressed to unconfirmed", async () => {
+    const s = setup();
+    const original = s.stripe.createRefund.bind(s.stripe);
+    s.stripe.createRefund = async (input, key) => {
+      const created = await original(input, key);
+      // refund.created arrives (alarm claim, then outcome) before the response is lost
+      await auditStripeRefund(created, s.ledger);
+      await recordRefundEvent({ eventId: "evt_early", type: "refund.created", refund: created }, s.ledger, NOW);
+      throw new Error("socket hang up");
+    };
+    const r = await s.refund("pi_1001", 1899, BR);
+    expect(r).toMatchObject({ refunded: true, completion: "succeeded" });
+    expect((await s.ledger.get(r.gateRef))?.submission?.state).toBe("accepted");
+  });
+
+  it("a lifecycle event for a refund the entry does not yet account for records nothing", async () => {
+    const s = setup();
+    s.stripe.failRefund = true;
+    const r = await s.refund("pi_1001", 1899, BR);
+    const forged: StripeRefund = { id: "re_x", status: "succeeded", amount: 1899, currency: "usd", charge: "ch_1001", payment_intent: "pi_1001", metadata: { atlasent_gate_ref: r.gateRef } };
+    expect((await recordRefundEvent({ eventId: "evt_x", type: "refund.updated", refund: forged }, s.ledger, NOW)).recorded).toBe(false);
+    expect((await s.ledger.get(r.gateRef))?.submission?.state).toBe("unconfirmed");
+  });
+});
+
 describe("explicit action binding", () => {
   it("defaults to finance.payment.authorize with the unchanged v1 digest", async () => {
     const s = setup();

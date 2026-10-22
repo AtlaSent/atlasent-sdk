@@ -217,6 +217,9 @@ export class InMemoryLedger implements PermitLedger {
   async recordSubmission(gateRef: string, submission: RefundSubmission): Promise<void> {
     const e = this.entries.get(gateRef);
     if (!e) throw new Error(`no ledger entry ${gateRef}`);
+    // Confirmed is final: a late local error (a lost response) must not regress
+    // what a readback or verified event already established.
+    if (e.submission?.state === "accepted" && submission.state !== "accepted") return;
     const attempts = (e.submission?.attempts ?? 0) + (submission.state === "submitting" ? 1 : 0);
     const metadata = submission.metadata ?? e.submission?.metadata;
     e.submission = { ...submission, attempts, ...(metadata ? { metadata: { ...metadata } } : {}) };

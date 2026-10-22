@@ -377,7 +377,16 @@ Outside those limits it stays unconfirmed for an operator.
 
 Signature-verified `refund.created`/`refund.updated`/`refund.failed` events are
 recorded once per event id as `event` observations, only for a refund that
-matches its entry. Observations keep every status in arrival order;
+matches its entry. Only `refund.created` runs the alarm, so a refund made
+outside the gate is alerted and counted once. A lifecycle event records
+nothing until `refund.created` (or the submission response, or a readback) has
+established which refund the entry accounts for. A confirmed submission is
+never regressed by a late local error.
+
+If Stripe answers with a live refund that does not match the authorization
+(another amount, charge, payment or currency), the entry is NOT cancelled: it
+stays `unconfirmed` with the payment reserved, the alarm flags that refund, and
+`reconcileStripeRefund` reports `mismatch`. Treat it as an incident. Observations keep every status in arrival order;
 `latestProviderStatus` returns the last one. Stripe can report a refund as
 failed after it succeeded, so read the observations, not one flag.
 
