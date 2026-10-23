@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "refund": "tsx src/cli.ts",
     "webhook": "tsx src/webhook-server.ts",
-    "seed-test-payments": "tsx src/seed.ts"
+    "seed-test-payments": "tsx src/seed.ts",
+    "acceptance": "tsx src/acceptance.ts"
   },
   "repository": {
     "type": "git",
