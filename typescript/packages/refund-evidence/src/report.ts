@@ -176,7 +176,8 @@ export function buildEvidenceReport(input: EvidenceReportInput): EvidenceReport 
     unconfirmed: total(by(["unconfirmed"])),
     outsideGate: total(outsideRows),
     alarmAccountedFor: alarms.filter((a) => a.verdict === "authorized").length,
-    approvedByManager: decisions.filter(approvedByManager).length,
+    // Counted inside the Refunded tile, so only refunds that tile counts.
+    approvedByManager: decisions.filter((d) => approvedByManager(d) && !acceptedNotCompleted(d)).length,
     decisions: decisions.length,
   };
 

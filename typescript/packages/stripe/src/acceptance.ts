@@ -76,10 +76,16 @@ const brief = (r: StripeRefundResult) =>
     ? { refunded: true, completion: r.completion, refund_id: r.refund.id, gate_ref: r.gateRef }
     : { refunded: false, decision: r.decision, reason: r.reason, gate_ref: r.gateRef, ...(r.denyCode ? { deny_code: r.denyCode } : {}) };
 
-/** A refund that never reached allow, so the contract under test was not exercised. */
+/**
+ * A refund the policy did not allow, so the contract under test was not exercised.
+ * verify_failed is NOT here: policy allowed, and verification is part of the contract.
+ */
 function notAllowed(r: StripeRefundResult): boolean {
-  return !r.refunded && ["deny", "hold", "escalate", "verify_failed"].includes(r.decision);
+  return !r.refunded && ["deny", "hold", "escalate"].includes(r.decision);
 }
+
+/** Stripe accepted the refund (requires_action included); completion is a separate fact. */
+const ACCEPTED = new Set(["succeeded", "pending", "requires_action"]);
 
 async function tagged(stripe: StripeApi, pi: string, gateRef: string): Promise<StripeRefund[]> {
   return (await stripe.listRefunds(pi)).filter((r) => r.metadata?.atlasent_gate_ref === gateRef);
@@ -117,7 +123,7 @@ export async function runAcceptance(deps: AcceptanceDeps): Promise<AcceptanceCas
     }
   } else {
     const rb = r1.refunded ? await reconcileStripeRefund(deps.stripe, r1.gateRef, opts) : null;
-    const okA1 = r1.refunded && rb !== null && (rb.state === "succeeded" || rb.state === "pending") && rb.refundId === r1.refund.id;
+    const okA1 = r1.refunded && rb !== null && ACCEPTED.has(rb.state) && rb.refundId === r1.refund.id;
     add({
       id: "A1",
       title: "allowed refund, read back",
@@ -162,7 +168,7 @@ export async function runAcceptance(deps: AcceptanceDeps): Promise<AcceptanceCas
     const okA5 =
       !r5.refunded && r5.decision === "unconfirmed" &&
       !other.refunded && other.decision === "in_progress" &&
-      (rb5.state === "succeeded" || rb5.state === "pending") &&
+      ACCEPTED.has(rb5.state) &&
       !again.refunded && again.decision === "duplicate_request" &&
       t5.length === 1;
     add({
@@ -186,7 +192,7 @@ export async function runAcceptance(deps: AcceptanceDeps): Promise<AcceptanceCas
     const okA6 =
       !r6.refunded && r6.decision === "unconfirmed" &&
       plain.state === "unconfirmed" &&
-      resent.resubmitted === true && (resent.state === "succeeded" || resent.state === "pending") &&
+      resent.resubmitted === true && ACCEPTED.has(resent.state) &&
       t6.length === 1;
     add({
       id: "A6",

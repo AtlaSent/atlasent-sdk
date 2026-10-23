@@ -53,4 +53,18 @@ describe("refund execution acceptance runner", () => {
     const cases = await runAcceptance(d);
     expect(cases.find((c) => c.id === "A2")?.verdict).toBe("fail");
   });
+
+  it("a permit that fails verification is a failed case, not a blocked one", async () => {
+    const { d } = deps({ verifyValid: false });
+    const cases = await runAcceptance(d);
+    expect(cases.find((c) => c.id === "A1")?.verdict).toBe("fail");
+    expect(summarize(cases).blocked).toBe(0);
+  });
+
+  it("a refund Stripe returns as requires_action is accepted, not failed", async () => {
+    const { d, stripe } = deps();
+    stripe.refundStatus = "requires_action";
+    const cases = await runAcceptance(d);
+    expect(cases.map((c) => c.verdict)).toEqual(["pass", "pass", "pass", "pass", "pass", "pass"]);
+  });
 });

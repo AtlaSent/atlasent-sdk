@@ -217,6 +217,13 @@ describe("accepted is not completed", () => {
     expect(rows.find((l) => l.includes(",g-b,"))).toMatch(/,pending$/);
   });
 
+  it("counts a manager approval only for a refund the Refunded tile counts", () => {
+    const approved = (status: string, gate: string) => ({ ...stripe(status, gate), decision: "allow_after_approval", approval_request_id: `apr-${gate}` });
+    const r = build([approved("pending", "g-p"), approved("succeeded", "g-s")], []);
+    expect(r.summary.refunded.count).toBe(1);
+    expect(r.summary.approvedByManager).toBe(1);
+  });
+
   it("shows no pending tile when nothing is pending", () => {
     expect(build([stripe("succeeded", "g-a")], []).html).not.toContain("Accepted, not yet completed");
   });
