@@ -67,4 +67,14 @@ describe("refund execution acceptance runner", () => {
     const cases = await runAcceptance(d);
     expect(cases.map((c) => c.verdict)).toEqual(["pass", "pass", "pass", "pass", "pass", "pass"]);
   });
+
+  it("two simultaneous refunds that are both refused in_progress fail A4, never count as blocked", async () => {
+    const { d, stripe } = deps();
+    // A defective ledger that refuses every reservation as already in flight.
+    const ledger = d.ledger as InMemoryLedger;
+    ledger.reserve = async (r) => ({ reserved: false, conflict: "payment_in_flight", gateRef: r.gate_ref });
+    const cases = await runAcceptance(d);
+    expect(cases.find((c) => c.id === "A4")?.verdict).toBe("fail");
+    expect(stripe.refunds).toHaveLength(0);
+  });
 });

@@ -148,7 +148,9 @@ export async function runAcceptance(deps: AcceptanceDeps): Promise<AcceptanceCas
   const [x, y] = await Promise.all([guard(deps.stripe, pi4, 1000, brid("a4-x")), guard(deps.stripe, pi4, 1000, brid("a4-y"))]);
   const inProgress = [x, y].filter((r) => !r.refunded && r.decision === "in_progress").length;
   const refundsA4 = (await deps.stripe.listRefunds(pi4)).length;
-  if ([x, y].every((r) => notAllowed(r) || (!r.refunded && r.decision === "in_progress"))) {
+  // Blocked only when policy refused the request that ran; two refusals as
+  // in_progress mean nothing ran at all, which is a defect, not a precondition.
+  if ([x, y].some(notAllowed) && [x, y].every((r) => notAllowed(r) || (!r.refunded && r.decision === "in_progress"))) {
     add({ id: "A4", title: "simultaneous refunds on one payment", verdict: "blocked", detail: "the request that ran was not allowed by policy", evidence: { payment_intent: pi4, results: [brief(x), brief(y)] } });
   } else {
     const okA4 = inProgress === 1 && refundsA4 === 1;
