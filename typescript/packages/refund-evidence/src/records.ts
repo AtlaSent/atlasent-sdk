@@ -37,6 +37,8 @@ export interface RefundDecisionRecord {
   days_since_delivery: number | null;
   /** The approval request behind an escalation, or behind a refund a manager approved. Absent in older records. */
   approval_request_id?: string | null;
+  /** The processor's status for a refunded outcome (Stripe: succeeded / pending / requires_action). Absent in older and Shopify records. */
+  processor_status?: string | null;
 }
 
 export interface RefundAlarmRecord {
@@ -72,7 +74,8 @@ export function asRecord(v: unknown): EvidenceRecord | null {
       strOrNull(r.order_ref) && numOrNull(r.amount_cents) && strOrNull(r.currency) && OUTCOMES.has(r.outcome as string) &&
       isStr(r.decision) && strOrNull(r.deny_code) && isStr(r.reason) && strOrNull(r.audit_hash) && strOrNull(r.refund_id) &&
       strOrNull(r.order_status) && numOrNull(r.days_since_delivery) &&
-      (r.approval_request_id === undefined || strOrNull(r.approval_request_id));
+      (r.approval_request_id === undefined || strOrNull(r.approval_request_id)) &&
+      (r.processor_status === undefined || strOrNull(r.processor_status));
     return ok ? (r as unknown as RefundDecisionRecord) : null;
   }
   if (r.schema === REFUND_ALARM_SCHEMA) {

@@ -401,6 +401,36 @@ evaluate and verify both use it and the digest is binding v2 (also binds the
 business request id). An escalated refund resumes only under the action it was
 escalated for. The adapter never maps one action onto the other.
 
+## Running the acceptance cases (Stripe test mode)
+
+`npm run acceptance` runs six cases against a real Stripe test account and a
+real AtlaSent org. Each case uses a fresh test payment (`pm_card_visa`, no real
+money), labelled `metadata.atlasent_acceptance_run`:
+
+| Case | Contract |
+|---|---|
+| A1 | An allowed refund is issued and read back as one matching refund |
+| A2 | A retry of the same business request is answered from the ledger; still one refund |
+| A3 | The same business request id with another amount is refused |
+| A4 | Two simultaneous refunds on one payment: one runs, one is refused `in_progress` |
+| A5 | Stripe creates the refund but the response is lost: `unconfirmed`. A second refund on the payment is refused, readback confirms it, and a retry is `duplicate_request` |
+| A6 | The request never reaches Stripe: `unconfirmed`. Readback finds nothing, and a resubmission with the same key creates exactly one refund |
+
+```sh
+STRIPE_SETUP_KEY=sk_test_... STRIPE_SECRET_KEY=rk_test_... \
+ATLASENT_API_KEY=... ATLASENT_BASE_URL=... ATLASENT_ENVIRONMENT=test \
+STRIPE_ACCEPTANCE_CONFIRM=test-mode npm run acceptance -- --out acceptance-out
+```
+
+- A5 and A6 inject one fault (a lost response) around the real client. Nothing else is simulated.
+- The run writes `acceptance-out/report.json` (`atlasent.refund_execution_acceptance.v1`), plus the ledger.
+- **Verdicts:** `pass`, `fail`, or `blocked`. `blocked` means the org's policy did not allow the refund, so the contract was not exercised. It never counts as `pass`.
+- **Exit code:** 0 when every case passes, 1 on any failure, 3 when something was blocked.
+- Live-mode keys are refused, and nothing is deleted.
+
+The runner's own logic is tested against the fakes (`test/acceptance.test.ts`).
+Those tests are not a test-mode run.
+
 ## Still not covered here
 
 - Order/customer ownership, return or service evidence, line-item
