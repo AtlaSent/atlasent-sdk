@@ -37,6 +37,8 @@ export interface EvidenceSummary {
   escalated: MoneyTotal;
   declined: MoneyTotal;
   stopped: MoneyTotal;
+  /** The processor accepted these refunds but reported them pending or requiring action: not yet completed. */
+  acceptedNotCompleted: MoneyTotal;
   /** Submitted, outcome not confirmed by the processor: neither refunded nor nothing refunded. */
   unconfirmed: MoneyTotal;
   outsideGate: MoneyTotal;
@@ -123,9 +125,19 @@ export const RULE_LABEL: Record<string, string> = {
   approval_unconfirmed: "Approved; refund outcome not yet confirmed",
 };
 
-/** The outcome as a reader says it: a manager's "no" is not the policy's. */
-export function outcomeText(d: Pick<RefundDecisionRecord, "outcome" | "deny_code">): string {
+/** Statuses in which the processor accepted a refund that has not completed. */
+const NOT_COMPLETED = new Set(["pending", "requires_action"]);
+
+/** A refunded outcome the processor accepted but had not completed when it was recorded. */
+export const acceptedNotCompleted = (d: Pick<RefundDecisionRecord, "outcome" | "processor_status">) =>
+  d.outcome === "refunded" && typeof d.processor_status === "string" && NOT_COMPLETED.has(d.processor_status);
+
+/** The outcome as a reader says it: a manager's "no" is not the policy's, and accepted is not completed. */
+export function outcomeText(d: Pick<RefundDecisionRecord, "outcome" | "deny_code" | "processor_status">): string {
   if (d.outcome === "denied" && d.deny_code?.startsWith("APPROVAL_")) return "Declined by a manager";
+  if (acceptedNotCompleted(d)) {
+    return d.processor_status === "pending" ? "Accepted by the processor, pending" : "Accepted by the processor, needs action";
+  }
   return OUTCOME_LABEL[d.outcome];
 }
 
@@ -156,7 +168,8 @@ export function buildEvidenceReport(input: EvidenceReportInput): EvidenceReport 
   const by = (o: RefundOutcome[]) => decisions.filter((d) => o.includes(d.outcome));
 
   const summary: EvidenceSummary = {
-    refunded: total(by(["refunded"])),
+    refunded: total(by(["refunded"]).filter((d) => !acceptedNotCompleted(d))),
+    acceptedNotCompleted: total(decisions.filter(acceptedNotCompleted)),
     escalated: total(by(["escalated", "held"])),
     declined: total(by(["denied", "refused"])),
     stopped: total(by(["stopped"])),
@@ -221,6 +234,7 @@ ${tile("Refunded", summary.refunded, `Within policy${summary.approvedByManager >
 ${tile("Sent to a manager", summary.escalated, "Over the automatic limit; the manager's decision, once made, is its own row below", "", true)}
 ${tile("Declined", summary.declined, "Outside policy, declined by a manager, or invalid; nothing refunded", "", true)}
 ${tile("Stopped", summary.stopped, "Could not complete safely; nothing refunded", "", true)}
+${summary.acceptedNotCompleted.count > 0 ? tile("Accepted, not yet completed", summary.acceptedNotCompleted, "The processor accepted these refunds but reported them pending or needing action. Check the processor before treating them as refunded", "alert") : ""}
 ${summary.unconfirmed.count > 0 ? tile("Outcome unconfirmed", summary.unconfirmed, "Submitted to the processor; whether the refund was created is not yet confirmed. Reconcile each one", "alert") : ""}
 ${tile("Refunds made outside the gate", summary.outsideGate, "Made in an admin or dashboard, or with another key", summary.outsideGate.count > 0 ? "alert" : "")}
 </div>
@@ -242,13 +256,14 @@ ${decisionRows || '<tr><td colspan="9">No decisions in this period.</td></tr>'}
 </body></html>
 `;
 
-  const header = ["type", "at", "system", "order_or_payment", "order_ref", "amount", "currency", "outcome", "rule", "reason", "requested_by", "audit_reference", "gate_reference", "refund_id", "approval_request_id"];
+  const header = ["type", "at", "system", "order_or_payment", "order_ref", "amount", "currency", "outcome", "rule", "reason", "requested_by", "audit_reference", "gate_reference", "refund_id", "approval_request_id", "processor_status"];
   const lines = [header.join(",")];
   for (const d of decisions) {
     lines.push(
       [
         "decision", d.at, d.system, d.target, d.order_ref, d.amount_cents === null ? null : (d.amount_cents / 100).toFixed(2), d.currency,
         outcomeText(d), ruleOf(d), d.reason, d.actor, d.audit_hash, d.gate_ref, d.refund_id, d.approval_request_id ?? null,
+        d.processor_status ?? null,
       ].map(csvCell).join(","),
     );
   }
@@ -256,7 +271,7 @@ ${decisionRows || '<tr><td colspan="9">No decisions in this period.</td></tr>'}
     lines.push(
       [
         "refund_outside_gate", a.at, a.system, a.target, null, a.amount_cents === null ? null : (a.amount_cents / 100).toFixed(2), a.currency,
-        "Made outside the gate", null, a.reason, null, null, a.gate_ref, a.refund_id, null,
+        "Made outside the gate", null, a.reason, null, null, a.gate_ref, a.refund_id, null, null,
       ].map(csvCell).join(","),
     );
   }

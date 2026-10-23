@@ -136,7 +136,7 @@ describe("hostile values", () => {
 describe("CSV", () => {
   it("one header, one row per decision and per refund outside the gate", () => {
     const lines = build([decision(), decision({ gate_ref: "g-2" })], [alarm(), alarm({ verdict: "authorized", refund_id: "re_2" })]).csv.trim().split("\n");
-    expect(lines[0]).toBe("type,at,system,order_or_payment,order_ref,amount,currency,outcome,rule,reason,requested_by,audit_reference,gate_reference,refund_id,approval_request_id");
+    expect(lines[0]).toBe("type,at,system,order_or_payment,order_ref,amount,currency,outcome,rule,reason,requested_by,audit_reference,gate_reference,refund_id,approval_request_id,processor_status");
     expect(lines).toHaveLength(4);
     expect(lines[1]).toContain("decision,2026-10-15T10:00:00.000Z,shopify,gid://shopify/Order/1001,#PPS-1001,18.99,USD,Refunded,Within policy");
     expect(lines[3]).toMatch(/^refund_outside_gate,/);
@@ -176,7 +176,7 @@ describe("manager approvals", () => {
     expect(r.html).not.toContain(">not evaluated<");
     expect(r.summary).toMatchObject({ approvedByManager: 1, refunded: { count: 1 }, declined: { count: 1 } });
     expect(r.html).toContain("1 of them approved by a manager");
-    expect(r.csv.split("\n")[1]).toMatch(/,apr-7$/);
+    expect(r.csv.split("\n")[1]).toMatch(/,apr-7,$/);
   });
 
   it("accepts records with or without approval_request_id, and rejects a malformed one", () => {
@@ -202,3 +202,27 @@ describe("unknown currency", () => {
     expect(formatMoney(2500, null)).toBe("25.00 (currency unknown)");
   });
 });
+
+describe("accepted is not completed", () => {
+  const stripe = (status: string | undefined, gate: string) =>
+    decision({ system: "stripe", gate_ref: gate, target: "pi_1", order_ref: "o1", ...(status === undefined ? {} : { processor_status: status }) });
+
+  it("keeps pending and requires_action refunds out of Refunded and shows them separately", () => {
+    const r = build([stripe("succeeded", "g-a"), stripe("pending", "g-b"), stripe("requires_action", "g-c"), stripe(undefined, "g-d")], []);
+    expect(r.summary.refunded.count).toBe(2); // succeeded, and a record that never carried a status
+    expect(r.summary.acceptedNotCompleted.count).toBe(2);
+    expect(r.html).toContain("Accepted, not yet completed");
+    const rows = r.csv.trim().split("\n");
+    expect(rows.find((l) => l.includes(",g-b,"))).toContain("Accepted by the processor, pending");
+    expect(rows.find((l) => l.includes(",g-b,"))).toMatch(/,pending$/);
+  });
+
+  it("shows no pending tile when nothing is pending", () => {
+    expect(build([stripe("succeeded", "g-a")], []).html).not.toContain("Accepted, not yet completed");
+  });
+
+  it("rejects a record whose processor_status is not a string", () => {
+    expect(parseLog(JSON.stringify({ ...stripe("pending", "g-x"), processor_status: 3 })).rejectedLines).toEqual([1]);
+  });
+});
+
