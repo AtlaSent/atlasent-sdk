@@ -1,0 +1,122 @@
+name: Stripe refund acceptance (test mode)
+
+# The six-case refund execution acceptance run (typescript/packages/stripe,
+# `npm run acceptance`, atlasent-api#4656) against Stripe TEST mode and the
+# AtlaSent STAGING runtime. Manual dispatch only; nothing runs on push or PR.
+#
+# Needs, on the `stripe-refund-acceptance` environment (names only; values are
+# never printed, and the job fails closed when any is missing):
+#   STRIPE_ACCEPTANCE_SETUP_KEY       secret  sk_test_... of a Stripe TEST account used only
+#                                             for this run (creates labelled test payments)
+#   STRIPE_ACCEPTANCE_REFUND_KEY      secret  rk_test_... of the same account: refunds write,
+#                                             payment intents read
+#   ATLASENT_REFUND_ACCEPTANCE_API_KEY secret runtime STAGING key (evaluate:write +
+#                                             verify:execute) of an authorized staging org whose
+#                                             finance.payment.authorize policy is the one under test
+#   ATLASENT_REFUND_ACCEPTANCE_BASE_URL var   https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1
+#
+# Guards before anything runs: both Stripe keys must be test-mode (the runner
+# refuses live keys too) and the AtlaSent base URL must be the staging runtime,
+# never production. A policy that does not allow is reported `blocked`, never
+# `pass`, and is never loosened to make the run pass.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type test-mode to create labelled Stripe TEST payments and refunds"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stripe-refund-acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: stripe-refund-acceptance
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+
+      - name: Guard keys and target
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          SETUP_KEY: ${{ secrets.STRIPE_ACCEPTANCE_SETUP_KEY }}
+          REFUND_KEY: ${{ secrets.STRIPE_ACCEPTANCE_REFUND_KEY }}
+          ATLASENT_KEY: ${{ secrets.ATLASENT_REFUND_ACCEPTANCE_API_KEY }}
+          BASE_URL: ${{ vars.ATLASENT_REFUND_ACCEPTANCE_BASE_URL }}
+        run: |
+          set -euo pipefail
+          [ "$CONFIRM" = "test-mode" ] || { echo "::error::type test-mode in the confirm input"; exit 2; }
+          missing=""
+          [ -n "$SETUP_KEY" ] || missing="$missing STRIPE_ACCEPTANCE_SETUP_KEY"
+          [ -n "$REFUND_KEY" ] || missing="$missing STRIPE_ACCEPTANCE_REFUND_KEY"
+          [ -n "$ATLASENT_KEY" ] || missing="$missing ATLASENT_REFUND_ACCEPTANCE_API_KEY"
+          [ -n "$BASE_URL" ] || missing="$missing ATLASENT_REFUND_ACCEPTANCE_BASE_URL(var)"
+          if [ -n "$missing" ]; then echo "::error::not configured on the stripe-refund-acceptance environment:$missing"; exit 2; fi
+          case "$SETUP_KEY" in sk_test_*) ;; *) echo "::error::STRIPE_ACCEPTANCE_SETUP_KEY is not a TEST secret key (sk_test_)"; exit 2 ;; esac
+          case "$REFUND_KEY" in sk_test_*|rk_test_*) ;; *) echo "::error::STRIPE_ACCEPTANCE_REFUND_KEY is not a TEST key"; exit 2 ;; esac
+          host="$(printf '%s' "$BASE_URL" | sed -E 's#^https://([^/]+).*#\1#')"
+          if [ "$host" != "lwnqpmnxpeyhpxvastku.supabase.co" ]; then
+            echo "::error::ATLASENT_REFUND_ACCEPTANCE_BASE_URL must be the staging runtime (lwnqpmnxpeyhpxvastku), got host $host"
+            exit 2
+          fi
+          echo "Stripe TEST mode; AtlaSent staging runtime."
+
+      - name: Build the core SDK the package links to
+        working-directory: typescript
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install dependencies
+        working-directory: typescript/packages/stripe
+        run: npm ci
+
+      - name: Run the six cases
+        working-directory: typescript/packages/stripe
+        env:
+          STRIPE_SETUP_KEY: ${{ secrets.STRIPE_ACCEPTANCE_SETUP_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_ACCEPTANCE_REFUND_KEY }}
+          ATLASENT_API_KEY: ${{ secrets.ATLASENT_REFUND_ACCEPTANCE_API_KEY }}
+          ATLASENT_BASE_URL: ${{ vars.ATLASENT_REFUND_ACCEPTANCE_BASE_URL }}
+          ATLASENT_ENVIRONMENT: test
+          STRIPE_ACCEPTANCE_CONFIRM: test-mode
+          STRIPE_ACCOUNT_LABEL: stripe-refund-acceptance
+          ADAPTER_REVISION: ${{ github.sha }}
+          ACCEPTANCE_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          set +e
+          npm run acceptance -- --out acceptance-out
+          code=$?
+          set -e
+          if [ -f acceptance-out/report.json ]; then
+            {
+              echo "### Stripe refund acceptance (test mode)"
+              echo "- exit code: $code (0 pass, 1 fail, 3 blocked, 2 refused)"
+              echo "- summary: \`$(jq -c '.summary' acceptance-out/report.json)\`; adapter: \`$(jq -r '.adapter_revision' acceptance-out/report.json)\`"
+              jq -r '.cases[] | "- \(.verdict | ascii_upcase) \(.id) \(.title): \(.detail)"' acceptance-out/report.json
+              echo "- not covered: $(jq -r '.not_covered' acceptance-out/report.json)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$code"
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stripe-refund-acceptance-report
+          path: |
+            typescript/packages/stripe/acceptance-out/report.json
+            typescript/packages/stripe/acceptance-out/ledger.json
+          if-no-files-found: warn
