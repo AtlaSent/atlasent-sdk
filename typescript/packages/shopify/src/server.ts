@@ -164,6 +164,9 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
     }
     try {
       const order = await admin.getOrder(orderId);
+      if (order !== null && order.id !== orderId) {
+        return send(res, 503, { error: "Shopify order identity mismatch", mode: "read_only" });
+      }
       // The order read is authenticated to the session's allowlisted shop.
       // Never accept shop, customer, policy, approval or refund facts from the caller.
       return send(res, 200, previewShopifyRefundOperation(order, amountCents, deps.now?.() ?? new Date()));
