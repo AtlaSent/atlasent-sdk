@@ -12,7 +12,8 @@
 import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 import { AtlaSentClient } from "@atlasent/sdk";
-import { createAdminClient, normalizeShopDomain, type ShopifyAdmin } from "./admin.js";
+import { createAdminClient, normalizeShopDomain, toOrderGid, type ShopifyAdmin } from "./admin.js";
+import { previewShopifyRefundOperation } from "./operations-preview.js";
 import { describeResult } from "./describe.js";
 import { moneyToCents } from "./facts.js";
 import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "./guard.js";
@@ -133,6 +134,47 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
     return send(res, 200, describeResult(result));
   }
 
+  /** Read-only first-value endpoint: no runtime evaluation, permit or refundCreate. */
+  async function handleOperationsPreview(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const who = authenticate(req, res);
+    if (who === null) return;
+    let body: { orderId?: unknown; amount?: unknown };
+    try {
+      body = JSON.parse((await readBody(req)).toString("utf8"));
+    } catch {
+      return send(res, 400, { error: "invalid JSON" });
+    }
+    if (typeof body.orderId !== "string" || typeof body.amount !== "string") {
+      return send(res, 400, { error: "orderId and amount strings are required" });
+    }
+    let orderId: string;
+    let amountCents: number;
+    try {
+      orderId = toOrderGid(body.orderId);
+      amountCents = moneyToCents(body.amount);
+      if (amountCents <= 0) throw new RangeError("amount must be positive");
+    } catch {
+      return send(res, 400, { error: "invalid order or refund amount" });
+    }
+    let admin: ShopifyAdmin;
+    try {
+      admin = await deps.adminFor(who.shop, who.token);
+    } catch {
+      return send(res, 503, { error: "Shopify connection unavailable", mode: "read_only" });
+    }
+    try {
+      const order = await admin.getOrder(orderId);
+      if (order !== null && order.id !== orderId) {
+        return send(res, 503, { error: "Shopify order identity mismatch", mode: "read_only" });
+      }
+      // The order read is authenticated to the session's allowlisted shop.
+      // Never accept shop, customer, policy, approval or refund facts from the caller.
+      return send(res, 200, previewShopifyRefundOperation(order, amountCents, deps.now?.() ?? new Date()));
+    } catch {
+      return send(res, 503, { error: "Shopify order facts unavailable", mode: "read_only" });
+    }
+  }
+
   async function handleRefund(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const who = authenticate(req, res);
     if (who === null) return;
@@ -224,7 +266,7 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
     const url = new URL(req.url ?? "/", "http://localhost");
     const route = `${req.method} ${url.pathname}`;
     let work: Promise<void>;
-    if (req.method === "OPTIONS" && (url.pathname === "/api/refunds" || url.pathname === "/api/refunds/resume")) {
+    if (req.method === "OPTIONS" && (url.pathname === "/api/refunds" || url.pathname === "/api/refunds/resume" || url.pathname === "/api/operations/refund-preview")) {
       res.writeHead(204, {
         "access-control-allow-origin": "*",
         "access-control-allow-methods": "POST, OPTIONS",
@@ -234,7 +276,8 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
       res.end();
       return;
     }
-    if (route === "POST /api/refunds") work = handleRefund(req, res);
+    if (route === "POST /api/operations/refund-preview") work = handleOperationsPreview(req, res);
+    else if (route === "POST /api/refunds") work = handleRefund(req, res);
     else if (route === "POST /api/refunds/resume") work = handleResume(req, res);
     else if (route === "POST /webhooks/refunds-create") work = handleWebhook(req, res);
     else if (route === "GET /healthz") work = Promise.resolve(send(res, 200, { ok: true }));
