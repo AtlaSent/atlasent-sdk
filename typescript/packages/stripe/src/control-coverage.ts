@@ -18,7 +18,7 @@ export interface ExecutionAcceptanceInput {
   atlasent_environment: string;
   action_type: string;
   adapter_revision: string;
-  cases: Array<{ id: string; verdict: string }>;
+  cases: ReadonlyArray<{ readonly id: string; readonly verdict: string }>;
   summary: { pass: number; fail: number; blocked: number; total: number };
 }
 
