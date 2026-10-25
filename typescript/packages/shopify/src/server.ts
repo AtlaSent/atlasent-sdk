@@ -277,7 +277,7 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
       return;
     }
     if (route === "POST /api/operations/refund-preview") work = handleOperationsPreview(req, res);
-    if (route === "POST /api/refunds") work = handleRefund(req, res);
+    else if (route === "POST /api/refunds") work = handleRefund(req, res);
     else if (route === "POST /api/refunds/resume") work = handleResume(req, res);
     else if (route === "POST /webhooks/refunds-create") work = handleWebhook(req, res);
     else if (route === "GET /healthz") work = Promise.resolve(send(res, 200, { ok: true }));
