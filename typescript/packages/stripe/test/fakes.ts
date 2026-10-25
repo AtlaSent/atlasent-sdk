@@ -47,7 +47,7 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
   const verifyBodies: Record<string, unknown>[] = [];
   const permits = new Map<string, { bound: string; consumed: boolean; actor: unknown; action: unknown; environment: unknown }>();
   /** Approval requests the runtime created for escalations. A test plays the person deciding them. */
-  const approvalRows = new Map<string, { status: string; bound: string; claimed: boolean }>();
+  const approvalRows = new Map<string, { status: string; bound: string; claimed: boolean; actor: unknown; action: unknown; environment: unknown }>();
   let seq = 0;
 
   function evaluate(body: Record<string, unknown>) {
@@ -70,7 +70,7 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
       if (d.decision === "escalate") {
         const id = `apr-${n}`;
         const ep = body.execution_payload_hash;
-        approvalRows.set(id, { status: "pending", bound: typeof ep === "string" ? ep.toLowerCase() : "", claimed: false });
+        approvalRows.set(id, { status: "pending", bound: typeof ep === "string" ? ep.toLowerCase() : "", claimed: false, actor: body.actor_id, action: body.action_type, environment: body.environment });
         approval = { escalation_id: `esc-${n}`, approval_request_id: id };
       }
       return { ...d, audit_hash: `audit-${n}`, ...approval };
@@ -129,7 +129,7 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
       row.claimed = true;
       const token = `pt.v3.approved-${++seq}`;
       const bound = claimFaults.boundTo ?? row.bound;
-      permits.set(token, { bound, consumed: false });
+      permits.set(token, { bound, consumed: false, actor: row.actor, action: row.action, environment: row.environment });
       return { claimed: true, permitToken: token, executionHashExpected: bound };
     },
   };
