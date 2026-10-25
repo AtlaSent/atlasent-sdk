@@ -16,6 +16,36 @@ gate issued.
 > credit is not a payment going out, so which canonical action it should be
 > evaluated as is a Canon decision, not one this package should guess.
 
+## Refund-controls.v1: verified limits of this demonstration
+
+The six-case Stripe TEST workflow writes `report.json`, `ledger.json`, and
+`control-coverage.json`. The last file lists **all 14** Action Catalog control
+areas but never reports any area as fully accepted. After a complete six-case
+staging run, five areas have *partial execution evidence* and nine remain
+*not verified*. A failed, missing, duplicate or wrong-environment run has no
+partial-coverage credit.
+
+`src/trusted-evidence.ts` defines a server-collected evidence intake schema
+with exact org/account/environment/payment/order/customer/case scoping,
+timestamps and record digests. Its validator detects missing, stale, duplicated,
+wrong-scope and unavailable source records. **A digest and a field named
+"source" do not authenticate evidence.** The validator never returns authority
+or permission to execute; the real collector must independently authenticate
+sources, bind their payloads and policy revisions, and re-read them before
+execution.
+
+The adapter tests now require the fake runtime to bind permits to actor,
+action, environment and payload digest. This is contract testing, not proof
+that the current production runtime verifies a particular human approver,
+segregation of duties or revocation.
+
+The canonical `customer.refund.issue` control pack remains **review-only** until
+runtime-owned actor/approver verification, trusted business facts, cumulative
+budgets, signed provider outcome reconciliation and covered execution paths
+are accepted. The existing `finance.payment.authorize` demo is not a
+production-ready refund pack. Do not broaden credentials or change a
+customer's policy to make the acceptance workflow green.
+
 ## The pieces
 
 | | What | Where |

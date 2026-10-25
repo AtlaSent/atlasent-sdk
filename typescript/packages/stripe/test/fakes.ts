@@ -45,9 +45,9 @@ export function demoPolicy(ctx: Record<string, unknown>): { decision: string; de
 export function fakeRuntime(opts: RuntimeOptions = {}) {
   const evaluateBodies: Record<string, unknown>[] = [];
   const verifyBodies: Record<string, unknown>[] = [];
-  const permits = new Map<string, { bound: string; consumed: boolean }>();
+  const permits = new Map<string, { bound: string; consumed: boolean; actor: unknown; action: unknown; environment: unknown }>();
   /** Approval requests the runtime created for escalations. A test plays the person deciding them. */
-  const approvalRows = new Map<string, { status: string; bound: string; claimed: boolean }>();
+  const approvalRows = new Map<string, { status: string; bound: string; claimed: boolean; actor: unknown; action: unknown; environment: unknown }>();
   let seq = 0;
 
   function evaluate(body: Record<string, unknown>) {
@@ -70,7 +70,7 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
       if (d.decision === "escalate") {
         const id = `apr-${n}`;
         const ep = body.execution_payload_hash;
-        approvalRows.set(id, { status: "pending", bound: typeof ep === "string" ? ep.toLowerCase() : "", claimed: false });
+        approvalRows.set(id, { status: "pending", bound: typeof ep === "string" ? ep.toLowerCase() : "", claimed: false, actor: body.actor_id, action: body.action_type, environment: body.environment });
         approval = { escalation_id: `esc-${n}`, approval_request_id: id };
       }
       return { ...d, audit_hash: `audit-${n}`, ...approval };
@@ -78,7 +78,7 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
     const ep = body.execution_payload_hash;
     const bound = typeof ep === "string" && /^[0-9a-f]{64}$/i.test(ep) ? ep.toLowerCase() : "sha256:" + sha256(JSON.stringify(body));
     const token = `pt.v3.fake-${++seq}`;
-    permits.set(token, { bound, consumed: false });
+    permits.set(token, { bound, consumed: false, actor: body.actor_id, action: body.action_type, environment: body.environment });
     return { decision: "allow", permit_token: token, audit_hash: `audit-${seq}` };
   }
 
@@ -88,6 +88,9 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
     const p = permits.get(String(body.permit_token));
     if (!p) return { valid: false, outcome: "deny", verify_error_code: "PERMIT_NOT_FOUND" };
     if (p.consumed) return { valid: false, outcome: "deny", verify_error_code: "PERMIT_ALREADY_USED" };
+    if (body.actor_id !== p.actor) return { valid: false, outcome: "deny", verify_error_code: "ACTOR_MISMATCH" };
+    if (body.action_type !== p.action) return { valid: false, outcome: "deny", verify_error_code: "ACTION_MISMATCH" };
+    if (body.environment !== p.environment) return { valid: false, outcome: "deny", verify_error_code: "ENVIRONMENT_MISMATCH" };
     const presented = body.payload_hash ?? body.execution_hash;
     if (presented !== p.bound) return { valid: false, outcome: "deny", verify_error_code: "PAYLOAD_MISMATCH" };
     if (opts.verifyValid === false) return { valid: false, outcome: "deny", verify_error_code: "FORCED" };
@@ -126,7 +129,7 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
       row.claimed = true;
       const token = `pt.v3.approved-${++seq}`;
       const bound = claimFaults.boundTo ?? row.bound;
-      permits.set(token, { bound, consumed: false });
+      permits.set(token, { bound, consumed: false, actor: row.actor, action: row.action, environment: row.environment });
       return { claimed: true, permitToken: token, executionHashExpected: bound };
     },
   };

@@ -107,6 +107,9 @@ jobs:
               echo "- summary: \`$(jq -c '.summary' acceptance-out/report.json)\`; adapter: \`$(jq -r '.adapter_revision' acceptance-out/report.json)\`"
               jq -r '.cases[] | "- \(.verdict | ascii_upcase) \(.id) \(.title): \(.detail)"' acceptance-out/report.json
               echo "- not covered: $(jq -r '.not_covered' acceptance-out/report.json)"
+              if [ -f acceptance-out/control-coverage.json ]; then
+                echo "- 14-control coverage (not production acceptance): $(jq -c '.summary' acceptance-out/control-coverage.json)"
+              fi
             } >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$code"
@@ -119,4 +122,5 @@ jobs:
           path: |
             typescript/packages/stripe/acceptance-out/report.json
             typescript/packages/stripe/acceptance-out/ledger.json
+            typescript/packages/stripe/acceptance-out/control-coverage.json
           if-no-files-found: warn

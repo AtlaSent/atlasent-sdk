@@ -44,6 +44,7 @@ import {
 } from "./guard.js";
 import { JsonFileLedger, type PermitLedger } from "./ledger.js";
 import { assertStagingBaseUrl, assertTestSetupKey, paymentIntentForm } from "./seed.js";
+import { buildRefundControlCoverage } from "./control-coverage.js";
 import { createStripeClient, StripeApiError, type StripeApi, type StripeRefund } from "./stripe.js";
 
 export const ACCEPTANCE_SCHEMA = "atlasent.refund_execution_acceptance.v1" as const;
@@ -284,6 +285,10 @@ async function main(): Promise<number> {
     not_covered: "order/customer ownership, return evidence, allocation, cumulative budgets, accounting, webhook delivery, production",
   };
   writeFileSync(join(outDir, "report.json"), JSON.stringify(report, null, 2));
+  // A passing six-case execution run is not fourteen accepted business controls.
+  const coverage = buildRefundControlCoverage(report);
+  writeFileSync(join(outDir, "control-coverage.json"), JSON.stringify(coverage, null, 2));
+  console.log(`Refund control coverage: ${coverage.summary.partial} partial, ${coverage.summary.not_verified} not verified, 0 fully verified`);
   for (const c of cases) console.log(`${c.verdict.toUpperCase().padEnd(7)} ${c.id} ${c.title}: ${c.detail}`);
   console.log(`\n${JSON.stringify(report.summary)}  report: ${join(outDir, "report.json")}`);
   return report.summary.fail > 0 ? 1 : report.summary.blocked > 0 ? 3 : 0;
