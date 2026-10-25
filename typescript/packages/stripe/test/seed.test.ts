@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { staticDeliveryFacts } from "../src/facts.js";
 import { guardedStripeRefund } from "../src/guard.js";
 import { InMemoryLedger } from "../src/ledger.js";
-import { assertTestSetupKey, deliveryFile, paymentIntentForm, runbook, SEED_SCENARIOS, seedTestPayments } from "../src/seed.js";
+import { assertStagingBaseUrl, assertTestSetupKey, deliveryFile, paymentIntentForm, runbook, SEED_SCENARIOS, seedTestPayments } from "../src/seed.js";
 import { FakeStripe, fakeRuntime, makePaymentIntent, NOW } from "./fakes.js";
 
 describe("seed scenarios", () => {
@@ -35,6 +35,26 @@ describe("seed scenarios", () => {
       "automatic_payment_methods[allow_redirects]": "never",
       "metadata[order_id]": "PPS-S101",
     });
+  });
+});
+
+describe("assertStagingBaseUrl", () => {
+  it("accepts only the staging runtime over https", () => {
+    expect(() => assertStagingBaseUrl("https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1")).not.toThrow();
+    for (const u of [
+      undefined,
+      "",
+      "https://api.atlasent.io/functions/v1",
+      "https://kttccumlnmdtupgbyfue.supabase.co/functions/v1",
+      "http://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1",
+      "https://lwnqpmnxpeyhpxvastku.supabase.co.example.com/functions/v1",
+      "https://example.com/lwnqpmnxpeyhpxvastku.supabase.co",
+      "https://x@lwnqpmnxpeyhpxvastku.supabase.co/functions/v1",
+      "https://lwnqpmnxpeyhpxvastku.supabase.co:8443/functions/v1",
+      "not a url",
+    ]) {
+      expect(() => assertStagingBaseUrl(u), String(u)).toThrow(/staging runtime/);
+    }
   });
 });
 

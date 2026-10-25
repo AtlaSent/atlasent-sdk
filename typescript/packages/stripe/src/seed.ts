@@ -75,6 +75,26 @@ export function assertTestSetupKey(key: string): void {
   }
 }
 
+/** The only AtlaSent runtime the refund acceptance may call: staging. */
+export const STAGING_RUNTIME_HOST = "lwnqpmnxpeyhpxvastku.supabase.co";
+
+/**
+ * The same host check stripe-refund-acceptance.yml makes, so a local run
+ * cannot reach production either: an unset base URL would otherwise fall back
+ * to the SDK's production default.
+ */
+export function assertStagingBaseUrl(baseUrl: string | undefined): void {
+  let url: URL | null = null;
+  try {
+    url = baseUrl ? new URL(baseUrl) : null;
+  } catch {
+    url = null;
+  }
+  if (!url || url.protocol !== "https:" || url.hostname !== STAGING_RUNTIME_HOST || url.username || url.password || url.port) {
+    throw new Error(`ATLASENT_BASE_URL must be the staging runtime (https://${STAGING_RUNTIME_HOST}/functions/v1); refusing ${baseUrl ? "this URL" : "an unset URL, which would fall back to production"}`);
+  }
+}
+
 export interface SeededPayment {
   orderRef: string;
   paymentIntent: string;
