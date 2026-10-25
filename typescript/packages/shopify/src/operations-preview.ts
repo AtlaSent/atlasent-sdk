@@ -111,6 +111,12 @@ export function previewShopifyRefundOperation(
       return result(order.id, amountCents, at, "needs_attention", "obtain_supported_currency",
         "Currency or transaction currency is unsupported or inconsistent; no automatic action.", observed);
     }
+    // A pending or failed refund can represent an unresolved compensation
+    // attempt. Do not propose another routine refund until reconciled.
+    if (order.transactions.some(t => t.kind === "REFUND" && t.status !== "SUCCESS")) {
+      return result(order.id, amountCents, at, "needs_attention", "inspect_payment_history",
+        "A prior refund has an unresolved or non-success status; reconcile before proceeding.", observed);
+    }
     if (captures.length !== 1 || facts.parent_transaction === null) {
       return result(order.id, amountCents, at, "needs_attention", "inspect_payment_history",
         "Payment history requires review before a refund can be proposed.", observed);
