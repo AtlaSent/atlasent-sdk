@@ -598,7 +598,10 @@ async function runReservedRefund(
       environment: options.environment,
       resource_id: piId,
       execution_payload_hash: digest,
-      context: policyContext(facts, amountCents),
+      // The SDK/runtime requires execution environment inside context as well as
+      // at the top level. Bind it to the configured gate environment, never
+      // to an agent-provided claim; missing/mismatched environment fails closed.
+      context: { ...policyContext(facts, amountCents), environment: options.environment },
     });
   } catch (err) {
     return { refunded: false, decision: "error", reason: `evaluate failed: ${errorText(err)}`, gateRef, digest, facts };
