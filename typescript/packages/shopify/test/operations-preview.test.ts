@@ -39,6 +39,15 @@ describe("read-only Shopify post-purchase operations preview", () => {
     expect(previewShopifyRefundOperation(foreign, 100, NOW).next_step).toBe("obtain_supported_currency");
   });
 
+  it("routes pending prior refunds to reconciliation rather than routine handling", () => {
+    const pending = order();
+    const refund = pending.transactions.find(t => t.kind === "REFUND")!;
+    refund.status = "PENDING";
+    expect(previewShopifyRefundOperation(pending, 100, NOW)).toMatchObject({
+      disposition: "needs_attention", next_step: "inspect_payment_history",
+    });
+  });
+
   it("holds full pages, malformed sources and absent orders as unknown", () => {
     const full = order();
     full.transactions = Array.from({ length: 100 }, (_, i) => ({ ...full.transactions[0]!, id: `tx-${i}` }));
