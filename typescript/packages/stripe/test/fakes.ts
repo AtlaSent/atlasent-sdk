@@ -53,6 +53,15 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
   function evaluate(body: Record<string, unknown>) {
     evaluateBodies.push(body);
     if (opts.evaluateThrows) throw new Error("connect ECONNREFUSED");
+    // Match the real runtime contract: top-level environment alone is not
+    // sufficient, and conflicting environment claims must never authorize.
+    const ctx = (body.context ?? {}) as Record<string, unknown>;
+    if (typeof ctx.environment !== "string" || !ctx.environment.trim()) {
+      throw new Error("context.environment is required");
+    }
+    if (ctx.environment !== body.environment) {
+      throw new Error("context.environment does not match request environment");
+    }
     if (opts.forceDecision) return { decision: opts.forceDecision, deny_reason: "forced" };
     const d = demoPolicy((body.context ?? {}) as Record<string, unknown>);
     if (d.decision !== "allow") {

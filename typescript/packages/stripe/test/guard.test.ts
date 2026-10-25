@@ -85,6 +85,7 @@ describe("what evaluate and verify receive", () => {
     expect(s.runtime.evaluateBodies[0]!.context).toEqual({
       amount_cents: 1899,
       currency: "USD",
+      environment: "test",
       order_status: "delivered",
       days_since_delivery: 5,
       refundable_cents: 3499,
