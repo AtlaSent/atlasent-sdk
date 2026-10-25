@@ -217,6 +217,7 @@ describe("POST /api/operations/refund-preview (read-only first value)", () => {
     expect(s.runtime.evaluateBodies).toHaveLength(0);
     expect(s.runtime.verifyBodies).toHaveLength(0);
     expect(s.shopify.refunds).toHaveLength(0);
+    expect(s.shopify.emailReads).toBe(0);
   });
 
   it("refuses missing/invalid sessions, other shops, and malformed input before any read", async () => {
