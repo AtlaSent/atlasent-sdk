@@ -4,10 +4,11 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryLedger, refundNote } from "../src/ledger.js";
 import { createGateHandler } from "../src/server.js";
+import type { ShopifyAdmin } from "../src/admin.js";
 import { signSessionToken } from "../src/session-token.js";
 import type { RefundAuditVerdict, RefundWebhookPayload } from "../src/webhook.js";
 import type { RefundDecisionRecord } from "../src/decision-record.js";
-import { demoOrders, FakeShopify, fakeRuntime, NOW } from "./fakes.js";
+import { demoOrders, FakeShopify, fakeRuntime, makeOrder, NOW } from "./fakes.js";
 
 const CLIENT_ID = "client-123";
 const SECRET = "shpss_secret";
@@ -21,6 +22,7 @@ async function start(
   extra: {
     onVerdict?: (v: RefundAuditVerdict, p: RefundWebhookPayload, shop: string) => void;
     onDecision?: (r: RefundDecisionRecord) => void;
+    adminFor?: (shop: string, token: string) => Promise<ShopifyAdmin>;
   } = {},
 ) {
   const runtime = fakeRuntime();
@@ -189,5 +191,85 @@ describe("POST /webhooks/refunds-create (the alarm)", () => {
     expect(await (await deliver(s.base, { id: 1, order_id: 1 }, { topic: "orders/create" })).json()).toEqual({ ignored: true });
     expect(await (await deliver(s.base, { id: 1, order_id: 1 }, { shop: "other.myshopify.com" })).json()).toEqual({ ignored: true });
     expect(s.alerts).toHaveLength(0);
+  });
+});
+
+const postPreview = (base: string, body: unknown, auth = `Bearer ${token()}`) =>
+  fetch(`${base}/api/operations/refund-preview`, {
+    method: "POST", headers: { authorization: auth, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+describe("POST /api/operations/refund-preview (read-only first value)", () => {
+  it("returns a useful next step without runtime evaluation, refund or customer message", async () => {
+    const s = await start();
+    const res = await postPreview(s.base, { orderId: "1001", amount: "18.99", approved: true, customerEmail: "forged@example.com" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      schema: "atlasent.shopify_refund_operations_preview.v1",
+      mode: "read_only", authorization: "not_evaluated", execution: "not_attempted",
+      customer_notification: "not_sent", disposition: "routine_candidate",
+      next_step: "verify_business_eligibility",
+    });
+    expect(body.missing_proofs).toContain("independent_authority_and_approval");
+    expect(JSON.stringify(body)).not.toContain("forged@example.com");
+    expect(s.runtime.evaluateBodies).toHaveLength(0);
+    expect(s.runtime.verifyBodies).toHaveLength(0);
+    expect(s.shopify.refunds).toHaveLength(0);
+  });
+
+  it("refuses missing/invalid sessions, other shops, and malformed input before any read", async () => {
+    const s = await start();
+    expect((await postPreview(s.base, { orderId: "1001", amount: "1.00" }, "")).status).toBe(401);
+    const other = token({ iss: "https://other.myshopify.com/admin", dest: "https://other.myshopify.com" });
+    expect((await postPreview(s.base, { orderId: "1001", amount: "1.00" }, `Bearer ${other}`)).status).toBe(403);
+    for (const body of [
+      {}, { orderId: "1001" }, { orderId: "1001", amount: "0.00" },
+      { orderId: "https://other.myshopify.com/orders/1001", amount: "1.00" },
+      { orderId: "1001", amount: 10 },
+    ]) {
+      expect((await postPreview(s.base, body)).status).toBe(400);
+    }
+    expect(s.shopsAsked).toHaveLength(0);
+    expect(s.shopify.refunds).toHaveLength(0);
+  });
+
+  it("rejects an Admin client that returns a different order identity", async () => {
+    const s = await start({
+      adminFor: async () => ({
+        getOrder: async () => makeOrder({ id: 1002, delivery: "delivered" }),
+        createRefund: async () => { throw new Error("must never call"); },
+      }),
+    });
+    const res = await postPreview(s.base, { orderId: "1001", amount: "1.00" });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ mode: "read_only" });
+    expect(s.runtime.evaluateBodies).toHaveLength(0);
+  });
+
+  it("returns an explicit unavailable state on a missing order, without fabricating completion", async () => {
+    const s = await start();
+    const res = await postPreview(s.base, { orderId: "999999", amount: "1.00" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      disposition: "unavailable", next_step: "retry_source_read", execution: "not_attempted",
+    });
+    expect(s.shopify.refunds).toHaveLength(0);
+  });
+
+  it("returns 503 when Shopify access is unavailable; does not guess from the request", async () => {
+    const s = await start({ adminFor: async () => { throw new Error("secret provider detail"); } });
+    const res = await postPreview(s.base, { orderId: "1001", amount: "1.00" });
+    expect(res.status).toBe(503);
+    expect(JSON.stringify(await res.json())).not.toContain("secret provider detail");
+    expect(s.runtime.evaluateBodies).toHaveLength(0);
+  });
+
+  it("answers CORS preflight for the preview route", async () => {
+    const s = await start();
+    const res = await fetch(`${s.base}/api/operations/refund-preview`, { method: "OPTIONS" });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-methods")).toContain("POST");
   });
 });
