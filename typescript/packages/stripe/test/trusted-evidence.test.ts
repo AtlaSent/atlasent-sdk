@@ -7,6 +7,7 @@ import {
 const scope: RefundEvidenceScope = {
   organization_id: "org_a", processor_account_id: "acct_a", environment: "test",
   payment_intent_id: "pi_123", order_id: "order_1", customer_id: "cus_1", refund_case_id: "case_1",
+  amount_cents: 1500, currency: "USD", policy_revision: "refund-v1",
 };
 const now = new Date("2026-10-25T12:00:00Z");
 const records = (): CollectedRefundEvidence[] => REFUND_EVIDENCE_KINDS.map(kind => ({
@@ -33,6 +34,17 @@ describe("collected refund source readiness is never authorization", () => {
       r[0]!.scope[key] = "other";
       expect(inspect(r).defects.some(x => x.includes(`${key} scope mismatch`))).toBe(true);
     }
+  });
+  it("rejects changed amount, currency and policy revision", () => {
+    const r = records();
+    r[0]!.scope.amount_cents = 2500;
+    r[1]!.scope.currency = "EUR";
+    r[2]!.scope.policy_revision = "old-policy";
+    const result = inspect(r);
+    expect(result.structurally_complete).toBe(false);
+    expect(result.defects.some(x => x.includes("amount_cents scope mismatch"))).toBe(true);
+    expect(result.defects.some(x => x.includes("currency scope mismatch"))).toBe(true);
+    expect(result.defects.some(x => x.includes("policy_revision scope mismatch"))).toBe(true);
   });
   it("rejects duplicate source kinds and unavailable evidence", () => {
     const r = records();
