@@ -14,6 +14,40 @@ manager, and every refund is checked against the permits the gate issued.
 > against the API version you pin before the first live run. See
 > [What has not been verified](#what-has-not-been-verified).
 
+## Post-purchase operations preview (read-only, not protection)
+
+The existing authenticated Shopify app backend now supports
+`POST /api/operations/refund-preview` with the same verified Shopify session
+token and allowlisted-shop boundary as the refund demo. Send
+`{"orderId":"1001","amount":"18.99"}` as JSON with a Shopify session bearer
+token. **Do not send customer identity, policy approval, or eligibility flags.**
+
+The response is a preliminary operator next step, not a refund decision:
+
+- `routine_candidate` — a simple delivered USD order has one observed payment
+  and enough *observed* balance; **merchant eligibility, compensation, disputes,
+  authority and full history still need verification**.
+- `needs_attention` — a human should inspect fulfillment, payment allocation,
+  currency, or apparent remaining amount.
+- `unavailable` — the order is absent, malformed or its source data may be
+  incomplete; do not assume the absence of disputes or refunds.
+
+All responses state `authorization:not_evaluated`,
+`execution:not_attempted`, `customer_notification:not_sent`, and list
+missing proofs. The endpoint calls only `ShopifyAdmin.getOrder`; it does not
+evaluate a runtime permit, create a refund, send email or install policy.
+It refuses mismatched order identity, invalid sessions, other shops and
+malformed amounts, and returns an unavailable response on provider failure.
+
+**Important:** The current Shopify Admin query reads a maximum of 100
+transactions and 50 fulfillments without full pagination; a full page is
+marked unavailable. Even a shorter page does not establish complete refund,
+dispute or compensation history. No customer-ownership or protected-data
+scope has been validated by this read. A Shopify development-store integration,
+approved read-only permissions, actual first-value UI and separate 14-control
+acceptance remain open. This endpoint is an SDK/backend slice, **not a
+customer-ready Commerce Autopilot product**.
+
 ## The pieces
 
 | | What | Where |
