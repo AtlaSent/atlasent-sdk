@@ -17,6 +17,9 @@ export interface RefundEvidenceScope {
   order_id: string;
   customer_id: string;
   refund_case_id: string;
+  amount_cents: number;
+  currency: string;
+  policy_revision: string;
 }
 export interface CollectedRefundEvidence {
   kind: RefundEvidenceKind;
@@ -39,7 +42,7 @@ export interface EvidenceReadiness {
 
 const SCOPE_KEYS: readonly (keyof RefundEvidenceScope)[] = [
   "organization_id", "processor_account_id", "environment", "payment_intent_id",
-  "order_id", "customer_id", "refund_case_id",
+  "order_id", "customer_id", "refund_case_id", "currency", "policy_revision",
 ];
 
 /** No caller/agent-supplied "approved", "trusted" or "allow" flag is consulted. */
@@ -58,6 +61,8 @@ export function inspectCollectedRefundEvidence(
   for (const key of SCOPE_KEYS) {
     if (typeof expected[key] !== "string" || !expected[key].trim()) defects.push(`missing expected scope: ${key}`);
   }
+  if (!Number.isSafeInteger(expected.amount_cents) || expected.amount_cents <= 0) defects.push("invalid expected refund amount");
+  if (!/^[A-Z]{3}$/.test(expected.currency)) defects.push("invalid expected currency");
   for (const [index, record] of records.entries()) {
     const prefix = `record[${index}]`;
     if (!record || !REFUND_EVIDENCE_KINDS.includes(record.kind)) {
@@ -69,6 +74,7 @@ export function inspectCollectedRefundEvidence(
     for (const key of SCOPE_KEYS) {
       if (record.scope?.[key] !== expected[key] || !record.scope?.[key]) defects.push(`${prefix}: ${key} scope mismatch`);
     }
+    if (record.scope?.amount_cents !== expected.amount_cents) defects.push(`${prefix}: amount_cents scope mismatch`);
     if (record.status !== "available") defects.push(`${prefix}: source unavailable`);
     if (!record.source_system?.trim() || !record.source_record_id?.trim()) defects.push(`${prefix}: source identity missing`);
     if (!/^[0-9a-f]{64}$/i.test(record.record_digest ?? "")) defects.push(`${prefix}: missing/invalid source digest`);
