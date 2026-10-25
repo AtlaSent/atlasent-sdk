@@ -43,7 +43,7 @@ import {
   type StripeRefundResult,
 } from "./guard.js";
 import { JsonFileLedger, type PermitLedger } from "./ledger.js";
-import { assertTestSetupKey, paymentIntentForm } from "./seed.js";
+import { assertStagingBaseUrl, assertTestSetupKey, paymentIntentForm } from "./seed.js";
 import { createStripeClient, StripeApiError, type StripeApi, type StripeRefund } from "./stripe.js";
 
 export const ACCEPTANCE_SCHEMA = "atlasent.refund_execution_acceptance.v1" as const;
@@ -242,6 +242,7 @@ async function main(): Promise<number> {
   if (process.env.STRIPE_ACCEPTANCE_CONFIRM !== "test-mode") throw new Error("Refusing to run without STRIPE_ACCEPTANCE_CONFIRM=test-mode");
   const apiKey = need("ATLASENT_API_KEY");
   const baseUrl = process.env.ATLASENT_BASE_URL;
+  assertStagingBaseUrl(baseUrl);
   const environment = need("ATLASENT_ENVIRONMENT");
 
   const startedAt = new Date();
@@ -251,7 +252,7 @@ async function main(): Promise<number> {
   const delivered: Record<string, DeliveryFacts> = {};
   const deps: AcceptanceDeps = {
     stripe: createStripeClient({ secretKey }),
-    atlasent: new AtlaSentClient({ apiKey, ...(baseUrl ? { baseUrl } : {}) }),
+    atlasent: new AtlaSentClient({ apiKey, baseUrl: baseUrl as string }),
     ledger: new JsonFileLedger(join(outDir, "ledger.json")),
     runId,
     async newPayment(caseId, cents) {

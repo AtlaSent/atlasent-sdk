@@ -418,7 +418,7 @@ money), labelled `metadata.atlasent_acceptance_run`:
 
 ```sh
 STRIPE_SETUP_KEY=sk_test_... STRIPE_SECRET_KEY=rk_test_... \
-ATLASENT_API_KEY=... ATLASENT_BASE_URL=... ATLASENT_ENVIRONMENT=test \
+ATLASENT_API_KEY=... ATLASENT_BASE_URL=https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1 ATLASENT_ENVIRONMENT=test \
 STRIPE_ACCEPTANCE_CONFIRM=test-mode npm run acceptance -- --out acceptance-out
 ```
 
@@ -426,7 +426,7 @@ STRIPE_ACCEPTANCE_CONFIRM=test-mode npm run acceptance -- --out acceptance-out
 - The run writes `acceptance-out/report.json` (`atlasent.refund_execution_acceptance.v1`), plus the ledger.
 - **Verdicts:** `pass`, `fail`, or `blocked`. `blocked` means the org's policy did not allow the refund, so the contract was not exercised. It never counts as `pass`.
 - **Exit code:** 0 when every case passes, 1 on any failure, 3 when something was blocked.
-- Live-mode keys are refused, and nothing is deleted.
+- Live-mode keys are refused, and nothing is deleted. `ATLASENT_BASE_URL` must be the staging runtime (`lwnqpmnxpeyhpxvastku`); any other URL, or none, is refused before any call, since an unset URL would fall back to production.
 
 The runner's own logic is tested against the fakes (`test/acceptance.test.ts`).
 Those tests are not a test-mode run.
