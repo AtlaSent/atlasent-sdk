@@ -13,7 +13,9 @@ follows [semver](https://semver.org/): breaking changes bump the major
 The private Shopify integration has a separate `serve:inbox` command, backed by
 API #4727's Observe-only connector route. An explicit action re-reads the order,
 checks the current key/tenant/shop/connector/environment and validates a matching
-non-authorizing receipt. The default preview remains independent of AtlaSent.
+non-authorizing receipt. Pending submissions lock edits and preserve their original
+order/amount/destination outcome even when the host changes the selected order.
+The default preview remains independent of AtlaSent.
 This requires a reserved server credential; no customer scope or plan is widened.
 Live merchant/tenant self-service acceptance and refund execution remain open.
 

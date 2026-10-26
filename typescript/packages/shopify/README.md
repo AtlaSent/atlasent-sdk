@@ -145,7 +145,10 @@ identity, with `authority_effect:none`, `execution:not_attempted` and
 
 Open the matching organization's Action Inbox **History** to see the observation.
 It is not a pending approval. No automatic retry follows an uncertain submission;
-check history before submitting again. Separate submissions are separate
+check history before submitting again. Amount edits and Close are disabled while a
+submission is pending. Its receipt or unconfirmed warning stays bound to the
+submitted order, amount and organization even if Shopify changes the selected
+order during the request. Separate submissions are separate
 observations, not durable refund business requests or execution attempts.
 
 This remains unverified against a real development store/runtime. Full merchant
