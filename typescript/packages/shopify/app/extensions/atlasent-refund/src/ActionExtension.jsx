@@ -112,6 +112,7 @@ function RefundViaAtlaSent() {
 
   const submit = () => {
     previewSequence.current += 1;
+    setPreviewBusy(false);
     setPreview(null);
     setPreviewError(null);
     setResult(null);
@@ -134,7 +135,7 @@ function RefundViaAtlaSent() {
             {busy ? "Checking…" : "Check approval"}
           </Button>
         ) : (
-          <Button onPress={submit} disabled={!valid || busy || result?.refunded}>
+          <Button onPress={submit} disabled={!valid || busy || previewBusy || result?.refunded}>
             {busy ? "Checking…" : "Request refund"}
           </Button>
         )
