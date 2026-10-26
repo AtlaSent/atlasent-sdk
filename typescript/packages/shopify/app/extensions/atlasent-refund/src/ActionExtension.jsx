@@ -8,7 +8,8 @@
 // Written against the React admin UI extension API (api_version 2025-07).
 // Newer API versions use Preact and web components; port before upgrading.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { centsFromAmount, parseRefundPreview } from "./preview-view.js";
 import {
   reactExtension,
   useApi,
@@ -31,8 +32,63 @@ function RefundViaAtlaSent() {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [previewError, setPreviewError] = useState(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const previewSequence = useRef(0);
 
-  const valid = /^\d+(\.\d{1,2})?$/.test(amount.trim()) && Number(amount) > 0;
+  const valid = centsFromAmount(amount) !== null;
+
+  // An in-flight response from another order must never appear as this order.
+  useEffect(() => {
+    previewSequence.current += 1;
+    setPreview(null);
+    setPreviewError(null);
+    setPreviewBusy(false);
+  }, [orderId]);
+
+  function changeAmount(value) {
+    previewSequence.current += 1;
+    setAmount(value);
+    setPreview(null);
+    setPreviewError(null);
+    setPreviewBusy(false);
+  }
+
+  async function loadPreview() {
+    if (!orderId || centsFromAmount(amount) === null) return;
+    const sequence = ++previewSequence.current;
+    setPreviewBusy(true);
+    setPreview(null);
+    setPreviewError(null);
+    try {
+      const token = await auth.idToken();
+      const response = await fetch("/api/operations/refund-preview", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        // The server fetches source facts. Never send caller-made eligibility or approval.
+        body: JSON.stringify({ orderId, amount: amount.trim() }),
+      });
+      const body = await response.json().catch(() => null);
+      if (sequence !== previewSequence.current) return;
+      if (!response.ok) {
+        setPreviewError("The authenticated Shopify order read is unavailable. No refund was evaluated.");
+        return;
+      }
+      const safe = parseRefundPreview(body, orderId, amount);
+      if (!safe) {
+        setPreviewError("The preview could not be verified for this order and amount. No refund was evaluated.");
+        return;
+      }
+      setPreview(safe);
+    } catch {
+      if (sequence === previewSequence.current) {
+        setPreviewError("Could not load the read-only Shopify preview. No refund was evaluated.");
+      }
+    } finally {
+      if (sequence === previewSequence.current) setPreviewBusy(false);
+    }
+  }
 
   // `keep` carries the approval id through a failed check, so it can be retried.
   async function post(path, payload, keep = {}) {
@@ -55,6 +111,9 @@ function RefundViaAtlaSent() {
   }
 
   const submit = () => {
+    previewSequence.current += 1;
+    setPreview(null);
+    setPreviewError(null);
     setResult(null);
     return post("/api/refunds", { orderId, amount: amount.trim(), reason: reason.trim() });
   };
@@ -84,11 +143,30 @@ function RefundViaAtlaSent() {
     >
       <BlockStack gap>
         <Text>
-          Refunds under $50 on delivered orders, within 30 days of delivery, are issued straight away. Larger refunds go
-          to a manager.
+          Start with a read-only operational preview. It checks the connected order and prepares an operator next step;
+          it does not determine eligibility, authorize or issue a refund, or notify a customer.
         </Text>
-        <TextField label="Amount (USD)" value={amount} onChange={setAmount} disabled={busy || result?.refunded || waiting} />
-        <TextField label="Reason" value={reason} onChange={setReason} disabled={busy || result?.refunded || waiting} />
+        <TextField label="Amount (USD)" value={amount} onChange={changeAmount} disabled={busy || result?.refunded || waiting} />
+        <Button onPress={loadPreview} disabled={!orderId || !valid || busy || previewBusy || waiting || result?.refunded}>
+          {previewBusy ? "Reading order…" : "Preview next step (read only)"}
+        </Button>
+        {previewError && <Banner tone="warning" title="Preview unavailable"><Text>{previewError}</Text></Banner>}
+        {preview && (
+          <Banner tone={preview.disposition === "routine_candidate" ? "info" : "warning"} title={`Preview only: ${preview.statusLabel}`}>
+            <Text>{preview.operatorMessage}</Text>
+            <Text>Operator next step: {preview.nextStepLabel}</Text>
+            <Text>Owner: not assigned by this preview.</Text>
+            <Text>Shopify order: {preview.orderId}; observed status: {preview.orderStatus}; currency: {preview.currency}.</Text>
+            <Text>Server read at: {preview.readAt} (this does not prove the age of Shopify source facts).</Text>
+            <Text>Missing requirements: {preview.missingProofLabels.join(", ")}.</Text>
+            <Text>Authorization not evaluated. Execution not attempted. No customer message sent.</Text>
+          </Banner>
+        )}
+        <Text>
+          The separate "Request refund" action below is the existing write-capable demo gate, not a result of this preview.
+          It may issue a refund only when the independently configured runtime and Shopify permissions allow it.
+        </Text>
+        <TextField label="Reason for demo refund request" value={reason} onChange={setReason} disabled={busy || result?.refunded || waiting} />
         {result && (
           <Banner tone={tone} title={result.message}>
             {result.denyCode && <Text>Code: {result.denyCode}</Text>}
