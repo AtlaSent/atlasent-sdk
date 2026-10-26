@@ -55,6 +55,34 @@ Do not describe its installation as least-privilege read-only onboarding.
 The Console Action Inbox handoff and real dev-store acceptance are still
 unproven. This is **not a customer-ready Commerce Autopilot product**.
 
+## Shopify order-action read-only first-value UI (unreleased)
+
+The existing **Refund via AtlaSent** order action now offers a separate
+**Preview next step (read only)** button. It calls the authenticated
+`POST /api/operations/refund-preview` route with only the selected order ID
+and requested amount. The response is accepted for display only when its
+schema, read-only mode, explicit `not_evaluated`/`not_attempted`/
+`not_sent` states, selected order, and exact cents match. It shows the
+operator next step, missing proofs, source read timestamp, and an unassigned
+owner rather than claiming completed work. Changing the amount or selected
+order invalidates an in-flight/previous preview.
+
+**This is an extension integration slice, not a customer-ready install.**
+The existing action still includes the **Request refund** demo button, and
+the current `app/shopify.app.toml` asks for `write_orders` because that
+demo path can call `refundCreate`. Do **not** offer this app as a
+least-privilege, read-only merchant onboarding experience or publish it as
+Commerce Operations Autopilot. A separately reviewed read-only app install
+with `read_orders` only, merchant-scoped OAuth/tenant binding, a live
+development-store read, an AtlaSent Action Inbox handoff, and independent
+14-control/runtime acceptance remain required. A preliminary
+`routine_candidate` is **not** merchant eligibility or authorization.
+
+The extension does not turn on a refund or notification as a consequence of
+the preview. The legacy demo write button is a distinct explicit operation
+and must remain restricted to the approved demo/test environment until the
+governed production refund product is accepted.
+
 ## The pieces
 
 | | What | Where |
