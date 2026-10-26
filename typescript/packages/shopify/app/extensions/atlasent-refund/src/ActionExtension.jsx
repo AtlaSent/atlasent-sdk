@@ -86,7 +86,7 @@ function OrderPreview() {
         return;
       }
       if (!response.ok) {
-        setPreviewError(handoff ? "The Inbox submission is unconfirmed. Check its history before submitting again. No refund was evaluated." : "The authenticated Shopify order read is unavailable. No refund was evaluated.");
+        setPreviewError("The authenticated Shopify order read is unavailable. No refund was evaluated.");
         return;
       }
       const safe = parseRefundPreview(body, orderId, amount);
