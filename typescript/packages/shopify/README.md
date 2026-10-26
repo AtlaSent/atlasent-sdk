@@ -45,15 +45,8 @@ marked unavailable. Even a shorter page does not establish complete refund,
 dispute or compensation history. No customer-ownership or protected-data
 scope has been validated by this read. A Shopify development-store integration,
 approved read-only permissions and separate 14-control acceptance remain
-open. The existing Shopify order action now has a **Preview next step (read only)**
-button that calls this endpoint with the staff session token, checks the
-response's order/amount and non-execution markers, and displays the operator
-next step and missing requirements. It never treats a routine candidate as
-an authorized refund. The separate **Request refund** button remains a
-write-capable *demo* action; this sample app still requests `write_orders`.
-Do not describe its installation as least-privilege read-only onboarding.
-The Console Action Inbox handoff and real dev-store acceptance are still
-unproven. This is **not a customer-ready Commerce Autopilot product**.
+open. The extension integration below is **not a customer-ready Commerce
+Autopilot product**.
 
 ## Shopify order-action read-only first-value UI (unreleased)
 
