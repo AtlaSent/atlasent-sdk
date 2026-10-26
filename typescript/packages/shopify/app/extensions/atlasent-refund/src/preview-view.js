@@ -18,7 +18,7 @@ const NEXT_STEP = Object.freeze({
 /** Convert a positive decimal dollar string into exact cents, without float rounding. */
 export function centsFromAmount(value) {
   if (typeof value !== 'string') return null;
-  const match = /^(\\d+)(?:\\.(\\d{1,2}))?$/.exec(value.trim());
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
   if (!match) return null;
   const whole = Number(match[1]);
   const cents = whole * 100 + Number((match[2] ?? '').padEnd(2, '0'));
