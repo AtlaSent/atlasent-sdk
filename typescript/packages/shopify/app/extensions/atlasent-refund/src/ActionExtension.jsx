@@ -1,12 +1,5 @@
-// "Refund via AtlaSent": an admin action on the order details page.
-//
-// The button collects an amount and a reason and sends them to the app
-// backend (../../../../src/server.ts, POST /api/refunds) with the staff
-// member's session token. The backend runs the AtlaSent gate; this UI only
-// shows what came back. It never calls Shopify's refund API itself.
-//
-// Written against the React admin UI extension API (api_version 2025-07).
-// Newer API versions use Preact and web components; port before upgrading.
+// Read-only order preview on the order details page. No refund or resume action.
+// React admin UI extension API (api_version 2025-07).
 
 import { useEffect, useRef, useState } from "react";
 import { centsFromAmount, parseRefundPreview } from "./preview-view.js";
@@ -23,15 +16,12 @@ import {
 
 const TARGET = "admin.order-details.action.render";
 
-export default reactExtension(TARGET, () => <RefundViaAtlaSent />);
+export default reactExtension(TARGET, () => <OrderPreview />);
 
-function RefundViaAtlaSent() {
+function OrderPreview() {
   const { close, data, auth } = useApi(TARGET);
   const orderId = data.selected[0]?.id;
   const [amount, setAmount] = useState("");
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
   const [preview, setPreview] = useState(null);
   const [previewError, setPreviewError] = useState(null);
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -90,67 +80,22 @@ function RefundViaAtlaSent() {
     }
   }
 
-  // `keep` carries the approval id through a failed check, so it can be retried.
-  async function post(path, payload, keep = {}) {
-    setBusy(true);
-    try {
-      const token = await auth.idToken();
-      // Relative URL: resolves against the app's application_url.
-      const res = await fetch(path, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-      });
-      const body = await res.json().catch(() => ({}));
-      setResult(res.ok ? { ...keep, ...body } : { ...keep, refunded: false, decision: "error", message: body.error ?? `Request failed (${res.status}). No refund was issued.` });
-    } catch {
-      setResult({ ...keep, refunded: false, decision: "error", message: "Could not reach the refund service. No refund was issued." });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const submit = () => {
-    previewSequence.current += 1;
-    setPreviewBusy(false);
-    setPreview(null);
-    setPreviewError(null);
-    setResult(null);
-    return post("/api/refunds", { orderId, amount: amount.trim(), reason: reason.trim() });
-  };
-  // After a manager decides in AtlaSent: issues the refund if approved, exactly as it was requested.
-  const checkApproval = () =>
-    post("/api/refunds/resume", { approvalRequestId: result.approvalRequestId }, { approvalRequestId: result.approvalRequestId });
-  const waiting =
-    result && !result.refunded && result.approvalRequestId && ["escalate", "hold", "error"].includes(result.decision);
-
-  const tone = !result ? undefined : result.refunded ? "success" : result.decision === "escalate" ? "warning" : "critical";
-
   return (
     <AdminAction
-      title="Refund via AtlaSent"
+      title="AtlaSent order preview"
       primaryAction={
-        waiting ? (
-          <Button onPress={checkApproval} disabled={busy}>
-            {busy ? "Checking…" : "Check approval"}
-          </Button>
-        ) : (
-          <Button onPress={submit} disabled={!valid || busy || previewBusy || result?.refunded}>
-            {busy ? "Checking…" : "Request refund"}
-          </Button>
-        )
+        <Button onPress={loadPreview} disabled={!orderId || !valid || previewBusy}>
+          {previewBusy ? "Reading order…" : "Preview next step (read only)"}
+        </Button>
       }
       secondaryAction={<Button onPress={close}>Close</Button>}
     >
       <BlockStack gap>
         <Text>
-          Start with a read-only operational preview. It checks the connected order and prepares an operator next step;
-          it does not determine eligibility, authorize or issue a refund, or notify a customer.
+          Read the connected order and prepare an operator next step. This preview does not determine
+          eligibility, authorize or issue a refund, or notify a customer.
         </Text>
-        <TextField label="Amount (USD)" value={amount} onChange={changeAmount} disabled={busy || result?.refunded || waiting} />
-        <Button onPress={loadPreview} disabled={!orderId || !valid || busy || previewBusy || waiting || result?.refunded}>
-          {previewBusy ? "Reading order…" : "Preview next step (read only)"}
-        </Button>
+        <TextField label="Amount (USD)" value={amount} onChange={changeAmount} />
         {previewError && <Banner tone="warning" title="Preview unavailable"><Text>{previewError}</Text></Banner>}
         {preview && (
           <Banner tone={preview.disposition === "routine_candidate" ? "info" : "warning"} title={`Preview only: ${preview.statusLabel}`}>
@@ -161,17 +106,6 @@ function RefundViaAtlaSent() {
             <Text>Server read at: {preview.readAt} (this does not prove the age of Shopify source facts).</Text>
             <Text>Missing requirements: {preview.missingProofLabels.join(", ")}.</Text>
             <Text>Authorization not evaluated. Execution not attempted. No customer message sent.</Text>
-          </Banner>
-        )}
-        <Text>
-          The separate "Request refund" action below is the existing write-capable demo gate, not a result of this preview.
-          It may issue a refund only when the independently configured runtime and Shopify permissions allow it.
-        </Text>
-        <TextField label="Reason for demo refund request" value={reason} onChange={setReason} disabled={busy || result?.refunded || waiting} />
-        {result && (
-          <Banner tone={tone} title={result.message}>
-            {result.denyCode && <Text>Code: {result.denyCode}</Text>}
-            {result.gateRef && <Text>Reference: {result.gateRef}</Text>}
           </Banner>
         )}
       </BlockStack>

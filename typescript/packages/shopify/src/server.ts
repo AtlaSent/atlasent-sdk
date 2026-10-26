@@ -1,6 +1,6 @@
 /**
- * App backend for the demo: the endpoint the "Refund via AtlaSent" admin
- * button calls, and the refunds/create webhook alarm.
+ * Explicit write-capable refund demo backend and refunds/create webhook alarm.
+ * Default `npm run serve` uses preview-server.ts instead.
  *
  *   POST /api/refunds               session-token auth -> guardedShopifyRefund
  *   POST /webhooks/refunds-create   HMAC auth -> auditRefundWebhook
@@ -12,15 +12,17 @@
 import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 import { AtlaSentClient } from "@atlasent/sdk";
-import { createAdminClient, normalizeShopDomain, toOrderGid, type ShopifyAdmin } from "./admin.js";
-import { previewShopifyRefundOperation } from "./operations-preview.js";
+import { createAdminClient, normalizeShopDomain, type ShopifyAdmin } from "./admin.js";
+import { createOperationsPreviewHandler } from "./preview-server.js";
+import { createSessionAuthenticator, preflight, readBody, send } from "./shopify-http.js";
+import { tokenExchangeAdmin } from "./token-exchange-admin.js";
+export { tokenExchangeAdmin } from "./token-exchange-admin.js";
 import { describeResult } from "./describe.js";
 import { moneyToCents } from "./facts.js";
 import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "./guard.js";
 import { createApprovalsClient, type ApprovalsApi } from "./approvals.js";
 import type { RefundDecisionRecord } from "./decision-record.js";
 import { JsonFileLedger, type PermitLedger } from "./ledger.js";
-import { SessionTokenError, verifySessionToken } from "./session-token.js";
 import { auditRefundWebhook, verifyShopifyWebhookHmac, type RefundAuditVerdict, type RefundWebhookPayload } from "./webhook.js";
 import { alarmRecord, appendEvidence } from "./evidence-log.js";
 
@@ -44,56 +46,11 @@ export interface GateServerDeps {
   now?: () => Date;
 }
 
-const MAX_BODY = 64 * 1024;
-
-async function readBody(req: IncomingMessage): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new Error("body too large");
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks);
-}
-
-function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, {
-    "content-type": "application/json",
-    // Admin UI extensions call from a Shopify-hosted origin with a bearer
-    // token, not cookies, so a wildcard origin grants nothing extra.
-    "access-control-allow-origin": "*",
-  });
-  res.end(JSON.stringify(body));
-}
-
 export function createGateHandler(deps: GateServerDeps): RequestListener {
   const allowed = new Set(deps.allowedShops.map(normalizeShopDomain));
 
-  /** Verifies the session token and shop; on failure sends the response and returns null. */
-  function authenticate(req: IncomingMessage, res: ServerResponse): { shop: string; userId?: string; token: string } | null {
-    const auth = req.headers.authorization ?? "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    let shop: string;
-    let userId: string | undefined;
-    try {
-      const s = verifySessionToken(token, {
-        clientId: deps.clientId,
-        clientSecret: deps.clientSecret,
-        ...(deps.now ? { now: deps.now() } : {}),
-      });
-      shop = s.shop;
-      userId = s.userId;
-    } catch (err) {
-      send(res, 401, { error: err instanceof SessionTokenError ? err.message : "unauthorized" });
-      return null;
-    }
-    if (!allowed.has(shop)) {
-      send(res, 403, { error: "shop not allowed" });
-      return null;
-    }
-    return { shop, token, ...(userId !== undefined ? { userId } : {}) };
-  }
+  const authenticate = createSessionAuthenticator(deps);
+  const previewHandler = createOperationsPreviewHandler(deps);
 
   const gateOptions = (shop: string, userId: string | undefined) => ({
     actor: `shopify-staff:${shop}/${userId ?? "unknown"}`,
@@ -132,47 +89,6 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
     );
     warnIfNotLogged(result);
     return send(res, 200, describeResult(result));
-  }
-
-  /** Read-only first-value endpoint: no runtime evaluation, permit or refundCreate. */
-  async function handleOperationsPreview(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const who = authenticate(req, res);
-    if (who === null) return;
-    let body: { orderId?: unknown; amount?: unknown };
-    try {
-      body = JSON.parse((await readBody(req)).toString("utf8"));
-    } catch {
-      return send(res, 400, { error: "invalid JSON" });
-    }
-    if (typeof body.orderId !== "string" || typeof body.amount !== "string") {
-      return send(res, 400, { error: "orderId and amount strings are required" });
-    }
-    let orderId: string;
-    let amountCents: number;
-    try {
-      orderId = toOrderGid(body.orderId);
-      amountCents = moneyToCents(body.amount);
-      if (amountCents <= 0) throw new RangeError("amount must be positive");
-    } catch {
-      return send(res, 400, { error: "invalid order or refund amount" });
-    }
-    let admin: ShopifyAdmin;
-    try {
-      admin = await deps.adminFor(who.shop, who.token);
-    } catch {
-      return send(res, 503, { error: "Shopify connection unavailable", mode: "read_only" });
-    }
-    try {
-      const order = await admin.getOrder(orderId);
-      if (order !== null && order.id !== orderId) {
-        return send(res, 503, { error: "Shopify order identity mismatch", mode: "read_only" });
-      }
-      // The order read is authenticated to the session's allowlisted shop.
-      // Never accept shop, customer, policy, approval or refund facts from the caller.
-      return send(res, 200, previewShopifyRefundOperation(order, amountCents, deps.now?.() ?? new Date()));
-    } catch {
-      return send(res, 503, { error: "Shopify order facts unavailable", mode: "read_only" });
-    }
   }
 
   async function handleRefund(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -265,79 +181,22 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
   return (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const route = `${req.method} ${url.pathname}`;
-    let work: Promise<void>;
-    if (req.method === "OPTIONS" && (url.pathname === "/api/refunds" || url.pathname === "/api/refunds/resume" || url.pathname === "/api/operations/refund-preview")) {
-      res.writeHead(204, {
-        "access-control-allow-origin": "*",
-        "access-control-allow-methods": "POST, OPTIONS",
-        "access-control-allow-headers": "authorization, content-type",
-        "access-control-max-age": "600",
-      });
-      res.end();
+    if (url.pathname === "/api/operations/refund-preview") {
+      previewHandler(req, res);
       return;
     }
-    if (route === "POST /api/operations/refund-preview") work = handleOperationsPreview(req, res);
-    else if (route === "POST /api/refunds") work = handleRefund(req, res);
+    let work: Promise<void>;
+    if (req.method === "OPTIONS" && (url.pathname === "/api/refunds" || url.pathname === "/api/refunds/resume")) {
+      preflight(res);
+      return;
+    }
+    if (route === "POST /api/refunds") work = handleRefund(req, res);
     else if (route === "POST /api/refunds/resume") work = handleResume(req, res);
     else if (route === "POST /webhooks/refunds-create") work = handleWebhook(req, res);
     else if (route === "GET /healthz") work = Promise.resolve(send(res, 200, { ok: true }));
     else work = Promise.resolve(send(res, 404, { error: "not found" }));
     work.catch(() => {
       if (!res.headersSent) send(res, 500, { error: "internal error" });
-    });
-  };
-}
-
-/**
- * Admin API access via Shopify token exchange: trade the staff member's
- * session token for an offline access token.
- *
- * Requests an expiring token (`expiring: "1"`) and caches it only until
- * shortly before `expires_in`. Every request to this backend carries a fresh
- * session token, so an expired token is simply exchanged again; no refresh
- * token is stored. A response without `expires_in` (a non-expiring token)
- * is cached for the life of the process.
- */
-export function tokenExchangeAdmin(opts: {
-  clientId: string;
-  clientSecret: string;
-  apiVersion?: string;
-  fetch?: typeof fetch;
-  now?: () => number;
-}) {
-  const cache = new Map<string, { token: string; expiresAt: number }>();
-  const doFetch = opts.fetch ?? fetch;
-  const now = opts.now ?? Date.now;
-  return async (shop: string, sessionToken: string): Promise<ShopifyAdmin> => {
-    const hit = cache.get(shop);
-    let accessToken = hit !== undefined && hit.expiresAt > now() ? hit.token : undefined;
-    if (accessToken === undefined) {
-      const res = await doFetch(`https://${shop}/admin/oauth/access_token`, {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({
-          client_id: opts.clientId,
-          client_secret: opts.clientSecret,
-          grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
-          subject_token: sessionToken,
-          subject_token_type: "urn:ietf:params:oauth:token-type:id_token",
-          requested_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
-          expiring: "1",
-        }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      const body = (await res.json().catch(() => null)) as { access_token?: string; expires_in?: number } | null;
-      if (!res.ok || typeof body?.access_token !== "string") throw new Error(`token exchange failed: HTTP ${res.status}`);
-      accessToken = body.access_token;
-      const ttlMs = typeof body.expires_in === "number" && body.expires_in > 0 ? body.expires_in * 1000 : Infinity;
-      // Refresh a minute early so a token never expires mid-refund.
-      cache.set(shop, { token: accessToken, expiresAt: now() + Math.max(0, ttlMs - 60_000) });
-    }
-    return createAdminClient({
-      shop,
-      accessToken,
-      ...(opts.apiVersion ? { apiVersion: opts.apiVersion } : {}),
-      fetch: doFetch,
     });
   };
 }
@@ -393,3 +252,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }),
   ).listen(port, () => console.log(`AtlaSent refund gate listening on :${port} for ${shop}`));
 }
+
