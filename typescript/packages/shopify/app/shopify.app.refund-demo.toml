@@ -24,4 +24,3 @@ api_version = "2025-10"
   # The alarm: every refund, however it was made, is checked against the permit ledger.
   topics = ["refunds/create"]
   uri = "/webhooks/refunds-create"
-

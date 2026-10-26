@@ -134,8 +134,11 @@ describe("standalone read-only preview server", () => {
       ]);
       expect(output).toContain("AtlaSent read-only order preview listening");
     } finally {
-      child.kill();
-      await once(child, "exit");
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, "exit");
+        child.kill();
+        await exited;
+      }
     }
   });
 });
