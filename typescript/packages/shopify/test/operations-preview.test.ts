@@ -48,6 +48,20 @@ describe("read-only Shopify post-purchase operations preview", () => {
     });
   });
 
+  it("does not silently discard unknown or pending payment statuses", () => {
+    for (const status of ["UNKNOWN", "PENDING", "FAILURE"] as const) {
+      const uncertain = order();
+      uncertain.transactions.push({
+        ...uncertain.transactions[0]!, id: `unresolved-${status}`,
+        kind: "CAPTURE", status,
+      });
+      expect(previewShopifyRefundOperation(uncertain, 100, NOW)).toMatchObject({
+        disposition: "needs_attention", next_step: "inspect_payment_history",
+        authorization: "not_evaluated", execution: "not_attempted",
+      });
+    }
+  });
+
   it("holds full pages, malformed sources and absent orders as unknown", () => {
     const full = order();
     full.transactions = Array.from({ length: 100 }, (_, i) => ({ ...full.transactions[0]!, id: `tx-${i}` }));

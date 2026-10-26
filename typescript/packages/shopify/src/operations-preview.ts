@@ -103,6 +103,14 @@ export function previewShopifyRefundOperation(
       order_status: facts.order_status,
       refundable_cents: facts.refundable_cents,
     };
+    // Unknown, pending or failed payment/refund transactions cannot prove a
+    // complete payment history. Never silently drop them and call it routine.
+    if (order.transactions.some(t =>
+      ["SALE", "CAPTURE", "REFUND"].includes(t.kind.toUpperCase()) &&
+      t.status.toUpperCase() !== "SUCCESS")) {
+      return result(order.id, amountCents, at, "needs_attention", "inspect_payment_history",
+        "Payment or refund transactions are unresolved or unsuccessful; reconcile before proceeding.", observed);
+    }
     // Multiple successful captures/sales require payment-specific allocation.
     const captures = order.transactions.filter(t =>
       (t.kind === "SALE" || t.kind === "CAPTURE") && t.status === "SUCCESS");
