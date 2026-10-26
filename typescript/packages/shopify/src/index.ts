@@ -43,6 +43,7 @@ export {
 } from "./ledger.js";
 export { verifyShopifyWebhookHmac, auditRefundWebhook, type RefundWebhookPayload, type RefundAuditVerdict } from "./webhook.js";
 export { verifySessionToken, signSessionToken, SessionTokenError, type VerifiedSession } from "./session-token.js";
+export { createPreviewObservationPublisher, type PreviewObservationInput, type PreviewObservationReceipt } from "./action-inbox.js";
 export { createOperationsPreviewHandler, type OperationsPreviewDeps } from "./preview-server.js";
 export { createGateHandler, tokenExchangeAdmin, type GateServerDeps } from "./server.js";
 export { describeResult } from "./describe.js";

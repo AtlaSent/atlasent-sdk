@@ -1,8 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { centsFromAmount, parseRefundPreview } from "../app/extensions/atlasent-refund/src/preview-view.js";
+import { centsFromAmount, parseRefundPreview, parseInboxDestination, parseObservationReceipt } from "../app/extensions/atlasent-refund/src/preview-view.js";
 
 const orderId = "gid://shopify/Order/1001";
 const amount = "18.99";
+
+const destination = { organization_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", connector_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" };
+const receipt = () => ({
+  schema: "atlasent.connector-observation-receipt.v1", ...destination,
+  event_id: "cccccccc-cccc-cccc-cccc-cccccccccccc", observation_id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+  idempotency_key: "dddddddd-dddd-dddd-dddd-dddddddddddd", received_at: "2026-10-26T01:00:00Z",
+  capability_level: "observe", authority_effect: "none", execution: "not_attempted", verification: "not_performed", duplicate: false,
+});
+
+describe("Observe handoff presentation", () => {
+  it("offers only an explicit valid destination and displays a matching non-authorizing receipt", () => {
+    expect(parseInboxDestination(null)).toBeNull();
+    expect(parseInboxDestination({ organization_id: "bad", connector_id: destination.connector_id })).toBeNull();
+    expect(parseInboxDestination(destination)).toEqual(destination);
+    expect(parseObservationReceipt(receipt(), destination)).toMatchObject({ organization_id: destination.organization_id });
+  });
+
+  it.each([
+    { organization_id: "other-org" }, { connector_id: "other-connector" }, { event_id: "bad" },
+    { observation_id: "other-request" }, { capability_level: "enforce" }, { authority_effect: "approved" },
+    { execution: "succeeded" }, { verification: "verified" }, { decision: "allow" }, { permit_token: "forged" },
+  ])("never shows success for a wrong-destination or authorizing receipt %j", (patch) => {
+    expect(parseObservationReceipt({ ...receipt(), ...patch }, destination)).toBeNull();
+  });
+});
 const valid = () => ({
   schema: "atlasent.shopify_refund_operations_preview.v1",
   mode: "read_only",
@@ -88,3 +113,4 @@ describe("Shopify admin read-only refund preview presentation", () => {
     });
   });
 });
+

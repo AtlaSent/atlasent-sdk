@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "refund": "tsx src/cli.ts",
     "serve": "tsx src/preview-server.ts",
+    "serve:inbox": "tsx src/inbox-server.ts",
     "serve:refund-demo": "tsx src/server.ts",
     "agent": "tsx src/agent-cli.ts",
     "seed-dev-store": "tsx scripts/seed-dev-store.ts"
@@ -29,7 +30,8 @@
     "@types/node": "^25.6.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.5",
+    "react": "18.3.1",
+    "react-test-renderer": "18.3.1"
   }
 }
-

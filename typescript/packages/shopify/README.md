@@ -96,6 +96,66 @@ or scope downgrade has been verified here. A preliminary `routine_candidate`
 is not merchant eligibility or authorization. Do not publish this as a finished
 Commerce Operations Autopilot product.
 
+## Explicit Action Inbox Observe handoff (internal/staging integration)
+
+This uses API [#4727](https://github.com/AtlaSent/atlasent-api/pull/4727)'s
+`POST /v1-connectors/{id}/observations`, **not** the generic event ingest
+route that also evaluates cross-system rules. Deploy and verify that runtime
+route before running this integration. Source code is not deployment proof.
+
+The normal `npm run serve` stays independent of AtlaSent and exposes no Inbox
+write. The separate `npm run serve:inbox` command adds an explicit button after
+a preview: **Add fresh preview to AtlaSent Inbox**. It displays the configured
+runtime organization before submission. The server validates that destination,
+re-reads the Shopify order and checks the AtlaSent key and current connector
+before appending an observation. It never accepts a browser-supplied preview,
+merchant eligibility, authority or destination override. A changed destination
+requires reading the preview again.
+
+Prerequisites for an authorized internal staging operator:
+
+- An existing active runtime `custom` connector in the intended bound tenant,
+  with `config.provider = "shopify"`, exact normalized `config.shop_domain`,
+  and `environment` staging or sandbox. This config is a declared routing
+  binding, **not proof of merchant/customer ownership or legal authority**.
+- An already-authorized server credential with `connectors:read` and
+  `connectors:write`. The latter is reserved (mint tier 3), unavailable to
+  customer API keys. Do not broaden/mint a customer key to make the demo work.
+  This is not the finished self-service merchant connection flow.
+- Verify that the runtime organization is the destination selected by the
+  console workspace's existing tenant-authority binding; never pick the first
+  org. This command does not create/repair that binding or store credentials
+  in a browser.
+
+```sh
+# Supply credentials through the authorized server environment, never source/URL/browser.
+SHOPIFY_CLIENT_ID=... SHOPIFY_CLIENT_SECRET=... SHOPIFY_SHOP=... \
+ATLASENT_INBOX_BASE_URL=https://YOUR_STAGING_RUNTIME/functions/v1 \
+ATLASENT_INBOX_API_KEY=... ATLASENT_INBOX_ORG_ID=... \
+ATLASENT_INBOX_CONNECTOR_ID=... ATLASENT_INBOX_ENVIRONMENT=test npm run serve:inbox
+```
+
+The Shopify app still needs only `read_orders`; no refund-write permission,
+refund webhook, permit ledger or approval client is added. The provider session
+and allowlisted shop are verified for every read and handoff. Preview reads more
+than 60 seconds old are refused, including when destination checks take too long.
+The receipt is accepted only for the exact organization, connector and observation
+identity, with `authority_effect:none`, `execution:not_attempted` and
+`verification:not_performed`.
+
+Open the matching organization's Action Inbox **History** to see the observation.
+It is not a pending approval. No automatic retry follows an uncertain submission;
+check history before submitting again. Amount edits and Close are disabled while a
+submission is pending. Its receipt or unconfirmed warning stays bound to the
+submitted order, amount and organization even if Shopify changes the selected
+order during the request. Separate submissions are separate
+observations, not durable refund business requests or execution attempts.
+
+This remains unverified against a real development store/runtime. Full merchant
+consent and selected-org self-service installation, customer role/plan access,
+revoked-consent/pagination acceptance, API #4656's 14 controls and native Stripe
+TEST outcome/readback/export remain open. Do not call the product released.
+
 ## The pieces
 
 | | What | Where |
