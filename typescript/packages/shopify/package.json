@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "refund": "tsx src/cli.ts",
     "serve": "tsx src/preview-server.ts",
+    "serve:inbox": "tsx src/inbox-server.ts",
     "serve:refund-demo": "tsx src/server.ts",
     "agent": "tsx src/agent-cli.ts",
     "seed-dev-store": "tsx scripts/seed-dev-store.ts"

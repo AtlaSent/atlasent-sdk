@@ -15,6 +15,26 @@ const NEXT_STEP = Object.freeze({
   retry_source_read: 'Reconnect or retry the authenticated Shopify order read',
 });
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function parseInboxDestination(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      !UUID.test(value.organization_id) || !UUID.test(value.connector_id)) return null;
+  return { organization_id: value.organization_id, connector_id: value.connector_id };
+}
+
+export function parseObservationReceipt(value, destination) {
+  if (!value || !destination || typeof value !== 'object' || Array.isArray(value) ||
+      value.schema !== 'atlasent.connector-observation-receipt.v1' ||
+      value.organization_id !== destination.organization_id || value.connector_id !== destination.connector_id ||
+      !UUID.test(value.event_id) || !UUID.test(value.observation_id) || value.idempotency_key !== value.observation_id ||
+      value.capability_level !== 'observe' || value.authority_effect !== 'none' ||
+      value.execution !== 'not_attempted' || value.verification !== 'not_performed' ||
+      typeof value.duplicate !== 'boolean' || typeof value.received_at !== 'string' || !Number.isFinite(Date.parse(value.received_at)) ||
+      ['decision', 'permit_id', 'permit_token', 'approval_satisfied', 'verified'].some(k => Object.hasOwn(value, k))) return null;
+  return { event_id: value.event_id, organization_id: value.organization_id, received_at: value.received_at };
+}
+
 /** Convert a positive decimal dollar string into exact cents, without float rounding. */
 export function centsFromAmount(value) {
   if (typeof value !== 'string') return null;
@@ -68,3 +88,4 @@ export function parseRefundPreview(payload, expectedOrderId, expectedAmount) {
     missingProofLabels: payload.missing_proofs.map(p => p.replaceAll('_', ' ')),
   };
 }
+

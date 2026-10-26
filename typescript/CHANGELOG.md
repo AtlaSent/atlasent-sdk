@@ -8,6 +8,15 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: explicit internal Shopify preview → Action Inbox observation
+
+The private Shopify integration has a separate `serve:inbox` command, backed by
+API #4727's Observe-only connector route. An explicit action re-reads the order,
+checks the current key/tenant/shop/connector/environment and validates a matching
+non-authorizing receipt. The default preview remains independent of AtlaSent.
+This requires a reserved server credential; no customer scope or plan is widened.
+Live merchant/tenant self-service acceptance and refund execution remain open.
+
 ### Fixed: Shopify preview defaults to a read-only app and server (private demo)
 
 `@atlasent/shopify` now runs an order-preview-only server with `npm run serve`,

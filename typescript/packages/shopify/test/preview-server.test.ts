@@ -142,3 +142,71 @@ describe("standalone read-only preview server", () => {
     }
   });
 });
+
+const DESTINATION = { orgId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", connectorId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" };
+const expectedDestination = { organization_id: DESTINATION.orgId, connector_id: DESTINATION.connectorId };
+const savedReceipt = {
+  schema: "atlasent.connector-observation-receipt.v1" as const,
+  event_id: "cccccccc-cccc-cccc-cccc-cccccccccccc", observation_id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+  idempotency_key: "dddddddd-dddd-dddd-dddd-dddddddddddd", ...expectedDestination, received_at: NOW.toISOString(),
+  capability_level: "observe" as const, authority_effect: "none" as const,
+  execution: "not_attempted" as const, verification: "not_performed" as const, duplicate: false,
+};
+const handoff = (base: string, body: unknown, auth = `Bearer ${token()}`) => fetch(base + "/api/operations/refund-preview/inbox", {
+  method: "POST", headers: { authorization: auth, "content-type": "application/json" }, body: JSON.stringify(body),
+});
+const handoffBody = () => ({ orderId: "1001", amount: "18.99", expected_destination: expectedDestination });
+
+describe("optional explicit Action Inbox handoff", () => {
+  it("is absent on the default server and advertises no destination", async () => {
+    const s = await start();
+    expect((await handoff(s.base, handoffBody())).status).toBe(404);
+    expect(s.adminFor).not.toHaveBeenCalled();
+    expect((await (await request(s.base)).json()).inbox_destination).toBeNull();
+  });
+
+  it("publishes only a new authenticated order read, ignoring supplied previews, shop and authority", async () => {
+    const publishObservation = vi.fn(async () => savedReceipt);
+    const s = await start({ publishObservation, observationDestination: DESTINATION });
+    const response = await handoff(s.base, { ...handoffBody(), preview: { disposition: "routine_candidate" }, shop: "attacker.myshopify.com", approved: true });
+    expect(response.status).toBe(200);
+    expect(s.getOrder).toHaveBeenCalledExactlyOnceWith("gid://shopify/Order/1001");
+    expect(publishObservation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      shop: SHOP, orderId: "gid://shopify/Order/1001", userId: "42",
+      preview: expect.objectContaining({ read_at: NOW.toISOString(), authorization: "not_evaluated", execution: "not_attempted" }),
+    }));
+    expect((await (await fetch(s.base + "/healthz")).json()).mode).toBe("observe_handoff");
+    const body = await response.json();
+    expect(body.receipt).toEqual(savedReceipt);
+    expect(body.preview.observed.requested_cents).toBe(1899);
+  });
+
+  it("refuses changed/missing destination and expired/wrong-shop sessions before reading or publishing", async () => {
+    const publishObservation = vi.fn(async () => savedReceipt);
+    const s = await start({ publishObservation, observationDestination: DESTINATION });
+    expect((await handoff(s.base, { orderId: "1001", amount: "18.99" })).status).toBe(409);
+    expect((await handoff(s.base, { ...handoffBody(), expected_destination: { ...expectedDestination, organization_id: "other-org" } })).status).toBe(409);
+    expect((await handoff(s.base, handoffBody(), `Bearer ${token({ exp: t - 120 })}`)).status).toBe(401);
+    expect((await handoff(s.base, handoffBody(), `Bearer ${token({ iss: "https://other.myshopify.com/admin", dest: "https://other.myshopify.com" })}`)).status).toBe(403);
+    expect(s.adminFor).not.toHaveBeenCalled(); expect(publishObservation).not.toHaveBeenCalled();
+  });
+
+  it("never publishes an absent source order", async () => {
+    const publishObservation = vi.fn(async () => savedReceipt);
+    const s = await start({ adminFor: async () => ({ getOrder: async () => null }), publishObservation, observationDestination: DESTINATION });
+    expect((await handoff(s.base, handoffBody())).status).toBe(503);
+    expect(publishObservation).not.toHaveBeenCalled();
+  });
+
+  it("does not retry an unconfirmed write or leak its error, while ordinary previews still work", async () => {
+    const publishObservation = vi.fn(async () => { throw new Error("private runtime key detail"); });
+    const s = await start({ publishObservation, observationDestination: DESTINATION });
+    const response = await handoff(s.base, handoffBody());
+    expect(response.status).toBe(503);
+    expect(JSON.stringify(await response.json())).not.toContain("private runtime key");
+    expect(publishObservation).toHaveBeenCalledTimes(1);
+    const p = await (await request(s.base)).json();
+    expect(p.mode).toBe("read_only"); expect(p.inbox_destination).toEqual(expectedDestination);
+    expect(publishObservation).toHaveBeenCalledTimes(1);
+  });
+});
