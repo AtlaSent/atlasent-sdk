@@ -8,6 +8,18 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Fixed: Shopify preview defaults to a read-only app and server (private demo)
+
+`@atlasent/shopify` now runs an order-preview-only server with `npm run serve`,
+without AtlaSent runtime credentials, approval clients or a permit ledger.
+The default Shopify app requests `read_orders` only, subscribes to no refund
+webhook, and its order action exposes no refund or approval-resume button.
+The existing guarded write demo remains explicit through
+`npm run serve:refund-demo` and `shopify.app.refund-demo.toml`. Existing
+write-capable installs must use a separate app/consent path and verify granted
+scopes; this source change does not revoke old permissions. Live development
+store, merchant/tenant binding and full refund acceptance remain unverified.
+
 ### Fixed: `keySelf()` accepts a key with no stored rate limit (contract-conforming)
 
 `GET /v1-api-key-self` is now served by the runtime (atlasent-api#4632); before
