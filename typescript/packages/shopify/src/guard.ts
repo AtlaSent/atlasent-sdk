@@ -421,7 +421,9 @@ async function decideShopifyRefund(
     });
   } catch (err) {
     if (err instanceof RefundReservationError) {
-      return { refunded: false, decision: err.code === "request_conflict" ? "invalid_request" : err.code, reason: err.message, ...evidence };
+      // Recovery needs the existing execution reference, not this retry's
+      // unrecorded UUID or its newly evaluated audit/payload binding.
+      return { refunded: false, decision: err.code === "request_conflict" ? "invalid_request" : err.code, reason: err.message, gateRef: err.gateRef, facts };
     }
     return { refunded: false, decision: "error", reason: `could not record the permit: ${errorText(err)}`, ...evidence };
   }
@@ -637,6 +639,10 @@ export async function resumeApprovedShopifyRefund(
       ...(p.business_request_id ? { business_request_id: p.business_request_id } : {}),
     });
   } catch (err) {
+    if (err instanceof RefundReservationError) {
+      await close("stopped", err.message);
+      return finish({ refunded: false, decision: err.code === "request_conflict" ? "invalid_request" : err.code, reason: err.message, gateRef: err.gateRef }, "approval_stopped", err.message);
+    }
     return stop("error", `could not record the permit: ${errorText(err)}`, facts);
   }
   const abort = async (decision: RefundBlockReason, reason: string) => {

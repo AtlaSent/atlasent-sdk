@@ -66,8 +66,11 @@ describe("POST /api/refunds (the admin button)", () => {
     const s = await start();
     expect((await postRefund(s.base, { orderId: "1001", amount: "18.99", businessRequestId: "" })).status).toBe(400);
     expect(s.runtime.evaluateBodies).toHaveLength(0);
-    await postRefund(s.base, { orderId: "1001", amount: "18.99" });
-    expect(await (await postRefund(s.base, { orderId: "1001", amount: "18.99" })).json()).toMatchObject({ decision: "duplicate_request" });
+    const first = await (await postRefund(s.base, { orderId: "1001", amount: "18.99" })).json();
+    const retry = await (await postRefund(s.base, { orderId: "1001", amount: "18.99" })).json();
+    expect(retry).toMatchObject({ decision: "duplicate_request", gateRef: first.gateRef });
+    const recovered = await fetch(`${s.base}/api/refunds/reconcile`, { method: "POST", headers: { authorization: `Bearer ${token()}`, "content-type": "application/json" }, body: JSON.stringify({ gateRef: retry.gateRef }) });
+    expect(await recovered.json()).toMatchObject({ status: "succeeded" });
     expect(s.shopify.refunds).toHaveLength(1);
   });
 

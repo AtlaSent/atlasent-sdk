@@ -58,9 +58,23 @@ describe("supported source facts at both execution reads", () => {
 describe("business request replay and single-payment interlock", () => {
   it("the same ID cannot issue a second refund or change its amount", async () => {
     const s = setup();
-    expect((await s.refund()).refunded).toBe(true);
-    expect(await s.refund()).toMatchObject({ refunded: false, decision: "duplicate_request" });
+    const first = await s.refund();
+    expect(first.refunded).toBe(true);
+    expect(await s.refund()).toMatchObject({ refunded: false, decision: "duplicate_request", gateRef: first.gateRef });
     expect(await s.refund("case-1001", 1900)).toMatchObject({ refunded: false, decision: "invalid_request" });
+    expect(s.shopify.refunds).toHaveLength(1);
+  });
+  it("a definitively pre-send aborted request retries with fresh authorization and the same stable ID", async () => {
+    const s = setup();
+    s.shopify.onRead = n => { if (n === 1) s.shopify.failGet = true; };
+    const first = await s.refund();
+    expect((await s.ledger.get(first.gateRef))?.aborted_reason).toBe("error");
+    expect(s.shopify.refunds).toHaveLength(0);
+    s.shopify.failGet = false;
+    delete s.shopify.onRead;
+    expect((await s.refund()).refunded).toBe(true);
+    expect(s.runtime.evaluateBodies).toHaveLength(2);
+    expect(s.runtime.verifyBodies).toHaveLength(2);
     expect(s.shopify.refunds).toHaveLength(1);
   });
   it("normalizes the configured shop so spelling changes cannot bypass request replay", async () => {
@@ -99,7 +113,7 @@ describe("business request replay and single-payment interlock", () => {
     expect(first).toMatchObject({ refunded: false, decision: "unconfirmed" });
     expect(describeResult(first).message).toMatch(/unconfirmed.*before issuing another refund/);
     const reopened = new JsonFileLedger(s.path!);
-    expect(await s.refund("fresh-key", 1899, { ...s.options, ledger: reopened })).toMatchObject({ decision: "reconciliation_required" });
+    expect(await s.refund("fresh-key", 1899, { ...s.options, ledger: reopened })).toMatchObject({ decision: "reconciliation_required", gateRef: first.gateRef });
     expect(s.shopify.refunds).toHaveLength(1);
     const nativeId = [...s.shopify.nativeRefunds.keys()][0]!;
     expect(await reconcileShopifyRefund(s.shopify, reopened, { gateRef: first.gateRef, shop: SHOP, environment: "test", candidateRefundId: nativeId }))

@@ -17,7 +17,7 @@
 
 import { createHash } from "node:crypto";
 import { AtlaSentClient } from "@atlasent/sdk";
-import type { CreatedRefund, GetOrderOptions, RefundCreateInput, ShopifyAdmin, ShopifyOrder } from "../../shopify/src/admin.js";
+import type { CreatedRefund, GetOrderOptions, RefundCreateInput, RefundReadback, ShopifyAdmin, ShopifyOrder } from "../../shopify/src/admin.js";
 import type { RefundWebhookPayload } from "../../shopify/src/webhook.js";
 import type { CreateRefundInput, StripeApi, StripePaymentIntent, StripeRefund } from "../../stripe/src/stripe.js";
 import type { ApprovalsApi } from "../../shopify/src/approvals.js";
@@ -117,6 +117,7 @@ export interface SimOrderSpec {
 export class SimShopify implements ShopifyAdmin {
   readonly orders = new Map<string, ShopifyOrder>();
   readonly webhooks: RefundWebhookPayload[] = [];
+  private nativeRefunds = new Map<string, RefundReadback>();
   private refundSeq = 0;
 
   constructor(specs: SimOrderSpec[], now: Date) {
@@ -163,7 +164,20 @@ export class SimShopify implements ShopifyAdmin {
   async createRefund(input: RefundCreateInput): Promise<CreatedRefund> {
     const t = input.transactions[0]!;
     const { id } = this.record(input.orderId, t.amount, input.note);
-    return { id: `gid://shopify/Refund/${id}`, createdAt: new Date().toISOString(), totalRefunded: { amount: t.amount, currencyCode: "USD" } };
+    const refund = { id: `gid://shopify/Refund/${id}`, createdAt: new Date().toISOString(), totalRefunded: { amount: t.amount, currencyCode: "USD" } };
+    this.nativeRefunds.set(refund.id, {
+      ...refund, order: { id: input.orderId }, note: input.note,
+      transactions: { pageInfo: { hasNextPage: false }, nodes: [{
+        id: `gid://shopify/OrderTransaction/r${id}`, kind: "REFUND", status: "SUCCESS", gateway: t.gateway,
+        amountSet: { shopMoney: { amount: t.amount, currencyCode: "USD" } }, parentTransaction: { id: t.parentId },
+      }] },
+    });
+    return refund;
+  }
+
+  async getRefund(refundId: string): Promise<RefundReadback | null> {
+    const refund = this.nativeRefunds.get(refundId);
+    return refund ? structuredClone(refund) : null;
   }
 
   /** A staff member refunding in the Shopify admin, around the gate. */
@@ -219,4 +233,5 @@ export class SimStripe implements StripeApi {
     return this.record(pi, amount, {});
   }
 }
+
 

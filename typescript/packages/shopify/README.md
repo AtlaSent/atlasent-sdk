@@ -23,6 +23,10 @@ or mismatched native transaction is `unconfirmed`, not “nothing happened.”
 A new business ID does not bypass an unresolved execution. Only an exact
 successful native refund transaction readback establishes `refunded: true`.
 `refundCreate` returning an ID alone is not completion evidence.
+Duplicate/interlocked results return the original execution's `gateRef`, so
+a lost HTTP response can be recovered through reconciliation. An identical
+request stopped definitively before submission can retry with its stable ID,
+but must pass fresh evaluation, verification, recording and source reads.
 
 `reconcileShopifyRefund` reads the original outcome without submitting another
 refund. It is available as authenticated `POST /api/refunds/reconcile` with

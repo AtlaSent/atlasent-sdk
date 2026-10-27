@@ -87,7 +87,7 @@ export interface PermitLedger {
 }
 
 export class RefundReservationError extends Error {
-  constructor(public readonly code: "duplicate_request" | "request_conflict" | "reconciliation_required", message: string) {
+  constructor(public readonly code: "duplicate_request" | "request_conflict" | "reconciliation_required", message: string, public readonly gateRef: string) {
     super(message);
     this.name = "RefundReservationError";
   }
@@ -111,16 +111,21 @@ export class InMemoryLedger implements PermitLedger {
       for (const previous of this.entries.values()) {
         const sameScope = previous.shop === entry.shop && previous.environment === entry.environment;
         if (sameScope && entry.business_request_id !== undefined && previous.business_request_id === entry.business_request_id) {
+          const sameRequest = previous.execution_digest === entry.execution_digest;
+          // Only a definitively pre-send abort can retry the same immutable
+          // operation, after a fresh evaluation and consumed permit.
+          if (sameRequest && previous.aborted_reason !== undefined) continue;
           throw new RefundReservationError(
-            previous.execution_digest === entry.execution_digest ? "duplicate_request" : "request_conflict",
+            sameRequest ? "duplicate_request" : "request_conflict",
             "this business request was already recorded; inspect its original outcome instead of issuing another refund",
+            previous.gate_ref,
           );
         }
         const unresolved = previous.refund_id === undefined && previous.aborted_reason === undefined;
         const samePayment = sameScope && previous.parent_transaction_id === entry.parent_transaction_id;
         const legacyOrder = previous.shop === undefined && previous.order_id === entry.order_id;
         if (unresolved && (samePayment || legacyOrder)) {
-          throw new RefundReservationError("reconciliation_required", "an earlier refund on this payment is in flight or unconfirmed; reconcile it before another request");
+          throw new RefundReservationError("reconciliation_required", "an earlier refund on this payment is in flight or unconfirmed; reconcile it before another request", previous.gate_ref);
         }
       }
     }
