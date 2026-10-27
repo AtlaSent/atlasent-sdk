@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createAdminClient } from "../src/admin.js";
+import { createAdminClient, DEFAULT_ADMIN_API_VERSION } from "../src/admin.js";
 import { guardedShopifyRefund, resumeApprovedShopifyRefund, type RefundGuardOptions } from "../src/guard.js";
 import { InMemoryLedger, JsonFileLedger } from "../src/ledger.js";
 import { describeResult } from "../src/describe.js";
@@ -179,7 +179,7 @@ describe("completion is native transaction truth", () => {
       expect(body.query).toContain("AtlaSentRefundReadback");
       expect(body.query).not.toContain("refundCreate");
       expect(body.variables).toEqual({ id: "gid://shopify/Refund/91" });
-      return Response.json({ data: { node: null } });
+      return Response.json({ data: { node: null } }, { headers: { "x-shopify-api-version": DEFAULT_ADMIN_API_VERSION } });
     }) as typeof fetch });
     expect(await admin.getRefund!("gid://shopify/Refund/91")).toBeNull();
     await expect(admin.getRefund!("not-a-refund")).rejects.toThrow();

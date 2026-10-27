@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAdminClient } from "../src/admin.js";
+import { createAdminClient, DEFAULT_ADMIN_API_VERSION } from "../src/admin.js";
 import { tokenExchangeAdmin } from "../src/server.js";
 
 function fakeShopifyHttp(exchange: Array<{ access_token: string; expires_in?: number }>) {
@@ -14,7 +14,7 @@ function fakeShopifyHttp(exchange: Array<{ access_token: string; expires_in?: nu
       return new Response(JSON.stringify(next ?? {}), { status: next ? 200 : 400 });
     }
     queries.push({ token: new Headers(init?.headers).get("x-shopify-access-token"), query: body.query });
-    return new Response(JSON.stringify({ data: { order: null } }), { status: 200 });
+    return new Response(JSON.stringify({ data: { order: null } }), { status: 200, headers: { "x-shopify-api-version": DEFAULT_ADMIN_API_VERSION } });
   }) as typeof fetch;
   return { impl, exchanges, queries };
 }
@@ -65,3 +65,4 @@ describe("the order query", () => {
     expect(http.queries[1]!.query).toMatch(/\bemail\b/);
   });
 });
+

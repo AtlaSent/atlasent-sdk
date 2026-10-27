@@ -12,6 +12,7 @@ export {
   type RefundCreateInput,
   type CreatedRefund,
   type RefundReadback,
+  type RefundSubmissionOptions,
 } from "./admin.js";
 export { deriveRefundFacts, moneyToCents, centsToMoney, SUPPORTED_CURRENCY, type RefundFacts } from "./facts.js";
 export { previewShopifyRefundOperation, type RefundOperationsPreview, type PreviewDisposition, type PreviewNextStep } from "./operations-preview.js";
