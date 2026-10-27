@@ -7,7 +7,8 @@
  * them against the API version you pin before the first live refund.
  */
 
-export const DEFAULT_ADMIN_API_VERSION = "2025-10";
+/** Reviewed native contract; upgrades require adapter and development-store acceptance. */
+export const DEFAULT_ADMIN_API_VERSION = "2026-07";
 
 export interface ShopifyMoney {
   amount: string;
@@ -62,6 +63,12 @@ export interface CreatedRefund {
   totalRefunded: ShopifyMoney | null;
 }
 
+/** Provider deduplication identity, not a permit or an authority assertion. */
+export interface RefundSubmissionOptions {
+  /** The gate's saved execution UUID; never regenerated inside a native send. */
+  idempotencyKey: string;
+}
+
 /** Native readback, separate from refundCreate's acknowledgement. */
 export interface RefundReadback extends CreatedRefund {
   order: { id: string };
@@ -84,7 +91,7 @@ export interface GetOrderOptions {
 /** What the guard needs from Shopify. Tests substitute a fake. */
 export interface ShopifyAdmin {
   getOrder(orderId: string, options?: GetOrderOptions): Promise<ShopifyOrder | null>;
-  createRefund(input: RefundCreateInput): Promise<CreatedRefund>;
+  createRefund(input: RefundCreateInput, submission?: RefundSubmissionOptions): Promise<CreatedRefund>;
   /** Missing support never establishes completion. Does not issue a refund. */
   getRefund?(refundId: string): Promise<RefundReadback | null>;
 }
@@ -108,8 +115,8 @@ const orderQuery = (includeEmail: boolean) => `query AtlaSentRefundFacts($id: ID
   }
 }`;
 
-const REFUND_MUTATION = `mutation AtlaSentRefund($input: RefundInput!) {
-  refundCreate(input: $input) {
+const REFUND_MUTATION = `mutation AtlaSentRefund($input: RefundInput!, $idempotencyKey: String!) {
+  refundCreate(input: $input) @idempotent(key: $idempotencyKey) {
     refund { id createdAt totalRefundedSet { shopMoney { amount currencyCode } } }
     userErrors { field message }
   }
@@ -136,9 +143,18 @@ export interface AdminClientOptions {
   /** `my-store.myshopify.com` */
   shop: string;
   accessToken: string;
+  /** Only the reviewed DEFAULT_ADMIN_API_VERSION is accepted by this adapter. */
   apiVersion?: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
+}
+
+/** A missing/fallen-forward version is not evidence for the reviewed native contract. */
+export function assertShopifyApiVersion(response: Response, expected = DEFAULT_ADMIN_API_VERSION): void {
+  const actual = response.headers.get("x-shopify-api-version");
+  if (actual !== expected) {
+    throw new ShopifyAdminError(`Shopify API version mismatch: requested ${expected}, served ${actual ?? "unknown"}; review the integration before continuing`);
+  }
 }
 
 /** Accepts a numeric id or a full `gid://shopify/Order/<id>`. */
@@ -170,6 +186,9 @@ export function normalizeShopDomain(shop: string): string {
 export function createAdminClient(opts: AdminClientOptions): ShopifyAdmin {
   const shop = normalizeShopDomain(opts.shop);
   const version = opts.apiVersion ?? DEFAULT_ADMIN_API_VERSION;
+  if (version !== DEFAULT_ADMIN_API_VERSION) {
+    throw new ShopifyAdminError(`this adapter requires reviewed API version ${DEFAULT_ADMIN_API_VERSION}; received ${version}`);
+  }
   const doFetch = opts.fetch ?? fetch;
   const timeoutMs = opts.timeoutMs ?? 10_000;
 
@@ -179,9 +198,12 @@ export function createAdminClient(opts: AdminClientOptions): ShopifyAdmin {
       headers: { "content-type": "application/json", "x-shopify-access-token": opts.accessToken },
       body: JSON.stringify({ query, variables }),
       signal: AbortSignal.timeout(timeoutMs),
+      redirect: "error",
     });
+    if (!res.ok) throw new ShopifyAdminError(`Shopify Admin API HTTP ${res.status}`);
+    assertShopifyApiVersion(res, version);
     const body = (await res.json().catch(() => null)) as { data?: T; errors?: unknown } | null;
-    if (!res.ok || body === null) throw new ShopifyAdminError(`Shopify Admin API HTTP ${res.status}`);
+    if (body === null) throw new ShopifyAdminError(`Shopify Admin API HTTP ${res.status}: unreadable response`);
     if (body.errors !== undefined) throw new ShopifyAdminError(`Shopify Admin API error: ${JSON.stringify(body.errors)}`);
     if (body.data === undefined) throw new ShopifyAdminError("Shopify Admin API returned no data");
     return body.data;
@@ -192,13 +214,19 @@ export function createAdminClient(opts: AdminClientOptions): ShopifyAdmin {
       const data = await graphql<{ order: ShopifyOrder | null }>(orderQuery(options?.includeEmail === true), { id: toOrderGid(orderId) });
       return data.order;
     },
-    async createRefund(input) {
+    async createRefund(input, submission) {
+      // Required in the native client even though the interface keeps an
+      // additive optional argument for existing injected implementations.
+      const idempotencyKey = submission?.idempotencyKey;
+      if (typeof idempotencyKey !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+        throw new ShopifyAdminError("a saved execution UUID is required as the refund idempotency key; no request was sent");
+      }
       const data = await graphql<{
         refundCreate: {
           refund: { id: string; createdAt: string | null; totalRefundedSet: { shopMoney: ShopifyMoney } | null } | null;
           userErrors: { field: string[] | null; message: string }[];
         };
-      }>(REFUND_MUTATION, { input });
+      }>(REFUND_MUTATION, { input, idempotencyKey });
       const r = data.refundCreate;
       if (r.userErrors.length > 0) {
         throw new ShopifyAdminError(`refundCreate rejected: ${r.userErrors.map((e) => e.message).join("; ")}`);

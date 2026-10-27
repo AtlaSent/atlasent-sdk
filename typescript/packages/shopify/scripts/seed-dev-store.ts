@@ -16,7 +16,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { createAdminClient, DEFAULT_ADMIN_API_VERSION, normalizeShopDomain } from "../src/admin.js";
+import { assertShopifyApiVersion, createAdminClient, DEFAULT_ADMIN_API_VERSION, normalizeShopDomain } from "../src/admin.js";
 import { centsToMoney, deriveRefundFacts } from "../src/facts.js";
 
 interface Scenario {
@@ -86,7 +86,10 @@ async function main(): Promise<void> {
       method: "POST",
       headers: { "content-type": "application/json", "x-shopify-access-token": token },
       body: JSON.stringify({ query, variables }),
+      redirect: "error",
     });
+    if (!res.ok) throw new Error(`Shopify Admin API HTTP ${res.status}`);
+    assertShopifyApiVersion(res, version);
     const body = (await res.json()) as { data?: T; errors?: unknown };
     if (!res.ok || body.errors || !body.data) throw new Error(`HTTP ${res.status}: ${JSON.stringify(body.errors ?? body)}`);
     return body.data;
@@ -140,3 +143,4 @@ main().catch((err) => {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });
+

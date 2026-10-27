@@ -7,6 +7,37 @@ gate; its policy and write-capable tools are described below.
 
 `private: true`. This package is a demo and is not published to npm.
 
+## Reviewed native API contract (2026-10-26)
+
+The Admin client and app/webhook configs are pinned to **2026-07**. The
+adapter rejects another configured version and requires the native
+`X-Shopify-API-Version` response header to match. Missing or fallen-forward
+versions stop source reads, so the guard cannot proceed to authorization or
+refund submission on an unreviewed read. HTTP redirects are refused.
+The development-store seed's native GraphQL responses use the same check.
+The admin UI extension has a separate API target and still needs its own
+compatibility acceptance; changing this Admin pin does not port the extension.
+
+Shopify requires `@idempotent` on `refundCreate` from API **2026-04**. The
+guard passes its saved execution UUID (`gateRef`) as the directive's
+`idempotencyKey` variable on the native mutation. The native client refuses
+a missing/malformed UUID before HTTP and never silently generates a new key.
+The additional submission option is optional in the injectable interface for
+compatibility, but is required by the real Admin client. An injected provider
+must honor the key; a test double is not proof of native deduplication.
+
+This adds no transport retry or resubmit route. Shopify retains idempotency
+keys for **24 hours**, so this provider feature cannot replace durable
+business-request identity or the existing unresolved-payment interlock.
+A response lost after submission, or a changed/missing version on that
+response, remains `unconfirmed`; inspect native results before another action.
+
+Sources: [refundCreate 2026-07](https://shopify.dev/docs/api/admin-graphql/2026-07/mutations/refundCreate),
+[implementing idempotency](https://shopify.dev/docs/apps/build/apis/graphql-admin/implementing-idempotency),
+[API versioning](https://shopify.dev/docs/api/usage/versioning).
+HTTP-contract tests are local only; no development-store write or native
+version/idempotency acceptance has been performed by this change.
+
 ## Execution and recovery changes (2026-10-26)
 
 The explicit write demo requires a stable `businessRequestId` on HTTP refund
@@ -525,11 +556,9 @@ The evidence log was checked against five more, and each made it fail:
   If it returns no `approval_request_id`, there is nothing to resume.
 - The standalone preview and explicit write-demo servers in a live Shopify app.
 - Multi-payment allocation is unsupported and refused by the execution guard.
-- Native idempotency/version compatibility: the demo's older API pin and
-  mutation do not send an `@idempotent` key. Current Shopify versions have
-  different requirements; validate the exact pinned version before any native
-  write. The local interlock never authorizes a provider resubmit. See
-  [Shopify idempotent requests](https://shopify.dev/docs/api/usage/idempotent-requests).
+- Native idempotency/version compatibility on the selected store: the client
+  now implements the reviewed 2026-07 contract above, but a real native run
+  remains required. The local interlock never authorizes a provider resubmit.
 - The new native refund readback query and reconciliation, in an actual store.
 - The `expiring: "1"` token-exchange parameter and `expires_in` handling,
   against Shopify's current access-token docs.

@@ -209,7 +209,7 @@ async function executeAuthorizedRefund(
     return { refunded: false, decision: "unconfirmed", reason, ...evidence, ...(refund ? { refundId: refund.id } : {}) };
   };
   try {
-    refund = await shopify.createRefund(input);
+    refund = await shopify.createRefund(input, { idempotencyKey: evidence.gateRef });
   } catch (err) {
     return unresolved(`refundCreate outcome is unknown: ${errorText(err)}`);
   }
