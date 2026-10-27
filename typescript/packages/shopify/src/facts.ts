@@ -54,8 +54,8 @@ export function deriveRefundFacts(order: ShopifyOrder, now: Date): RefundFacts {
   const sum = (ts: ShopifyTransaction[]) => ts.reduce((n, t) => n + moneyToCents(t.amountSet.shopMoney.amount), 0);
   const refundable = Math.max(0, sum(paid) - sum(refunded));
 
-  // Refunds go against the first successful payment. A multi-payment order
-  // (split tender, several captures) is out of scope for this demo.
+  // The preview can inspect this candidate; collectSupportedRefundFacts
+  // refuses multiple payments at the execution boundary.
   const parent = paid[0];
 
   let order_status: OrderStatusFact;
@@ -85,3 +85,28 @@ export function deriveRefundFacts(order: ShopifyOrder, now: Date): RefundFacts {
     parent_transaction: parent ? { id: parent.id, gateway: parent.gateway } : null,
   };
 }
+
+/**
+ * Supported execution facts only. This does not establish merchant eligibility,
+ * returns, disputes or full compensation history. Those remain release gates.
+ */
+export function collectSupportedRefundFacts(order: ShopifyOrder, expectedOrderId: string, now: Date): RefundFacts {
+  if (order.id !== expectedOrderId) throw new Error("Shopify returned a different order");
+  if (!Array.isArray(order.transactions) || order.transactions.length >= 100 ||
+      !Array.isArray(order.fulfillments) || order.fulfillments.length >= 50) {
+    throw new Error("incomplete transaction or fulfillment history; reconcile all pages first");
+  }
+  if (order.transactions.some(t =>
+    ["SALE", "CAPTURE", "REFUND"].includes(t.kind.toUpperCase()) && !isSuccess(t))) {
+    throw new Error("unresolved or unsuccessful payment/refund; reconcile before another refund");
+  }
+  if (order.transactions.some(t => t.amountSet.shopMoney.currencyCode !== order.currencyCode)) {
+    throw new Error("transaction currency does not match the order");
+  }
+  const payments = order.transactions.filter(t => isPayment(t) && isSuccess(t));
+  if (payments.length > 1) throw new Error("multiple payments require payment-specific allocation");
+  const facts = deriveRefundFacts(order, now);
+  if (!Number.isSafeInteger(facts.refundable_cents)) throw new Error("refundable balance out of range");
+  return facts;
+}
+

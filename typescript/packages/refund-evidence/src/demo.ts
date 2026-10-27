@@ -24,7 +24,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { AtlaSentClient } from "@atlasent/sdk";
-import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "../../shopify/src/guard.js";
+import { guardedShopifyRefund, resumeApprovedShopifyRefund, type RefundRequest } from "../../shopify/src/guard.js";
 import type { ApprovalsApi } from "../../shopify/src/approvals.js";
 import { InMemoryLedger as ShopifyLedger } from "../../shopify/src/ledger.js";
 import { auditRefundWebhook } from "../../shopify/src/webhook.js";
@@ -87,8 +87,8 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
   );
   const shopifyLedger = new ShopifyLedger();
   const shopifyOptions = (actor: string) => ({ actor, environment: opts.environment, ledger: shopifyLedger, shop: SHOP, now, onDecision });
-  const shopifyGate = (actor: string) => (req: { orderId: string; amountCents: number; reason?: string }) =>
-    guardedShopifyRefund(shopify, opts.atlasent, req, shopifyOptions(actor));
+  const shopifyGate = (actor: string) => (req: RefundRequest) =>
+    guardedShopifyRefund(shopify, opts.atlasent, { ...req, businessRequestId: req.businessRequestId ?? `demo-refund-${req.orderId}` }, shopifyOptions(actor));
 
   say("Shopify admin button (staff member Dana):");
   const dana = `shopify-staff:${SHOP}/dana`;
@@ -103,6 +103,7 @@ export async function runDemo(opts: DemoOptions): Promise<DemoResult> {
     // runSupportTool never calls the model; only runSupportAgent does.
     anthropic: undefined as never,
     customerEmail,
+    businessRequestId: "demo-support-refund-1005",
     now,
     lookupOrder: (id) => shopify.getOrder(id, { includeEmail: true }),
     refund: shopifyGate("agent:pinecone-support"),
@@ -204,3 +205,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`\nRefunded ${s.refunded.count}, sent to a manager ${s.escalated.count}, declined ${s.declined.count}, made outside the gate ${s.outsideGate.count}.`);
   console.log(`Wrote ${join(outDir, "report.html")}, report.csv and decisions.jsonl`);
 }
+

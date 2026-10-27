@@ -27,6 +27,8 @@ export interface SupportAgentDeps {
   anthropic: Pick<Anthropic, "beta">;
   /** Authenticated by the store, never taken from the conversation. */
   customerEmail: string;
+  /** Stable support operation ID supplied by the host, never by model tool arguments. */
+  businessRequestId?: string;
   /** Must return the order WITH its email (`getOrder(id, { includeEmail: true })`); without one, every order is refused. */
   lookupOrder: (orderId: string) => Promise<ShopifyOrder | null>;
   /** guardedShopifyRefund bound to this agent's actor, ledger and shop. */
@@ -113,6 +115,9 @@ export async function runSupportTool(
   }
 
   if (name === "issue_refund") {
+    if (typeof deps.businessRequestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(deps.businessRequestId)) {
+      return { content: "A stable support case operation ID is required before requesting a refund.", isError: true };
+    }
     if (typeof args.amount !== "string") return { content: "amount is required, e.g. \"18.99\"", isError: true };
     let amountCents: number;
     try {
@@ -121,7 +126,7 @@ export async function runSupportTool(
       return { content: "amount must look like 18.99", isError: true };
     }
     const reason = typeof args.reason === "string" ? args.reason.slice(0, 200) : "";
-    const result = await deps.refund({ orderId: order.id, amountCents, ...(reason ? { reason } : {}) });
+    const result = await deps.refund({ orderId: order.id, amountCents, businessRequestId: deps.businessRequestId, ...(reason ? { reason } : {}) });
     refunds.push(result);
     return { content: JSON.stringify(describeResult(result)), isError: false };
   }
@@ -183,3 +188,4 @@ export async function runSupportAgent(deps: SupportAgentDeps, history: MessagePa
 
   return { reply: "Sorry, I couldn't finish that. A member of our team will follow up.", messages, refunds };
 }
+

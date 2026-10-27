@@ -84,6 +84,7 @@ describe("what evaluate and verify receive", () => {
       execution_payload_hash: digest,
     });
     expect(ev.context).toEqual({
+      environment: "test",
       amount_cents: 1899,
       currency: "USD",
       order_status: "delivered",
@@ -137,7 +138,7 @@ describe("fails closed", () => {
     ["verified but reported not consumed", { consumed: false }, () => {}, "verify_failed"],
     ["verified with consumed omitted", { consumed: null }, () => {}, "verify_failed"],
     ["Shopify read fails", {}, (s) => (s.shopify.failGet = true), "error"],
-    ["refundCreate fails", {}, (s) => (s.shopify.failRefund = true), "error"],
+    ["refundCreate fails", {}, (s) => (s.shopify.failRefund = true), "unconfirmed"],
   ];
   for (const [name, rt, arrange, decision] of cases) {
     it(name, async () => {
@@ -201,14 +202,15 @@ describe("a stop after the permit is recorded cancels the ledger entry", () => {
     transactions: [{ kind: "refund", status: "success", amount: "18.99" }],
   });
 
-  it("refundCreate failure: a staff refund copying the gateRef is still flagged", async () => {
+  it("refundCreate failure remains unconfirmed and a copied note needs native reconciliation", async () => {
     const s = setup();
     s.shopify.failRefund = true;
     const r = await s.refund("1001", 1899);
     expect(r.refunded).toBe(false);
-    expect((await s.ledger.get(r.gateRef))?.aborted_reason).toBe("error");
+    expect((await s.ledger.get(r.gateRef))?.aborted_reason).toBeUndefined();
+    expect((await s.ledger.get(r.gateRef))?.unconfirmed_reason).toMatch(/unknown/);
     const v = await auditRefundWebhook(copiedNote(r.gateRef), s.ledger);
-    expect(v).toMatchObject({ verdict: "unauthorized", reason: expect.stringMatching(/stopped this refund/) });
+    expect(v).toMatchObject({ verdict: "unauthorized", reason: expect.stringMatching(/native reconciliation/) });
   });
 
   it("order changed: the entry is cancelled too", async () => {
@@ -223,7 +225,9 @@ describe("a stop after the permit is recorded cancels the ledger entry", () => {
 
   it("a ledger that cannot cancel says so in the reason", async () => {
     const s = setup();
-    s.shopify.failRefund = true;
+    s.shopify.onRead = (n, fake) => {
+      if (n === 1) fake.orders.get("gid://shopify/Order/1001")!.cancelledAt = NOW.toISOString();
+    };
     s.ledger.recordAborted = async () => {
       throw new Error("disk full");
     };
@@ -276,3 +280,4 @@ describe("onDecision (evidence log)", () => {
     expect(s.shopify.refunds).toHaveLength(1);
   });
 });
+

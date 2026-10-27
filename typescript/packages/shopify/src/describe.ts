@@ -12,7 +12,13 @@ export function describeResult(r: RefundResult): Record<string, unknown> {
     };
   }
   const message =
-    r.decision === "escalate"
+    r.decision === "unconfirmed"
+      ? "Refund status is unconfirmed. Reconcile this request before issuing another refund."
+      : r.decision === "duplicate_request"
+        ? "This request was already recorded. Review its original outcome; no additional refund was issued."
+        : r.decision === "reconciliation_required"
+          ? "An earlier refund needs reconciliation. No additional refund was issued."
+          : r.decision === "escalate"
       ? "Sent to a manager for approval. No refund has been issued yet."
       : r.decision === "hold"
         ? r.approvalRequestId !== undefined
@@ -27,5 +33,7 @@ export function describeResult(r: RefundResult): Record<string, unknown> {
     gateRef: r.gateRef,
     ...(r.escalationId !== undefined ? { escalationId: r.escalationId } : {}),
     ...(r.approvalRequestId !== undefined ? { approvalRequestId: r.approvalRequestId } : {}),
+    ...(r.refundId !== undefined ? { refundId: r.refundId } : {}),
   };
 }
+

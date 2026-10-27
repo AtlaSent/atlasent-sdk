@@ -31,6 +31,19 @@ export interface LedgerEntry {
   matched_refund_id?: string;
   /** Set when the gate stopped after recording, so the entry can never vouch for a refund. */
   aborted_reason?: string;
+  /** Additive execution scope; older demo records may lack these fields. */
+  shop?: string;
+  environment?: string;
+  parent_transaction_id?: string;
+  currency?: string;
+  gateway?: string;
+  business_request_id?: string;
+  execution_digest?: string;
+  refund_note?: string;
+  approval_request_id?: string;
+  /** A send was attempted; its financial outcome has not been confirmed. */
+  unconfirmed_reason?: string;
+  observed_refund_id?: string;
 }
 
 /**
@@ -50,6 +63,9 @@ export interface PendingApproval {
   /** The refund snapshot the permit will be bound to. */
   snapshot: Record<string, unknown>;
   digest: string;
+  /** Bind approval resume to the facts actually evaluated, not just the amount. */
+  source_facts_hash?: string;
+  business_request_id?: string;
   reason?: string;
   created_at: string;
   /** Set once the approval is final (refunded, not approved, or stopped). */
@@ -61,12 +77,20 @@ export interface PermitLedger {
   recordExecuted(gateRef: string, refundId: string): Promise<void>;
   /** The refund was recorded but not issued by the gate. */
   recordAborted(gateRef: string, reason: string): Promise<void>;
+  recordUnconfirmed(gateRef: string, reason: string, refundId?: string): Promise<void>;
   get(gateRef: string): Promise<LedgerEntry | undefined>;
   /** Marks the entry as accounting for `refundId`. False if already used by another refund. */
   claim(gateRef: string, refundId: string): Promise<boolean>;
   recordPendingApproval(pending: PendingApproval): Promise<void>;
   getPendingApproval(approvalRequestId: string): Promise<PendingApproval | undefined>;
   resolvePendingApproval(approvalRequestId: string, resolved: NonNullable<PendingApproval["resolved"]>): Promise<void>;
+}
+
+export class RefundReservationError extends Error {
+  constructor(public readonly code: "duplicate_request" | "request_conflict" | "reconciliation_required", message: string, public readonly gateRef: string) {
+    super(message);
+    this.name = "RefundReservationError";
+  }
 }
 
 /** Shopify ids arrive as gids (gid://shopify/Refund/1) or bare numbers; compare their numeric part. */
@@ -81,6 +105,30 @@ export class InMemoryLedger implements PermitLedger {
 
   async recordAuthorized(entry: LedgerEntry): Promise<void> {
     if (this.entries.has(entry.gate_ref)) throw new Error(`duplicate ledger entry ${entry.gate_ref}`);
+    // Runs under JsonFileLedger's existing read-modify-write lock. This is a
+    // single-machine demo interlock, not the runtime's transactional budget.
+    if (entry.shop !== undefined && entry.environment !== undefined && entry.parent_transaction_id !== undefined) {
+      for (const previous of this.entries.values()) {
+        const sameScope = previous.shop === entry.shop && previous.environment === entry.environment;
+        if (sameScope && entry.business_request_id !== undefined && previous.business_request_id === entry.business_request_id) {
+          const sameRequest = previous.execution_digest === entry.execution_digest;
+          // Only a definitively pre-send abort can retry the same immutable
+          // operation, after a fresh evaluation and consumed permit.
+          if (sameRequest && previous.aborted_reason !== undefined) continue;
+          throw new RefundReservationError(
+            sameRequest ? "duplicate_request" : "request_conflict",
+            "this business request was already recorded; inspect its original outcome instead of issuing another refund",
+            previous.gate_ref,
+          );
+        }
+        const unresolved = previous.refund_id === undefined && previous.aborted_reason === undefined;
+        const samePayment = sameScope && previous.parent_transaction_id === entry.parent_transaction_id;
+        const legacyOrder = previous.shop === undefined && previous.order_id === entry.order_id;
+        if (unresolved && (samePayment || legacyOrder)) {
+          throw new RefundReservationError("reconciliation_required", "an earlier refund on this payment is in flight or unconfirmed; reconcile it before another request", previous.gate_ref);
+        }
+      }
+    }
     this.entries.set(entry.gate_ref, { ...entry });
     this.persist();
   }
@@ -88,14 +136,28 @@ export class InMemoryLedger implements PermitLedger {
   async recordExecuted(gateRef: string, refundId: string): Promise<void> {
     const e = this.entries.get(gateRef);
     if (!e) throw new Error(`no ledger entry ${gateRef}`);
+    if (e.aborted_reason !== undefined || (e.refund_id !== undefined && !sameRefundId(e.refund_id, refundId)) ||
+        (e.observed_refund_id !== undefined && !sameRefundId(e.observed_refund_id, refundId))) throw new Error("conflicting refund outcome");
     e.refund_id = refundId;
+    delete e.unconfirmed_reason;
+    const pending = e.approval_request_id ? this.pending.get(e.approval_request_id) : undefined;
+    if (pending) pending.resolved = { outcome: "refunded", at: new Date().toISOString(), detail: refundId };
     this.persist();
   }
 
   async recordAborted(gateRef: string, reason: string): Promise<void> {
     const e = this.entries.get(gateRef);
     if (!e) throw new Error(`no ledger entry ${gateRef}`);
+    if (e.unconfirmed_reason !== undefined || e.refund_id !== undefined || e.observed_refund_id !== undefined) throw new Error("an attempted refund must be reconciled, not canceled");
     e.aborted_reason = reason;
+    this.persist();
+  }
+
+  async recordUnconfirmed(gateRef: string, reason: string, refundId?: string): Promise<void> {
+    const e = this.entries.get(gateRef);
+    if (!e || e.aborted_reason !== undefined || e.refund_id !== undefined) throw new Error("no unresolved refund execution");
+    e.unconfirmed_reason = reason;
+    if (refundId !== undefined) e.observed_refund_id = refundId;
     this.persist();
   }
 
@@ -376,6 +438,9 @@ export class JsonFileLedger extends InMemoryLedger {
   override recordAborted(gateRef: string, reason: string): Promise<void> {
     return this.locked(() => super.recordAborted(gateRef, reason));
   }
+  override recordUnconfirmed(gateRef: string, reason: string, refundId?: string): Promise<void> {
+    return this.locked(() => super.recordUnconfirmed(gateRef, reason, refundId));
+  }
   override claim(gateRef: string, refundId: string): Promise<boolean> {
     return this.locked(() => super.claim(gateRef, refundId));
   }
@@ -420,3 +485,4 @@ export function gateRefFromNote(note: string | null | undefined): string | undef
   const id = note.slice(NOTE_PREFIX.length).split(" ")[0];
   return id && id.length > 0 ? id : undefined;
 }
+

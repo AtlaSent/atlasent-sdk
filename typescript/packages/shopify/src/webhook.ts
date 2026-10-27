@@ -76,6 +76,9 @@ export async function auditRefundWebhook(payload: RefundWebhookPayload, ledger: 
   if (entry.aborted_reason !== undefined) {
     return unauthorized(`the gate stopped this refund before issuing it (${entry.aborted_reason})`, gateRef);
   }
+  if (entry.unconfirmed_reason !== undefined) {
+    return unauthorized("the refund outcome requires native reconciliation; the webhook alone does not establish completion", gateRef);
+  }
   if (numericId(entry.order_id) !== orderId) return unauthorized("the permit was for a different order", gateRef);
   if (amountCents === null || amountCents !== entry.amount_cents) {
     return unauthorized(`the permit was for ${entry.amount_cents} cents, the refund was ${amountCents ?? "unreadable"}`, gateRef);
@@ -105,3 +108,4 @@ export async function auditRefundWebhook(payload: RefundWebhookPayload, ledger: 
   }
   return { verdict: "authorized", refundId, orderId, amountCents, gateRef };
 }
+

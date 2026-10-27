@@ -59,9 +59,35 @@ const token = (over: Record<string, unknown> = {}) =>
   );
 
 const postRefund = (base: string, body: unknown, auth = `Bearer ${token()}`) =>
-  fetch(`${base}/api/refunds`, { method: "POST", headers: { authorization: auth, "content-type": "application/json" }, body: JSON.stringify(body) });
+  fetch(`${base}/api/refunds`, { method: "POST", headers: { authorization: auth, "content-type": "application/json" }, body: JSON.stringify(body && typeof body === "object" ? { businessRequestId: "test-case", ...body } : body) });
 
 describe("POST /api/refunds (the admin button)", () => {
+  it("requires a stable request ID and replays cannot cause another refund", async () => {
+    const s = await start();
+    expect((await postRefund(s.base, { orderId: "1001", amount: "18.99", businessRequestId: "" })).status).toBe(400);
+    expect(s.runtime.evaluateBodies).toHaveLength(0);
+    const first = await (await postRefund(s.base, { orderId: "1001", amount: "18.99" })).json();
+    const retry = await (await postRefund(s.base, { orderId: "1001", amount: "18.99" })).json();
+    expect(retry).toMatchObject({ decision: "duplicate_request", gateRef: first.gateRef });
+    const recovered = await fetch(`${s.base}/api/refunds/reconcile`, { method: "POST", headers: { authorization: `Bearer ${token()}`, "content-type": "application/json" }, body: JSON.stringify({ gateRef: retry.gateRef }) });
+    expect(await recovered.json()).toMatchObject({ status: "succeeded" });
+    expect(s.shopify.refunds).toHaveLength(1);
+  });
+
+  it("authenticates reconciliation and reads the original outcome without a second send", async () => {
+    const s = await start();
+    s.shopify.failRefundRead = true;
+    const first = await (await postRefund(s.base, { orderId: "1001", amount: "18.99" })).json();
+    expect(first.decision).toBe("unconfirmed");
+    s.shopify.failRefundRead = false;
+    const reconcile = (auth: string, gateRef: string) => fetch(`${s.base}/api/refunds/reconcile`, {
+      method: "POST", headers: { authorization: auth, "content-type": "application/json" }, body: JSON.stringify({ gateRef }),
+    });
+    expect((await reconcile("", first.gateRef)).status).toBe(401);
+    expect(await (await reconcile(`Bearer ${token()}`, "unknown")).json()).toMatchObject({ status: "refused" });
+    expect(await (await reconcile(`Bearer ${token()}`, first.gateRef)).json()).toMatchObject({ status: "succeeded" });
+    expect(s.shopify.refunds).toHaveLength(1);
+  });
   it("refunds through the gate and names the staff member as the actor", async () => {
     const s = await start();
     const res = await postRefund(s.base, { orderId: "gid://shopify/Order/1001", amount: "18.99", reason: "torn" });
@@ -274,3 +300,4 @@ describe("POST /api/operations/refund-preview (read-only first value)", () => {
     expect(res.headers.get("access-control-allow-methods")).toContain("POST");
   });
 });
+

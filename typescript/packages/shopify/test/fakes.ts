@@ -14,7 +14,7 @@
 
 import { createHash } from "node:crypto";
 import { AtlaSentClient } from "@atlasent/sdk";
-import type { CreatedRefund, GetOrderOptions, RefundCreateInput, ShopifyAdmin, ShopifyOrder } from "../src/admin.js";
+import type { CreatedRefund, GetOrderOptions, RefundCreateInput, RefundReadback, ShopifyAdmin, ShopifyOrder } from "../src/admin.js";
 import type { ApprovalClaim, ApprovalsApi, ApprovalStatus } from "../src/approvals.js";
 
 export const NOW = new Date("2026-10-20T12:00:00Z");
@@ -46,13 +46,16 @@ export function demoPolicy(ctx: Record<string, unknown>): { decision: string; de
 export function fakeRuntime(opts: RuntimeOptions = {}) {
   const evaluateBodies: Record<string, unknown>[] = [];
   const verifyBodies: Record<string, unknown>[] = [];
-  const permits = new Map<string, { bound: string; consumed: boolean }>();
+  type Binding = { actor: unknown; action: unknown; environment: unknown };
+  const permits = new Map<string, Binding & { bound: string; consumed: boolean }>();
   /** Approval requests the runtime created for escalations. A test plays the person deciding them. */
-  const approvalRows = new Map<string, { status: string; bound: string; claimed: boolean }>();
+  const approvalRows = new Map<string, Binding & { status: string; bound: string; claimed: boolean }>();
   let seq = 0;
 
   function evaluate(body: Record<string, unknown>) {
     evaluateBodies.push(body);
+    if (typeof body.environment !== "string" || body.environment.length === 0 ||
+        (body.context as Record<string, unknown>)?.environment !== body.environment) throw new Error("context.environment is required and must match");
     if (opts.evaluateThrows) throw new Error("connect ECONNREFUSED");
     if (opts.forceDecision) return { decision: opts.forceDecision, deny_reason: "forced" };
     const d = demoPolicy((body.context ?? {}) as Record<string, unknown>);
@@ -62,7 +65,7 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
       if (d.decision === "escalate") {
         const id = `apr-${n}`;
         const ep = body.execution_payload_hash;
-        approvalRows.set(id, { status: "pending", bound: typeof ep === "string" ? ep.toLowerCase() : "", claimed: false });
+        approvalRows.set(id, { status: "pending", bound: typeof ep === "string" ? ep.toLowerCase() : "", claimed: false, actor: body.actor_id, action: body.action_type, environment: body.environment });
         approval = { escalation_id: `esc-${n}`, approval_request_id: id };
       }
       return { ...d, audit_hash: `audit-${n}`, ...approval };
@@ -70,7 +73,7 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
     const ep = body.execution_payload_hash;
     const bound = typeof ep === "string" && /^[0-9a-f]{64}$/i.test(ep) ? ep.toLowerCase() : "sha256:" + sha256(JSON.stringify(body));
     const token = `pt.v3.fake-${++seq}`;
-    permits.set(token, { bound, consumed: false });
+    permits.set(token, { bound, consumed: false, actor: body.actor_id, action: body.action_type, environment: body.environment });
     return { decision: "allow", permit_token: token, audit_hash: `audit-${seq}` };
   }
 
@@ -80,6 +83,9 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
     const p = permits.get(String(body.permit_token));
     if (!p) return { valid: false, outcome: "deny", verify_error_code: "PERMIT_NOT_FOUND" };
     if (p.consumed) return { valid: false, outcome: "deny", verify_error_code: "PERMIT_ALREADY_USED" };
+    if (body.actor_id !== p.actor || body.action_type !== p.action || body.environment !== p.environment) {
+      return { valid: false, outcome: "deny", verify_error_code: "BINDING_MISMATCH" };
+    }
     const presented = body.payload_hash ?? body.execution_hash;
     if (presented !== p.bound) return { valid: false, outcome: "deny", verify_error_code: "PAYLOAD_MISMATCH" };
     if (opts.verifyValid === false) return { valid: false, outcome: "deny", verify_error_code: "FORCED" };
@@ -118,7 +124,7 @@ export function fakeRuntime(opts: RuntimeOptions = {}) {
       row.claimed = true;
       const token = `pt.v3.approved-${++seq}`;
       const bound = claimFaults.boundTo ?? row.bound;
-      permits.set(token, { bound, consumed: false });
+      permits.set(token, { bound, consumed: false, actor: row.actor, action: row.action, environment: row.environment });
       return { claimed: true, permitToken: token, executionHashExpected: bound };
     },
   };
@@ -177,6 +183,9 @@ export class FakeShopify implements ShopifyAdmin {
   reads = 0;
   failGet = false;
   failRefund = false;
+  failRefundRead = false;
+  refundStatus = "SUCCESS";
+  nativeRefunds = new Map<string, RefundReadback>();
   /** Called with the read count after each getOrder, to simulate a change mid-flight. */
   onRead?: (n: number, fake: FakeShopify) => void;
 
@@ -201,7 +210,22 @@ export class FakeShopify implements ShopifyAdmin {
   async createRefund(input: RefundCreateInput): Promise<CreatedRefund> {
     if (this.failRefund) throw new Error("refundCreate rejected: boom");
     this.refunds.push(JSON.parse(JSON.stringify(input)));
-    return { id: `gid://shopify/Refund/9${this.refunds.length}`, createdAt: NOW.toISOString(), totalRefunded: { amount: input.transactions[0]!.amount, currencyCode: "USD" } };
+    const refund = { id: `gid://shopify/Refund/9${this.refunds.length}`, createdAt: NOW.toISOString(), totalRefunded: { amount: input.transactions[0]!.amount, currencyCode: "USD" } };
+    this.nativeRefunds.set(refund.id, {
+      ...refund, order: { id: input.orderId }, note: input.note,
+      transactions: { pageInfo: { hasNextPage: false }, nodes: input.transactions.map((t, i) => ({
+        id: `gid://shopify/OrderTransaction/refund-${this.refunds.length}-${i}`,
+        kind: t.kind, status: this.refundStatus, gateway: t.gateway,
+        amountSet: { shopMoney: { amount: t.amount, currencyCode: "USD" } }, parentTransaction: { id: t.parentId },
+      })) },
+    });
+    return refund;
+  }
+
+  async getRefund(refundId: string): Promise<RefundReadback | null> {
+    if (this.failRefundRead) throw new Error("native refund read failed");
+    const r = this.nativeRefunds.get(refundId);
+    return r ? JSON.parse(JSON.stringify(r)) as RefundReadback : null;
   }
 }
 
@@ -215,3 +239,4 @@ export function demoOrders(): ShopifyOrder[] {
     makeOrder({ id: 1005, delivery: "delivered", deliveredDaysAgo: 10, paid: "19.99", email: "jo@example.com" }),
   ];
 }
+

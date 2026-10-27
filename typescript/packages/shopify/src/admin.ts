@@ -1,5 +1,5 @@
 /**
- * Minimal Shopify Admin GraphQL client: the two calls a gated refund needs.
+ * Minimal Shopify Admin GraphQL client: order facts, refund and native readback.
  *
  * Field names follow the Admin GraphQL API (Order.fulfillments,
  * Fulfillment.displayStatus/deliveredAt, Order.transactions, refundCreate).
@@ -62,6 +62,16 @@ export interface CreatedRefund {
   totalRefunded: ShopifyMoney | null;
 }
 
+/** Native readback, separate from refundCreate's acknowledgement. */
+export interface RefundReadback extends CreatedRefund {
+  order: { id: string };
+  note: string | null;
+  transactions: {
+    nodes: ShopifyTransaction[];
+    pageInfo: { hasNextPage: boolean };
+  };
+}
+
 export interface GetOrderOptions {
   /**
    * Also read the customer email. Email is protected customer data: an app
@@ -75,6 +85,8 @@ export interface GetOrderOptions {
 export interface ShopifyAdmin {
   getOrder(orderId: string, options?: GetOrderOptions): Promise<ShopifyOrder | null>;
   createRefund(input: RefundCreateInput): Promise<CreatedRefund>;
+  /** Missing support never establishes completion. Does not issue a refund. */
+  getRefund?(refundId: string): Promise<RefundReadback | null>;
 }
 
 export class ShopifyAdminError extends Error {
@@ -100,6 +112,23 @@ const REFUND_MUTATION = `mutation AtlaSentRefund($input: RefundInput!) {
   refundCreate(input: $input) {
     refund { id createdAt totalRefundedSet { shopMoney { amount currencyCode } } }
     userErrors { field message }
+  }
+}`;
+
+const REFUND_READBACK = `query AtlaSentRefundReadback($id: ID!) {
+  node(id: $id) {
+    ... on Refund {
+      id createdAt note order { id }
+      totalRefundedSet { shopMoney { amount currencyCode } }
+      transactions(first: 100) {
+        nodes {
+          id kind status gateway
+          amountSet { shopMoney { amount currencyCode } }
+          parentTransaction { id }
+        }
+        pageInfo { hasNextPage }
+      }
+    }
   }
 }`;
 
@@ -177,5 +206,15 @@ export function createAdminClient(opts: AdminClientOptions): ShopifyAdmin {
       if (r.refund === null) throw new ShopifyAdminError("refundCreate returned no refund");
       return { id: r.refund.id, createdAt: r.refund.createdAt, totalRefunded: r.refund.totalRefundedSet?.shopMoney ?? null };
     },
+    async getRefund(refundId) {
+      if (!/^gid:\/\/shopify\/Refund\/\d+$/.test(refundId)) throw new ShopifyAdminError("not a Shopify refund id");
+      const data = await graphql<{
+        node: (Omit<RefundReadback, "totalRefunded"> & { totalRefundedSet: { shopMoney: ShopifyMoney } }) | null;
+      }>(REFUND_READBACK, { id: refundId });
+      const r = data.node;
+      if (r === null) return null;
+      return { ...r, totalRefunded: r.totalRefundedSet?.shopMoney ?? null };
+    },
   };
 }
+
