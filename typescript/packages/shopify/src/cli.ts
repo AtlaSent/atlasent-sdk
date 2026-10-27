@@ -18,6 +18,7 @@ import { centsToMoney, deriveRefundFacts, moneyToCents } from "./facts.js";
 import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "./guard.js";
 import { createApprovalsClient } from "./approvals.js";
 import { JsonFileLedger } from "./ledger.js";
+import { reconcileShopifyRefund } from "./reconcile.js";
 import { appendEvidence } from "./evidence-log.js";
 import type { RefundDecisionRecord } from "./decision-record.js";
 
@@ -33,11 +34,11 @@ function env(name: string): string {
 async function main(): Promise<number> {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
-    options: { order: { type: "string" }, amount: { type: "string" }, reason: { type: "string" }, approval: { type: "string" } },
+    options: { order: { type: "string" }, amount: { type: "string" }, reason: { type: "string" }, approval: { type: "string" }, "request-id": { type: "string" }, "gate-ref": { type: "string" }, "refund-id": { type: "string" } },
   });
   const command = positionals[0];
-  const usage = "usage: refund (facts|refund) --order <id> [--amount 18.99] [--reason text]\n       refund resume --approval <approval_request_id>";
-  if (!(command === "resume" ? values.approval : (command === "facts" || command === "refund") && values.order)) {
+  const usage = "usage: refund facts --order <id>\n       refund refund --order <id> --amount 18.99 --request-id <stable-case-id> [--reason text]\n       refund resume --approval <approval_request_id>\n       refund reconcile --gate-ref <gate_ref> [--refund-id <provider-refund-id>]";
+  if (!(command === "reconcile" ? values["gate-ref"] : command === "resume" ? values.approval : (command === "facts" || command === "refund") && values.order)) {
     console.error(usage);
     return 2;
   }
@@ -45,6 +46,15 @@ async function main(): Promise<number> {
   const shopify = createAdminClient({ shop, accessToken: env("SHOPIFY_ADMIN_TOKEN") });
   const evidenceLog = process.env.EVIDENCE_LOG;
   const logDecisions = evidenceLog ? { onDecision: (r: RefundDecisionRecord) => appendEvidence(evidenceLog, r) } : {};
+
+  if (command === "reconcile") {
+    const result = await reconcileShopifyRefund(shopify, new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"), {
+      gateRef: values["gate-ref"]!, shop, environment: env("ATLASENT_ENVIRONMENT"),
+      ...(values["refund-id"] ? { candidateRefundId: values["refund-id"] } : {}),
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return result.status === "succeeded" ? 0 : 1;
+  }
 
   if (command === "resume") {
     const apiKey = env("ATLASENT_API_KEY");
@@ -78,8 +88,8 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  if (!values.amount) {
-    console.error("--amount is required for refund");
+  if (!values.amount || !values["request-id"]) {
+    console.error("--amount and --request-id are required for refund; reuse the original request ID on retries");
     return 2;
   }
   const atlasent = new AtlaSentClient({
@@ -89,7 +99,7 @@ async function main(): Promise<number> {
   const result = await guardedShopifyRefund(
     shopify,
     atlasent,
-    { orderId, amountCents: moneyToCents(values.amount), ...(values.reason ? { reason: values.reason } : {}) },
+    { orderId, amountCents: moneyToCents(values.amount), businessRequestId: values["request-id"], ...(values.reason ? { reason: values.reason } : {}) },
     {
       actor: process.env.ATLASENT_ACTOR ?? `shopify-cli:${process.env.USER ?? "operator"}`,
       environment: env("ATLASENT_ENVIRONMENT"),
@@ -109,3 +119,4 @@ main().then(
     process.exit(1);
   },
 );
+

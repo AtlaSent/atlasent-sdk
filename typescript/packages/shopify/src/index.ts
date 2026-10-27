@@ -11,6 +11,7 @@ export {
   type ShopifyTransaction,
   type RefundCreateInput,
   type CreatedRefund,
+  type RefundReadback,
 } from "./admin.js";
 export { deriveRefundFacts, moneyToCents, centsToMoney, SUPPORTED_CURRENCY, type RefundFacts } from "./facts.js";
 export { previewShopifyRefundOperation, type RefundOperationsPreview, type PreviewDisposition, type PreviewNextStep } from "./operations-preview.js";
@@ -47,7 +48,9 @@ export { createPreviewObservationPublisher, type PreviewObservationInput, type P
 export { createOperationsPreviewHandler, type OperationsPreviewDeps } from "./preview-server.js";
 export { createGateHandler, tokenExchangeAdmin, type GateServerDeps } from "./server.js";
 export { describeResult } from "./describe.js";
+export { reconcileShopifyRefund, type RefundReconciliation } from "./reconcile.js";
 export { createApprovalsClient, assertApprovalRequestId, ApprovalsApiError, CLAIMABLE_APPROVAL_STATUSES, DEFAULT_APPROVALS_BASE_URL, type ApprovalsApi, type ApprovalStatus, type ApprovalClaim } from "./approvals.js";
 export { REFUND_DECISION_SCHEMA, outcomeOf, type RefundDecisionRecord, type RefundOutcome } from "./decision-record.js";
 export { runSupportAgent, runSupportTool, SUPPORT_AGENT_MODEL, type SupportAgentDeps } from "./agent.js";
+
 

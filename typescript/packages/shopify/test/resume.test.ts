@@ -184,14 +184,15 @@ describe("resumeApprovedShopifyRefund", () => {
     expect(s.shopify.refunds).toHaveLength(0);
   });
 
-  it("refundCreate failure cancels the ledger entry, so a copied note is still flagged", async () => {
+  it("refundCreate failure retains an unresolved execution for reconciliation", async () => {
     const s = setup();
     const id = await s.escalate();
     s.runtime.decide(id, "approved");
     s.shopify.failRefund = true;
     const r = await s.resume(id);
-    expect(r).toMatchObject({ refunded: false, decision: "error" });
-    expect((await s.ledger.get(r.gateRef))?.aborted_reason).toBe("error");
+    expect(r).toMatchObject({ refunded: false, decision: "unconfirmed" });
+    expect((await s.ledger.get(r.gateRef))?.aborted_reason).toBeUndefined();
+    expect((await s.ledger.get(r.gateRef))?.unconfirmed_reason).toMatch(/unknown/);
   });
 
   it("pending approvals survive a restart (JSON file ledger)", async () => {
@@ -207,3 +208,4 @@ describe("resumeApprovedShopifyRefund", () => {
     expect(resumed.refunded).toBe(true);
   });
 });
+

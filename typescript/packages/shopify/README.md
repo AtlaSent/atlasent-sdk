@@ -7,6 +7,50 @@ gate; its policy and write-capable tools are described below.
 
 `private: true`. This package is a demo and is not published to npm.
 
+## Execution and recovery changes (2026-10-26)
+
+The explicit write demo requires a stable `businessRequestId` on HTTP refund
+requests, `--request-id` on CLI refunds, and a host-supplied `SUPPORT_CASE_ID`
+for the agent CLI. Reuse the same upstream operation ID on retries; a model
+cannot supply or replace the support tool's ID. This ID prevents duplicate
+delivery; it does not prove customer intent or organizational authority.
+The low-level guard retains its optional field for compatibility; callers
+that omit it do not get business-request deduplication.
+
+The existing ledger now interlocks scoped, unresolved executions on the same
+payment. A send error, timeout, pending/failed transaction, missing readback,
+or mismatched native transaction is `unconfirmed`, not “nothing happened.”
+A new business ID does not bypass an unresolved execution. Only an exact
+successful native refund transaction readback establishes `refunded: true`.
+`refundCreate` returning an ID alone is not completion evidence.
+
+`reconcileShopifyRefund` reads the original outcome without submitting another
+refund. It is available as authenticated `POST /api/refunds/reconcile` with
+`gateRef` and optional `candidateRefundId`, or:
+
+```sh
+npm run refund -- reconcile --gate-ref <gate-ref> --refund-id gid://shopify/Refund/123
+```
+
+The optional provider ID is only a lookup hint. The native order, note, parent
+payment, amount, currency, gateway, transaction status and complete transaction
+page must match the saved execution. Missing proof stays unconfirmed. A later
+readback can also reconcile the approval's saved outcome.
+
+Execution reads reject mismatched orders, full bounded pages, unresolved
+payment/refund transactions, inconsistent currencies and split payments.
+Evaluate sends the configured environment at both required locations.
+Approval resume rejects another environment or changed evaluated facts.
+**Older pending approvals without a saved facts hash must be re-evaluated;**
+they cannot resume under this stricter source check. The permit binding
+version and legacy `finance.payment.authorize` action remain unchanged.
+
+These are local demo improvements, tested against fakes. The file ledger
+requires one shared, trustworthy machine/filesystem and is not a multi-instance
+transactional service, cumulative budget, signed provider event writer or
+merchant self-service install. No all-path protection or production activation
+follows from this change. The default server remains read-only.
+
 > **Status:** Automated tests use fakes of Shopify and the AtlaSent runtime.
 > **Nothing here has been run against a live Shopify store or a live
 > AtlaSent org yet.** The Shopify field names, mutations, token exchange and
@@ -268,9 +312,9 @@ alarm **detects**, it does not prevent:
   - the order and amount match;
   - no other refund has already used that ledger entry.
 
-  If the gate recorded a permit and then stopped (the order changed, or
-  `refundCreate` failed), it cancels the ledger entry. The `gateRef` it
-  returned can then never vouch for a refund made some other way.
+  A stop before submission (for example a changed order) cancels the entry.
+  A send failure remains unresolved instead: the payment stays interlocked
+  until native reconciliation. A webhook alone cannot resolve that outcome.
   Refund transactions count when `SUCCESS` or `PENDING`, because
   asynchronous gateways send `refunds/create` before settlement.
 
@@ -348,7 +392,7 @@ register as a delivery on your API version.
 ```sh
 export SHOPIFY_SHOP=... SHOPIFY_ADMIN_TOKEN=... ATLASENT_API_KEY=... ATLASENT_ENVIRONMENT=test
 npm run refund -- facts  --order <id>                          # Shopify only, no AtlaSent call
-npm run refund -- refund --order <id> --amount 18.99 --reason "arrived torn"
+npm run refund -- refund --order <id> --amount 18.99 --request-id case-123-refund --reason "arrived torn"
 ```
 
 ### 5. B + C — the explicit write backend and the alarm
@@ -371,14 +415,16 @@ exchanged again; no refresh token is stored.
 
 | Route | Auth | Does |
 |---|---|---|
-| `POST /api/refunds` | session token, verified for signature, audience, expiry and shop | runs the gate as `shopify-staff:<shop>/<user>` |
+| `POST /api/refunds` | session token, verified for signature, audience, expiry and shop | requires `businessRequestId`; runs the gate as `shopify-staff:<shop>/<user>` |
 | `POST /api/refunds/resume` | same | resumes an escalation by `approvalRequestId`; 501 if approvals are not configured |
+| `POST /api/refunds/reconcile` | same | reads the exact original refund transaction and updates local outcome; never submits a refund |
 | `POST /webhooks/refunds-create` | HMAC | runs the alarm |
 
 ### 6. D — the support agent
 
 ```sh
-CUSTOMER_EMAIL=robin@example.com npm run agent    # plus the env from step 4, and Anthropic credentials
+CUSTOMER_EMAIL=robin@example.com SUPPORT_CASE_ID=case-123-refund npm run agent
+# plus the env from step 4 and Anthropic credentials; reuse this operation ID on retries
 ```
 
 The agent runs on `claude-opus-5-5`, with server-side refusal fallback
@@ -474,8 +520,14 @@ The evidence log was checked against five more, and each made it fail:
 - Whether the runtime opens an approval request for an escalate on your org.
   If it returns no `approval_request_id`, there is nothing to resume.
 - The standalone preview and explicit write-demo servers in a live Shopify app.
-- Multi-payment orders: refunds go against the first successful payment.
-- Whether `refundCreate` on your API version requires an idempotency key.
+- Multi-payment allocation is unsupported and refused by the execution guard.
+- Native idempotency/version compatibility: the demo's older API pin and
+  mutation do not send an `@idempotent` key. Current Shopify versions have
+  different requirements; validate the exact pinned version before any native
+  write. The local interlock never authorizes a provider resubmit. See
+  [Shopify idempotent requests](https://shopify.dev/docs/api/usage/idempotent-requests).
+- The new native refund readback query and reconciliation, in an actual store.
 - The `expiring: "1"` token-exchange parameter and `expires_in` handling,
   against Shopify's current access-token docs.
+
 

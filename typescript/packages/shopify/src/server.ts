@@ -20,6 +20,7 @@ export { tokenExchangeAdmin } from "./token-exchange-admin.js";
 import { describeResult } from "./describe.js";
 import { moneyToCents } from "./facts.js";
 import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "./guard.js";
+import { reconcileShopifyRefund } from "./reconcile.js";
 import { createApprovalsClient, type ApprovalsApi } from "./approvals.js";
 import type { RefundDecisionRecord } from "./decision-record.js";
 import { JsonFileLedger, type PermitLedger } from "./ledger.js";
@@ -71,7 +72,7 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
     } catch {
       return send(res, 400, { error: "invalid JSON" });
     }
-    if (typeof body.approvalRequestId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(body.approvalRequestId)) {
+    if (!body || typeof body !== "object" || typeof body.approvalRequestId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(body.approvalRequestId)) {
       return send(res, 400, { error: "approvalRequestId is required" });
     }
     let admin: ShopifyAdmin;
@@ -96,14 +97,17 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
     if (who === null) return;
     const { shop, userId, token } = who;
 
-    let body: { orderId?: unknown; amount?: unknown; reason?: unknown };
+    let body: { orderId?: unknown; amount?: unknown; reason?: unknown; businessRequestId?: unknown };
     try {
       body = JSON.parse((await readBody(req)).toString("utf8"));
     } catch {
       return send(res, 400, { error: "invalid JSON" });
     }
-    if (typeof body.orderId !== "string" || typeof body.amount !== "string") {
+    if (!body || typeof body !== "object" || typeof body.orderId !== "string" || typeof body.amount !== "string") {
       return send(res, 400, { error: "orderId and amount (e.g. \"18.99\") are required strings" });
+    }
+    if (typeof body.businessRequestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(body.businessRequestId)) {
+      return send(res, 400, { error: "businessRequestId is required; reuse the original case ID on retries" });
     }
     let amountCents: number;
     try {
@@ -124,12 +128,32 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
       {
         orderId: body.orderId,
         amountCents,
+        businessRequestId: body.businessRequestId,
         ...(typeof body.reason === "string" && body.reason.length > 0 ? { reason: body.reason.slice(0, 200) } : {}),
       },
       gateOptions(shop, userId),
     );
     warnIfNotLogged(result);
     return send(res, 200, describeResult(result));
+  }
+
+  async function handleReconcile(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const who = authenticate(req, res);
+    if (who === null) return;
+    let body: { gateRef?: unknown; candidateRefundId?: unknown };
+    try { body = JSON.parse((await readBody(req)).toString("utf8")); }
+    catch { return send(res, 400, { error: "invalid JSON" }); }
+    if (!body || typeof body !== "object" || typeof body.gateRef !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(body.gateRef) ||
+        (body.candidateRefundId !== undefined && (typeof body.candidateRefundId !== "string" || !/^gid:\/\/shopify\/Refund\/\d+$/.test(body.candidateRefundId)))) {
+      return send(res, 400, { error: "gateRef and an optional Shopify refund ID are required" });
+    }
+    let admin: ShopifyAdmin;
+    try { admin = await deps.adminFor(who.shop, who.token); }
+    catch { return send(res, 502, { error: "could not get Shopify Admin API access" }); }
+    return send(res, 200, await reconcileShopifyRefund(admin, deps.ledger, {
+      gateRef: body.gateRef, shop: who.shop, environment: deps.environment,
+      ...(typeof body.candidateRefundId === "string" ? { candidateRefundId: body.candidateRefundId } : {}),
+    }));
   }
 
   /** The decision stands, but the evidence log lost it: say so where the operator looks. */
@@ -186,12 +210,13 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
       return;
     }
     let work: Promise<void>;
-    if (req.method === "OPTIONS" && (url.pathname === "/api/refunds" || url.pathname === "/api/refunds/resume")) {
+    if (req.method === "OPTIONS" && ["/api/refunds", "/api/refunds/resume", "/api/refunds/reconcile"].includes(url.pathname)) {
       preflight(res);
       return;
     }
     if (route === "POST /api/refunds") work = handleRefund(req, res);
     else if (route === "POST /api/refunds/resume") work = handleResume(req, res);
+    else if (route === "POST /api/refunds/reconcile") work = handleReconcile(req, res);
     else if (route === "POST /webhooks/refunds-create") work = handleWebhook(req, res);
     else if (route === "GET /healthz") work = Promise.resolve(send(res, 200, { ok: true }));
     else work = Promise.resolve(send(res, 404, { error: "not found" }));
@@ -252,4 +277,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }),
   ).listen(port, () => console.log(`AtlaSent refund gate listening on :${port} for ${shop}`));
 }
+
 

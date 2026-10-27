@@ -209,6 +209,7 @@ describe("claim re-checks the entry under the lock", () => {
       recordAuthorized: (e) => server.recordAuthorized(e),
       recordExecuted: (r, id) => server.recordExecuted(r, id),
       recordAborted: (r, why) => server.recordAborted(r, why),
+      recordUnconfirmed: (r, why, id) => server.recordUnconfirmed(r, why, id),
       recordPendingApproval: (p) => server.recordPendingApproval(p),
       getPendingApproval: (id) => server.getPendingApproval(id),
       resolvePendingApproval: (id, r) => server.resolvePendingApproval(id, r),
@@ -228,3 +229,4 @@ describe("claim re-checks the entry under the lock", () => {
     expect(await ledger.claim("ref-1", "777")).toBe(true);
   });
 });
+

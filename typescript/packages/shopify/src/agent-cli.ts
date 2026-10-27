@@ -35,6 +35,7 @@ const atlasent = new AtlaSentClient({
 const environment = env("ATLASENT_ENVIRONMENT");
 const ledger = new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json");
 const customerEmail = env("CUSTOMER_EMAIL");
+const businessRequestId = env("SUPPORT_CASE_ID");
 const evidenceLog = process.env.EVIDENCE_LOG;
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -49,6 +50,7 @@ for (;;) {
     {
       anthropic: new Anthropic(),
       customerEmail,
+      businessRequestId,
       lookupOrder: (id) => shopify.getOrder(id, { includeEmail: true }),
       refund: (req) =>
         guardedShopifyRefund(shopify, atlasent, req, {
@@ -67,3 +69,4 @@ for (;;) {
   }
   console.log(`agent> ${turn.reply}\n`);
 }
+

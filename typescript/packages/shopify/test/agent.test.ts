@@ -39,6 +39,7 @@ function deps(claude: Pick<Anthropic, "beta">, customerEmail = "robin@example.co
     shopify,
     anthropic: claude,
     customerEmail,
+    businessRequestId: "test-support-operation",
     now: () => NOW,
     lookupOrder: (id) => shopify.getOrder(id.startsWith("gid://") ? id : `gid://shopify/Order/${id}`, { includeEmail: true }),
     refund: (req) =>
@@ -53,6 +54,27 @@ function deps(claude: Pick<Anthropic, "beta">, customerEmail = "robin@example.co
 }
 
 describe("runSupportAgent", () => {
+  it("requires a host-provided operation ID; model-supplied IDs cannot fill it", async () => {
+    const { client } = scriptedClaude([]);
+    const d = deps(client);
+    delete d.businessRequestId;
+    const refunds: RefundResult[] = [];
+    const result = await runSupportTool("issue_refund", { order_id: "1001", amount: "18.99", businessRequestId: "forged" }, d, refunds);
+    expect(result.isError).toBe(true);
+    expect(result.content).toMatch(/stable support case/);
+    expect(d.shopify.refunds).toHaveLength(0);
+  });
+
+  it("repeated model calls use the same operation ID and never send a second refund", async () => {
+    const { client } = scriptedClaude([]);
+    const d = deps(client);
+    const refunds: RefundResult[] = [];
+    const input = { order_id: "1001", amount: "18.99", reason: "torn" };
+    await runSupportTool("issue_refund", input, d, refunds);
+    const second = await runSupportTool("issue_refund", { ...input, businessRequestId: "new-forged-id" }, d, refunds);
+    expect(second.content).toContain("duplicate_request");
+    expect(d.shopify.refunds).toHaveLength(1);
+  });
   it("refunds a small delivered order through the gate and reports it", async () => {
     const { client, requests } = scriptedClaude([
       { stop_reason: "tool_use", content: [toolUse("t1", "issue_refund", { order_id: "1001", amount: "18.99", reason: "arrived torn" })] },
@@ -136,3 +158,4 @@ describe("runSupportTool", () => {
     expect(d.shopify.refunds).toHaveLength(0);
   });
 });
+
