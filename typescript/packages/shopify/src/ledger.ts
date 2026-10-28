@@ -38,6 +38,8 @@ export interface LedgerEntry {
   currency?: string;
   gateway?: string;
   business_request_id?: string;
+  /** Explicit action for newer canonical executions; legacy records omit it. */
+  action_type?: string;
   execution_digest?: string;
   refund_note?: string;
   approval_request_id?: string;
@@ -485,4 +487,5 @@ export function gateRefFromNote(note: string | null | undefined): string | undef
   const id = note.slice(NOTE_PREFIX.length).split(" ")[0];
   return id && id.length > 0 ? id : undefined;
 }
+
 

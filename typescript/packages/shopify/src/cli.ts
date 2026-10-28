@@ -15,7 +15,7 @@ import { parseArgs } from "node:util";
 import { AtlaSentClient } from "@atlasent/sdk";
 import { createAdminClient, normalizeShopDomain } from "./admin.js";
 import { centsToMoney, deriveRefundFacts, moneyToCents } from "./facts.js";
-import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "./guard.js";
+import { guardedShopifyRefund, resumeApprovedShopifyRefund, resolveRefundActionType } from "./guard.js";
 import { createApprovalsClient } from "./approvals.js";
 import { JsonFileLedger } from "./ledger.js";
 import { reconcileShopifyRefund } from "./reconcile.js";
@@ -46,6 +46,8 @@ async function main(): Promise<number> {
   const shopify = createAdminClient({ shop, accessToken: env("SHOPIFY_ADMIN_TOKEN") });
   const evidenceLog = process.env.EVIDENCE_LOG;
   const logDecisions = evidenceLog ? { onDecision: (r: RefundDecisionRecord) => appendEvidence(evidenceLog, r) } : {};
+  const actionSetting = process.env.ATLASENT_REFUND_ACTION_TYPE !== undefined
+    ? { actionType: resolveRefundActionType(process.env.ATLASENT_REFUND_ACTION_TYPE) } : {};
 
   if (command === "reconcile") {
     const result = await reconcileShopifyRefund(shopify, new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"), {
@@ -70,6 +72,7 @@ async function main(): Promise<number> {
         ledger: new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"),
         shop,
         ...logDecisions,
+        ...actionSetting,
       },
     );
     console.log(JSON.stringify(result, null, 2));
@@ -106,6 +109,7 @@ async function main(): Promise<number> {
       ledger: new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"),
       shop,
       ...logDecisions,
+      ...actionSetting,
     },
   );
   console.log(JSON.stringify(result, null, 2));
@@ -119,4 +123,5 @@ main().then(
     process.exit(1);
   },
 );
+
 

@@ -23,7 +23,11 @@ export {
   computeRefundDigest,
   policyContext,
   FINANCE_PAYMENT_AUTHORIZE,
+  CUSTOMER_REFUND_ISSUE,
+  resolveRefundActionType,
   SHOPIFY_REFUND_BINDING_VERSION,
+  SHOPIFY_REFUND_BINDING_VERSION_V2,
+  type RefundActionType,
   type RefundRequest,
   type RefundGuardOptions,
   type RefundResult,
@@ -53,5 +57,6 @@ export { reconcileShopifyRefund, type RefundReconciliation } from "./reconcile.j
 export { createApprovalsClient, assertApprovalRequestId, ApprovalsApiError, CLAIMABLE_APPROVAL_STATUSES, DEFAULT_APPROVALS_BASE_URL, type ApprovalsApi, type ApprovalStatus, type ApprovalClaim } from "./approvals.js";
 export { REFUND_DECISION_SCHEMA, outcomeOf, type RefundDecisionRecord, type RefundOutcome } from "./decision-record.js";
 export { runSupportAgent, runSupportTool, SUPPORT_AGENT_MODEL, type SupportAgentDeps } from "./agent.js";
+
 
 

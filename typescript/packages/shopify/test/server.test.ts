@@ -8,6 +8,7 @@ import type { ShopifyAdmin } from "../src/admin.js";
 import { signSessionToken } from "../src/session-token.js";
 import type { RefundAuditVerdict, RefundWebhookPayload } from "../src/webhook.js";
 import type { RefundDecisionRecord } from "../src/decision-record.js";
+import { CUSTOMER_REFUND_ISSUE, FINANCE_PAYMENT_AUTHORIZE, type RefundActionType } from "../src/guard.js";
 import { demoOrders, FakeShopify, fakeRuntime, makeOrder, NOW } from "./fakes.js";
 
 const CLIENT_ID = "client-123";
@@ -20,6 +21,7 @@ afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r()
 
 async function start(
   extra: {
+    actionType?: RefundActionType;
     onVerdict?: (v: RefundAuditVerdict, p: RefundWebhookPayload, shop: string) => void;
     onDecision?: (r: RefundDecisionRecord) => void;
     adminFor?: (shop: string, token: string) => Promise<ShopifyAdmin>;
@@ -62,6 +64,21 @@ const postRefund = (base: string, body: unknown, auth = `Bearer ${token()}`) =>
   fetch(`${base}/api/refunds`, { method: "POST", headers: { authorization: auth, "content-type": "application/json" }, body: JSON.stringify(body && typeof body === "object" ? { businessRequestId: "test-case", ...body } : body) });
 
 describe("POST /api/refunds (the admin button)", () => {
+  it("uses only the host-configured canonical action, ignoring a caller action override", async () => {
+    const s = await start({ actionType: CUSTOMER_REFUND_ISSUE });
+    const response = await postRefund(s.base, { orderId: "1001", amount: "18.99", actionType: FINANCE_PAYMENT_AUTHORIZE });
+    expect(response.status).toBe(200);
+    expect((await response.json()).refunded).toBe(true);
+    expect(s.runtime.evaluateBodies[0]).toMatchObject({ action_type: CUSTOMER_REFUND_ISSUE });
+    expect(s.runtime.verifyBodies[0]).toMatchObject({ action_type: CUSTOMER_REFUND_ISSUE });
+  });
+
+  it("a caller cannot opt the legacy host into the canonical action", async () => {
+    const s = await start();
+    await postRefund(s.base, { orderId: "1001", amount: "18.99", actionType: CUSTOMER_REFUND_ISSUE });
+    expect(s.runtime.evaluateBodies[0]).toMatchObject({ action_type: FINANCE_PAYMENT_AUTHORIZE });
+  });
+
   it("requires a stable request ID and replays cannot cause another refund", async () => {
     const s = await start();
     expect((await postRefund(s.base, { orderId: "1001", amount: "18.99", businessRequestId: "" })).status).toBe(400);
@@ -300,4 +317,5 @@ describe("POST /api/operations/refund-preview (read-only first value)", () => {
     expect(res.headers.get("access-control-allow-methods")).toContain("POST");
   });
 });
+
 
