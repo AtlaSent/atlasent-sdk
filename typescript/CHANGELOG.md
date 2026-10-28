@@ -8,6 +8,16 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Private Stripe 0.2: shared runtime budget admission
+
+Canonical `customer.refund.issue` requires runtime reservations and a durable
+business request. The guard reserves before evaluation and rechecks the exact
+liability before initial, approved and repeated submission. The typed HTTP client
+validates exact receipts, refuses redirects and sanitizes transport failures.
+Legacy action/digest/approval compatibility remains; it can explicitly opt in.
+Requires atlasent-api#4764 and staging/native verification. RF4 verified server
+settlement remains open; no caller outcome releases cumulative exposure.
+
 ### Added: explicit internal Shopify preview → Action Inbox observation
 
 The private Shopify integration has a separate `serve:inbox` command, backed by

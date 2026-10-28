@@ -81,3 +81,5 @@ export {
 } from "./webhook.js";
 export { createStripeWebhookHandler, type StripeWebhookDeps } from "./webhook-server.js";
 export { REFUND_DECISION_SCHEMA, outcomeOf, type RefundDecisionRecord, type RefundOutcome } from "./decision-record.js";
+export { createRefundReservationsClient, RefundBudgetError,
+  type RefundBudgetSubject, type RefundReservationsApi } from "./reservations.js";

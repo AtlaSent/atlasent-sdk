@@ -358,7 +358,11 @@ describe("explicit action binding", () => {
 
   it("customer.refund.issue is evaluated AND verified under that action and binds it into the digest", async () => {
     const s = setup({ actionType: CUSTOMER_REFUND_ISSUE });
-    const r = await s.refund("pi_1001", 1899);
+    s.options.runtimeReservations = {
+      reserve: async () => ({ reservationId: "83900000-0000-4000-8000-000000000021" }),
+      recheck: async () => {},
+    };
+    const r = await s.refund("pi_1001", 1899, BR);
     expect(r.refunded).toBe(true);
     expect(s.runtime.evaluateBodies[0]!.action_type).toBe(CUSTOMER_REFUND_ISSUE);
     expect(JSON.stringify(s.runtime.verifyBodies[0])).toContain(CUSTOMER_REFUND_ISSUE);

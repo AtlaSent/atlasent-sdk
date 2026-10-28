@@ -22,6 +22,8 @@ export interface StripeCharge {
 
 export interface StripePaymentIntent {
   id: string;
+  /** Provider-derived identity for customer-scoped budget constraints. */
+  customer?: string | { id: string } | null;
   status: string;
   currency: string;
   metadata: Record<string, string>;
