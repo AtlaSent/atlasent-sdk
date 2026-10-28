@@ -8,6 +8,18 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: explicit Shopify terminal agent-key identity mode
+
+The private refund/resume CLI and support-agent terminal can opt into the
+existing broker with `ATLASENT_ACTOR_IDENTITY=agent-key`, an enrolled agent
+actor and expected tenant. They use fresh assertions through the existing
+guard and claim path, with the same key/runtime as authorization. Malformed
+or partial configuration stops before source/runtime calls; broker failure
+does not fall back. Model/tool arguments cannot choose the identity source.
+Legacy actors and read-only facts/reconciliation remain compatible. No
+credential, broker provisioning, human approval, policy activation, deployment
+or native acceptance is added; API #4656 remains open.
+
 ### Added: Shopify claim-time identity and existing agent broker integration
 
 The private Shopify guard now obtains fresh identity for the original actor

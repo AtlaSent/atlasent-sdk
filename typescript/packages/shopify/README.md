@@ -84,6 +84,46 @@ Live broker, merchant authority, source facts, distributed reservations and
 budgets, native Shopify outcomes and the fourteen-control acceptance remain
 open under [API #4656](https://github.com/AtlaSent/atlasent-api/issues/4656).
 
+### Explicit agent-key identity in terminal commands
+
+The existing `refund`, `resume` and support-agent commands can use the helper
+when their **trusted process configuration** explicitly sets:
+
+| Variable | Required value in this mode |
+|---|---|
+| `ATLASENT_ACTOR_IDENTITY` | `agent-key` |
+| `ATLASENT_ACTOR` | `agent:<UUID>` of the enrolled agent bound to the existing key |
+| `ATLASENT_TENANT_ID` | Expected tenant UUID from the host's configuration |
+| `ATLASENT_API_KEY` | Existing key for that same enrolled agent |
+| `ATLASENT_BASE_URL` | Target runtime; use the selected staging runtime for acceptance |
+| `ATLASENT_ENVIRONMENT` | Environment covered by the current policy and issuer trust |
+
+Use the existing secret delivery mechanism for the key. The other values are
+configuration, not new credentials. Never paste assertions into a command or
+accept these settings from a model, browser or support-tool arguments. The
+agent's `CUSTOMER_EMAIL` and stable `SUPPORT_CASE_ID` remain host-owned.
+The CLI's `--request-id` requirement is unchanged.
+
+This opt-in makes fresh broker calls during initial evaluation/verification
+and approval claim/verification, using the same configured key and runtime as
+the authorization client. The original saved actor must still match the
+configured agent on resume; a different operator or agent cannot replace it.
+Incomplete, unknown or malformed identity configuration refuses the write
+command before any source/runtime request. Broker failure cannot fall back to
+an unsigned request. A failure before claim leaves the saved approval resumable.
+
+Without this mode, the refund CLI retains its configured/default legacy actor
+and the support-agent demo retains `agent:pinecone-support`, with no identity
+assertion. A tenant setting without the mode is rejected to avoid a silent
+partial configuration. `facts` and read-only `reconcile` do not use the broker
+or require an AtlaSent key. The default preview and Shopify staff HTTP identity
+path are unchanged; the agent-key helper cannot attest a human staff member.
+
+These commands do not enroll an agent, provision a broker, grant human approval
+or enable a refund policy. Tests use scripted broker/runtime responses and fake
+Shopify only. Configure and verify the legitimate agent/key/tenant/environment,
+merchant consent, current authority and trusted facts before native acceptance.
+
 ## Reviewed native API contract (2026-10-26)
 
 The Admin client and app/webhook configs are pinned to **2026-07**. The
@@ -407,14 +447,15 @@ single-shot, so check again while the decision is pending:
 | Approval status | What happens |
 |---|---|
 | `pending` | `hold`; nothing changes |
-| `approved` | the steps below |
+| `approved` / `approved_awaiting_claim` | the steps below; awaiting-claim also requires fresh actor identity and runtime reevaluation |
 | declined, expired, revoked, ... | `deny` with `APPROVAL_<STATUS>`; closed, nothing refunded |
 
 On approval, every step must pass, or nothing is refunded:
 
 1. re-read the order and recompute the digest; it must equal the frozen one,
    with enough left to refund;
-2. claim the one permit the runtime minted for the approval
+2. claim the one permit for the approval (with fresh original-actor identity
+   and current-policy reevaluation for `approved_awaiting_claim`)
    (`POST /v1-approvals/{id}/claim-permit`), and check it is bound to that
    digest;
 3. verify it, as the staff member who asked for the refund, and require
