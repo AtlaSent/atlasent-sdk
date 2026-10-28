@@ -13,6 +13,32 @@ function fake(status: number, body: unknown) {
 }
 
 describe("approvals client against the runtime's wire shapes", () => {
+  it("sends only actor_identity in an explicit claim and preserves empty legacy claims", async () => {
+    const c = fake(200, { claimed: true, permit_token: "pt.v3.x" });
+    const identity = { version: "actor_identity.v1", signature: "test-only" };
+    await c.api.claimPermit("a1", { actorIdentity: identity, actor_id: "forged", approval: "forged" } as { actorIdentity: Record<string, unknown> });
+    expect(JSON.parse(c.calls[0]!.body!)).toEqual({ actor_identity: identity });
+  });
+
+  it("refuses malformed identity before sending a claim", async () => {
+    for (const value of [null, [], {}, "token", { toJSON: () => null }]) {
+      const c = fake(200, { claimed: true, permit_token: "pt.v3.x" });
+      await expect(c.api.claimPermit("a1", { actorIdentity: value as Record<string, unknown> })).rejects.toThrow(/nonempty JSON object/);
+      expect(c.calls).toHaveLength(0);
+    }
+  });
+
+  it("refuses credential-bearing redirects and sanitizes transport failures", async () => {
+    const requests: RequestInit[] = [];
+    const c = createApprovalsClient({ apiKey: "sensitive-test-key", fetch: (async (_u, init) => {
+      requests.push(init!); throw new Error("sensitive-test-key");
+    }) as typeof fetch });
+    await expect(c.claimPermit("a1")).rejects.toThrow("approval transport unavailable");
+    expect(requests[0]?.redirect).toBe("error");
+    const f = fake(500, { error: "sensitive response with spaces" });
+    expect(await f.api.claimPermit("a1")).toEqual({ claimed: false, failure: "HTTP 500" });
+  });
+
   it("polls and claims on the function path the runtime routes", async () => {
     const g = fake(200, { id: "a1", status: "approved", re_evaluation_decision: "allow" });
     expect(await g.api.getStatus("a1")).toEqual({ found: true, status: "approved", reEvaluationDecision: "allow" });
@@ -52,3 +78,4 @@ describe("approvals client against the runtime's wire shapes", () => {
     await expect(fake(500, { error: "db_error" }).api.getStatus("a1")).rejects.toThrow(/HTTP 500/);
   });
 });
+

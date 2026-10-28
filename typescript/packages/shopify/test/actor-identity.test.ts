@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { guardedShopifyRefund, resumeApprovedShopifyRefund, CUSTOMER_REFUND_ISSUE,
   type RefundActorIdentityBinding, type RefundGuardOptions } from "../src/guard.js";
 import { InMemoryLedger } from "../src/ledger.js";
+import { createApprovalsClient, type ApprovalsApi } from "../src/approvals.js";
 import { demoOrders, FakeShopify, fakeRuntime, NOW } from "./fakes.js";
 
 const SHOP = "pinecone.myshopify.com";
@@ -20,6 +21,55 @@ function setup() {
 }
 
 describe("Shopify trusted-host actor identity transport", () => {
+  it("presents separate claim and verify identity for the approved original actor", async () => {
+    const s = setup();
+    const seen: RefundActorIdentityBinding[] = [];
+    s.options.resolveActorIdentity = async binding => { seen.push(binding); return assertion(binding.phase); };
+    const held = await guardedShopifyRefund(s.shopify, s.runtime.client,
+      { ...s.request, orderId: "1002", amountCents: 7200 }, s.options);
+    if (held.refunded || !held.approvalRequestId) throw new Error("expected approval");
+    s.runtime.decide(held.approvalRequestId, "approved");
+    const requests: Record<string, unknown>[] = [];
+    const transport = createApprovalsClient({ apiKey: "ask_test_fake", fetch: (async (_url, init) => {
+      const body = JSON.parse(String(init?.body)); requests.push(body);
+      expect(body).toEqual({ actor_identity: assertion("claim") });
+      const c = await s.runtime.approvals.claimPermit(held.approvalRequestId!);
+      return new Response(JSON.stringify(c.claimed ? { claimed: true, permit_token: c.permitToken } : { claimed: false }));
+    }) as typeof fetch });
+    const approvals: ApprovalsApi = { getStatus: async () => ({ found: true, status: "approved_awaiting_claim" }), claimPermit: transport.claimPermit };
+    const result = await resumeApprovedShopifyRefund(s.shopify, s.runtime.client, approvals,
+      { approvalRequestId: held.approvalRequestId, resumedBy: "staff:second" }, { ...s.options, actor: "staff:second" });
+    expect(result.refunded).toBe(true);
+    expect(seen.map(b => [b.phase, b.actor])).toEqual([["evaluate", s.options.actor], ["claim", s.options.actor], ["verify", s.options.actor]]);
+    expect(s.runtime.verifyBodies[0]?.actor_identity).toEqual(assertion("verify"));
+    expect(requests).toHaveLength(1);
+    expect(s.shopify.refunds).toHaveLength(1);
+    expect(JSON.stringify([await s.ledger.getPendingApproval(held.approvalRequestId), await s.ledger.get(result.gateRef), result])).not.toContain("test_marker");
+  });
+
+  for (const problem of ["no-source", "source-error", "empty-assertion"] as const) {
+    it(`keeps an awaiting-claim approval resumable on ${problem}`, async () => {
+      const s = setup();
+      const held = await guardedShopifyRefund(s.shopify, s.runtime.client,
+        { ...s.request, orderId: "1002", amountCents: 7200 }, s.options);
+      if (held.refunded || !held.approvalRequestId) throw new Error("expected approval");
+      if (problem !== "no-source") s.options.resolveActorIdentity = async () => {
+        if (problem === "source-error") throw new Error("sensitive-identity-error");
+        return {};
+      };
+      const claim = vi.fn(async () => ({ claimed: false as const, failure: "must-not-call" }));
+      const result = await resumeApprovedShopifyRefund(s.shopify, s.runtime.client,
+        { getStatus: async () => ({ found: true, status: "approved_awaiting_claim" }), claimPermit: claim },
+        { approvalRequestId: held.approvalRequestId }, s.options);
+      expect(result).toMatchObject({ refunded: false, decision: "error" });
+      expect(JSON.stringify(result)).not.toContain("sensitive-identity-error");
+      expect((await s.ledger.getPendingApproval(held.approvalRequestId))?.resolved).toBeUndefined();
+      expect(claim).not.toHaveBeenCalled();
+      expect(s.runtime.verifyBodies).toHaveLength(0);
+      expect(s.shopify.refunds).toHaveLength(0);
+    });
+  }
+
   it("gets a distinct assertion at each boundary and forwards it top-level through the real SDK", async () => {
     const s = setup();
     const bindings: RefundActorIdentityBinding[] = [];

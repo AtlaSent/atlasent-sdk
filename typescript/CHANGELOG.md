@@ -8,6 +8,22 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: Shopify claim-time identity and existing agent broker integration
+
+The private Shopify guard now obtains fresh identity for the original actor
+before claiming an `approved_awaiting_claim` approval. Missing/unavailable
+identity stops before HTTP and leaves that pending approval resumable. The
+approval client sends only the optional `actor_identity` claim field; legacy
+`approved` claim requests remain empty. Separate permit verification and
+consumption are still required before submission.
+
+`createAgentActorIdentityResolver` connects trusted hosts to the existing
+key-bound agent broker, with fresh requests per boundary, HTTPS/no redirects,
+bounded timeout/response size and binding/currentness checks. It does not mint
+human approval, grant authority, cache assertions or replace runtime signature
+verification. No CLI broker configuration, credential, policy, deployment or
+native merchant acceptance is added; API #4656 remains open.
+
 ### Added: trusted-host actor identity for the private Shopify refund guard
 
 Shopify library/server hosts may resolve a fresh signed actor assertion at
@@ -1399,3 +1415,4 @@ Also exports the supporting wire types: `ReplayDecisionResponse`,
 ---
 
 ## @atlasent/sdk 2.6.0 (2026-05-22)
+
