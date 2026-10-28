@@ -59,6 +59,15 @@ describe("runtime budget HTTP receipts", () => {
     const api = createRefundReservationsClient({ apiKey: "test-key", fetch: async () => new Response(JSON.stringify(receipt(subject))) });
     await expect(api.recheck(subject, "83900000-0000-4000-8000-000000000099")).rejects.toThrow("invalid budget receipt");
   });
+  it("normalizes a valid uppercase reservation UUID for a recheck", async () => {
+    const reservationId = "839abcde-0000-4abc-8def-000000000021";
+    const api = createRefundReservationsClient({ apiKey: "test-key", fetch: async (_url, init) => {
+      const body = JSON.parse(String(init?.body)); expect(body.reservation_id).toBe(reservationId);
+      return new Response(JSON.stringify({ ...receipt(body), reservation_id: reservationId,
+        binding: { ...body, provider: "stripe" } }));
+    } });
+    await expect(api.recheck(subject, reservationId.toUpperCase())).resolves.toBeUndefined();
+  });
   it("never exposes a credential included in a transport error", async () => {
     const api = createRefundReservationsClient({ apiKey: "test-key", fetch: async () => { throw new Error("test-key private server details"); } });
     await expect(api.reserve(subject)).rejects.toThrow(/^refund budget refused or unavailable$/);

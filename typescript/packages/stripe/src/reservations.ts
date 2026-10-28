@@ -33,6 +33,10 @@ export function createRefundReservationsClient(opts: {
   if (!Number.isInteger(timeout) || timeout <= 0 || timeout > 60_000) throw new RefundBudgetError("invalid budget timeout");
 
   async function call(action: string, subject: RefundBudgetSubject, reservationId?: string): Promise<string> {
+    if (reservationId !== undefined) {
+      if (typeof reservationId !== "string" || !UUID.test(reservationId)) throw new RefundBudgetError("invalid reservation identity");
+      reservationId = reservationId.toLowerCase();
+    }
     // Snapshot before any asynchronous authorizer/transport can mutate input.
     const frozen = structuredClone(subject);
     const body = { ...frozen, ...(reservationId === undefined ? {} : { reservation_id: reservationId }) };
@@ -60,7 +64,7 @@ export function createRefundReservationsClient(opts: {
       const binding = receipt.binding as Record<string, unknown> | undefined;
       if (receipt.ok !== true || receipt.state !== "reserved" || receipt.budget_status !== "enforced"
         || receipt.authority_effect !== "none" || typeof receipt.reservation_id !== "string" || !UUID.test(receipt.reservation_id)
-        || (reservationId !== undefined && receipt.reservation_id !== reservationId)
+        || (reservationId !== undefined && receipt.reservation_id.toLowerCase() !== reservationId)
         || typeof receipt.budget_remaining_minor !== "string" || !/^[0-9]+$/.test(receipt.budget_remaining_minor)
         || !binding || binding.provider !== "stripe" || binding.reservation_id !== receipt.reservation_id
         || Object.entries(frozen).some(([k, v]) => binding[k] !== v)) {
