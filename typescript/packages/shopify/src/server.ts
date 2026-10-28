@@ -19,7 +19,7 @@ import { tokenExchangeAdmin } from "./token-exchange-admin.js";
 export { tokenExchangeAdmin } from "./token-exchange-admin.js";
 import { describeResult } from "./describe.js";
 import { moneyToCents } from "./facts.js";
-import { guardedShopifyRefund, resumeApprovedShopifyRefund } from "./guard.js";
+import { guardedShopifyRefund, resumeApprovedShopifyRefund, resolveRefundActionType, type RefundActionType } from "./guard.js";
 import { reconcileShopifyRefund } from "./reconcile.js";
 import { createApprovalsClient, type ApprovalsApi } from "./approvals.js";
 import type { RefundDecisionRecord } from "./decision-record.js";
@@ -28,6 +28,8 @@ import { auditRefundWebhook, verifyShopifyWebhookHmac, type RefundAuditVerdict, 
 import { alarmRecord, appendEvidence } from "./evidence-log.js";
 
 export interface GateServerDeps {
+  /** Trusted host setting; an HTTP body cannot choose its authorization action. */
+  actionType?: RefundActionType;
   clientId: string;
   clientSecret: string;
   environment: string;
@@ -48,6 +50,8 @@ export interface GateServerDeps {
 }
 
 export function createGateHandler(deps: GateServerDeps): RequestListener {
+  // Validate at construction, before any provider read or request is served.
+  if (deps.actionType !== undefined) resolveRefundActionType(deps.actionType);
   const allowed = new Set(deps.allowedShops.map(normalizeShopDomain));
 
   const authenticate = createSessionAuthenticator(deps);
@@ -58,6 +62,7 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
     environment: deps.environment,
     ledger: deps.ledger,
     shop,
+    ...(deps.actionType !== undefined ? { actionType: deps.actionType } : {}),
     ...(deps.now ? { now: deps.now } : {}),
     ...(deps.onDecision ? { onDecision: deps.onDecision } : {}),
   });
@@ -256,6 +261,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       clientId,
       clientSecret,
       environment,
+      ...(process.env.ATLASENT_REFUND_ACTION_TYPE !== undefined
+        ? { actionType: resolveRefundActionType(process.env.ATLASENT_REFUND_ACTION_TYPE) } : {}),
       ledger,
       atlasent,
       adminFor,
@@ -277,5 +284,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }),
   ).listen(port, () => console.log(`AtlaSent refund gate listening on :${port} for ${shop}`));
 }
+
 
 

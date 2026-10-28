@@ -93,6 +93,30 @@ follows from this change. The default server remains read-only.
 > against the API version you pin before the first live run. See
 > [What has not been verified](#what-has-not-been-verified).
 
+## Explicit refund action binding
+
+The write-demo guard defaults to the existing `finance.payment.authorize`
+action. A host can explicitly select `actionType: "customer.refund.issue"`;
+the CLI, write-demo server and terminal agent accept the same host setting
+through `ATLASENT_REFUND_ACTION_TYPE=customer.refund.issue`. Request JSON and
+agent tool arguments cannot choose or override that setting. The default
+read-only preview server does not use it or gain a refund route.
+
+Canonical requests require a stable `businessRequestId`. Their v2 digest
+binds that ID and the exact action as well as the original shop, order,
+payment, currency, amount and gateway. Pending approvals retain this snapshot
+across file-ledger reloads. Resume uses the stored action and rejects a
+conflicting host setting or a missing/changed request binding before claiming
+a permit. Legacy v1 hashes and pending action defaults remain unchanged.
+
+This is adapter wiring, not a grant or an alias between actions. Use the
+canonical setting only with the org's actual runtime action/authority contract.
+Real verified actors, independent approval, authenticated merchant/source facts,
+server reservations/budgets and native fourteen-control acceptance remain
+required; this package does not manufacture any of them. The file ledger
+remains a single-machine demo interlock. No native Shopify call or activation
+is established by the scripted tests.
+
 ## Post-purchase operations preview (read-only, not protection)
 
 The default authenticated Shopify preview backend supports
@@ -562,5 +586,6 @@ The evidence log was checked against five more, and each made it fail:
 - The new native refund readback query and reconciliation, in an actual store.
 - The `expiring: "1"` token-exchange parameter and `expires_in` handling,
   against Shopify's current access-token docs.
+
 
 

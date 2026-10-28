@@ -2,7 +2,7 @@
  * AtlaSent refund-time authorization gate for the Shopify Admin API.
  *
  *   1. read      — fetch the order from Shopify and derive the policy facts
- *   2. evaluate  — finance.payment.authorize, bound to the exact refund
+ *   2. evaluate  — the configured action, bound to the exact refund
  *   3. verify    — confirm and consume the permit
  *   4. re-read   — the order must still support the refund
  *   5. refund    — refundCreate, ONLY if every step above passed
@@ -36,9 +36,22 @@ import { outcomeOf, REFUND_DECISION_SCHEMA, type RefundDecisionRecord } from "./
 
 /** ACT-0024 canonical action: releasing a payment, refund or payout. */
 export const FINANCE_PAYMENT_AUTHORIZE = "finance.payment.authorize" as const;
+/** Explicit opt-in; the runtime must have this action's real authority contract. */
+export const CUSTOMER_REFUND_ISSUE = "customer.refund.issue" as const;
+export type RefundActionType = typeof FINANCE_PAYMENT_AUTHORIZE | typeof CUSTOMER_REFUND_ISSUE;
+
+/** Host configuration only, never an action selected by request/agent payload. */
+export function resolveRefundActionType(value: unknown = undefined): RefundActionType {
+  if (value === undefined) return FINANCE_PAYMENT_AUTHORIZE;
+  if (value === FINANCE_PAYMENT_AUTHORIZE || value === CUSTOMER_REFUND_ISSUE) return value;
+  throw new Error("unsupported refund action type; configure finance.payment.authorize or customer.refund.issue");
+}
 
 /** Folded into the digest; bump when the digest input changes. */
 export const SHOPIFY_REFUND_BINDING_VERSION = "shopify_refund_binding.v1" as const;
+/** Canonical refund requests also bind the action and stable business request ID. */
+export const SHOPIFY_REFUND_BINDING_VERSION_V2 = "shopify_refund_binding.v2" as const;
+const BUSINESS_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 export interface RefundRequest {
   /** Stable upstream case/request ID, reused on delivery retries; never an authority claim. */
@@ -52,6 +65,8 @@ export interface RefundRequest {
 }
 
 export interface RefundGuardOptions {
+  /** Defaults to the legacy action. Explicit canonical requests require businessRequestId. */
+  actionType?: RefundActionType;
   /** AtlaSent actor, e.g. `shopify-staff:<shop>/<user>` or `agent:pinecone-support`. */
   actor: string;
   /** Must match an environment the org's bundle is published for. */
@@ -72,6 +87,9 @@ export interface RefundSnapshot {
   currency: string;
   parent_transaction_id: string;
   gateway: string;
+  /** Absent from legacy snapshots, preserving their exact v1 digests. */
+  action_type?: RefundActionType;
+  business_request_id?: string;
 }
 
 export type RefundBlockReason =
@@ -139,8 +157,10 @@ function sortKeysDeep(val: unknown): unknown {
 
 /** Bare 64-hex SHA-256 over the canonical snapshot. */
 export function computeRefundDigest(snapshot: RefundSnapshot): string {
+  const version = snapshot.action_type !== undefined || snapshot.business_request_id !== undefined
+    ? SHOPIFY_REFUND_BINDING_VERSION_V2 : SHOPIFY_REFUND_BINDING_VERSION;
   return createHash("sha256")
-    .update(JSON.stringify(sortKeysDeep({ binding_version: SHOPIFY_REFUND_BINDING_VERSION, ...snapshot })))
+    .update(JSON.stringify(sortKeysDeep({ binding_version: version, ...snapshot })))
     .digest("hex");
 }
 
@@ -294,7 +314,13 @@ async function decideShopifyRefund(
   // Never the permit token: the SDK's evaluationId/permitId IS the token.
   const gateRef = randomUUID();
   const amountCents = request.amountCents;
-  if (request.businessRequestId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(request.businessRequestId)) {
+  let actionType: RefundActionType;
+  try { actionType = resolveRefundActionType(options.actionType); }
+  catch (err) { return invalid(gateRef, errorText(err)); }
+  if (actionType === CUSTOMER_REFUND_ISSUE && request.businessRequestId === undefined) {
+    return invalid(gateRef, "customer.refund.issue requires a stable businessRequestId");
+  }
+  if (request.businessRequestId !== undefined && (typeof request.businessRequestId !== "string" || !BUSINESS_REQUEST_ID.test(request.businessRequestId))) {
     return invalid(gateRef, "businessRequestId must be a stable 1–128 character request identifier");
   }
   if (!Number.isSafeInteger(amountCents) || amountCents <= 0) {
@@ -321,6 +347,9 @@ async function decideShopifyRefund(
     currency: facts.currency,
     parent_transaction_id: parent.id,
     gateway: parent.gateway,
+    ...(actionType === CUSTOMER_REFUND_ISSUE ? {
+      action_type: actionType, business_request_id: request.businessRequestId!,
+    } : {}),
   });
   const digest = computeRefundDigest(snapshot);
 
@@ -328,7 +357,7 @@ async function decideShopifyRefund(
   try {
     ev = await atlasent.evaluate({
       actor_id: options.actor,
-      action_type: FINANCE_PAYMENT_AUTHORIZE,
+      action_type: actionType,
       environment: options.environment,
       resource_id: orderGid,
       execution_payload_hash: digest,
@@ -385,7 +414,7 @@ async function decideShopifyRefund(
     verified = await atlasent.verifyPermit({
       permitId: ev.permitId,
       agent: options.actor,
-      action: FINANCE_PAYMENT_AUTHORIZE,
+      action: actionType,
       environment: options.environment,
       execution_hash: digest,
     });
@@ -417,6 +446,7 @@ async function decideShopifyRefund(
       gateway: snapshot.gateway,
       execution_digest: digest,
       refund_note: refundNote(gateRef, request.reason),
+      ...(actionType === CUSTOMER_REFUND_ISSUE ? { action_type: actionType } : {}),
       ...(request.businessRequestId ? { business_request_id: request.businessRequestId } : {}),
     });
   } catch (err) {
@@ -529,6 +559,18 @@ export async function resumeApprovedShopifyRefund(
   if (p.environment !== options.environment) {
     return { refunded: false, decision: "invalid_request", reason: "that approval request belongs to a different environment", gateRef: "" };
   }
+  let actionType: RefundActionType;
+  try {
+    actionType = resolveRefundActionType(p.snapshot.action_type);
+    if (options.actionType !== undefined && resolveRefundActionType(options.actionType) !== actionType) {
+      return invalid(gateRef, "this approval can only resume under the action it was evaluated for", { approvalRequestId: id });
+    }
+  } catch (err) { return invalid(gateRef, errorText(err), { approvalRequestId: id }); }
+  if (actionType === CUSTOMER_REFUND_ISSUE &&
+      (typeof p.snapshot.business_request_id !== "string" || !BUSINESS_REQUEST_ID.test(p.snapshot.business_request_id) ||
+       p.snapshot.business_request_id !== p.business_request_id)) {
+    return invalid(gateRef, "the canonical approval's business request binding is missing or changed", { approvalRequestId: id });
+  }
   const resumedBy = request.resumedBy ? ` (resumed by ${request.resumedBy})` : "";
   const finish = async (result: RefundResult, decision: string, reason: string) =>
     emitDecision(result, p.order_id, p.amount_cents, options, {
@@ -591,6 +633,8 @@ export async function resumeApprovedShopifyRefund(
       currency: facts.currency,
       parent_transaction_id: facts.parent_transaction.id,
       gateway: facts.parent_transaction.gateway,
+      ...(snap.action_type !== undefined ? { action_type: snap.action_type } : {}),
+      ...(snap.business_request_id !== undefined ? { business_request_id: snap.business_request_id } : {}),
     }) === p.digest;
   if (!same || facts === null || facts.refundable_cents < p.amount_cents ||
       p.source_facts_hash === undefined || sourceFactsHash(facts) !== p.source_facts_hash) {
@@ -608,7 +652,7 @@ export async function resumeApprovedShopifyRefund(
     verified = await atlasent.verifyPermit({
       permitId: claim.permitToken,
       agent: p.actor_id,
-      action: FINANCE_PAYMENT_AUTHORIZE,
+      action: actionType,
       environment: p.environment,
       execution_hash: p.digest,
     });
@@ -636,6 +680,7 @@ export async function resumeApprovedShopifyRefund(
       execution_digest: p.digest,
       refund_note: refundNote(gateRef, `${p.reason ? `${p.reason}; ` : ""}approved by a manager`),
       approval_request_id: id,
+      ...(actionType === CUSTOMER_REFUND_ISSUE ? { action_type: actionType } : {}),
       ...(p.business_request_id ? { business_request_id: p.business_request_id } : {}),
     });
   } catch (err) {
@@ -680,4 +725,5 @@ export async function resumeApprovedShopifyRefund(
     result.refunded ? "approved by a manager" : result.reason,
   );
 }
+
 

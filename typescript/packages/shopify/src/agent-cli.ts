@@ -12,7 +12,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { AtlaSentClient } from "@atlasent/sdk";
 import { createAdminClient, normalizeShopDomain } from "./admin.js";
 import { runSupportAgent } from "./agent.js";
-import { guardedShopifyRefund } from "./guard.js";
+import { guardedShopifyRefund, resolveRefundActionType } from "./guard.js";
 import { appendEvidence } from "./evidence-log.js";
 import type { RefundDecisionRecord } from "./decision-record.js";
 import { JsonFileLedger } from "./ledger.js";
@@ -33,6 +33,8 @@ const atlasent = new AtlaSentClient({
   ...(process.env.ATLASENT_BASE_URL ? { baseUrl: process.env.ATLASENT_BASE_URL } : {}),
 });
 const environment = env("ATLASENT_ENVIRONMENT");
+const actionSetting = process.env.ATLASENT_REFUND_ACTION_TYPE !== undefined
+  ? { actionType: resolveRefundActionType(process.env.ATLASENT_REFUND_ACTION_TYPE) } : {};
 const ledger = new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json");
 const customerEmail = env("CUSTOMER_EMAIL");
 const businessRequestId = env("SUPPORT_CASE_ID");
@@ -58,6 +60,7 @@ for (;;) {
           environment,
           ledger,
           shop,
+          ...actionSetting,
           ...(evidenceLog ? { onDecision: (r: RefundDecisionRecord) => appendEvidence(evidenceLog, r) } : {}),
         }),
     },
@@ -69,4 +72,5 @@ for (;;) {
   }
   console.log(`agent> ${turn.reply}\n`);
 }
+
 
