@@ -7,6 +7,39 @@ gate; its policy and write-capable tools are described below.
 
 `private: true`. This package is a demo and is not published to npm.
 
+## Signed actor identity at the refund boundaries
+
+Trusted library hosts and `createGateHandler` may provide
+`resolveActorIdentity(binding)` in their server configuration. It must obtain
+the signed assertion from the existing approved identity-broker integration.
+The adapter calls it separately for evaluation and permit verification; it
+does not mint an assertion, infer identity from a job title, or grant authority.
+
+The read-only binding contains `phase` (`evaluate` or `verify`), `actor`,
+`actionType`, `environment`, `shop`, `resourceId` and `executionHash`. Return
+the broker's JSON assertion. The existing SDK sends it as top-level
+`actor_identity` at both runtime boundaries. The runtime independently checks
+its issuer, signature, subject, tenant, action, environment and currentness
+under the configured authority contract. Do not supply an unsigned claim or
+equate a Shopify session with organizational approval.
+
+A configured resolver that throws or returns no nonempty JSON object stops
+before the next runtime call and native write. Broker error contents are not
+returned. Approval resume obtains a fresh assertion for the original permit
+actor, even when another staff member asks to resume. Assertions are never
+saved in the pending-approval ledger or decision evidence. HTTP/model input
+cannot select the resolver or supply the assertion; browser identity fields
+are ignored. Keep tokens and assertions out of host logs.
+
+Omitting the integration preserves the previous requests without identity
+fields. **This is transport support, not an always-on verified-actor gate.**
+The runtime's action/authority configuration must require and validate the
+appropriate identity and approvals. No broker is configured automatically by
+the CLI or server entrypoint, and this source change adds no secret or grant.
+Live broker, merchant authority, source facts, distributed reservations and
+budgets, native Shopify outcomes and the fourteen-control acceptance remain
+open under [API #4656](https://github.com/AtlaSent/atlasent-api/issues/4656).
+
 ## Reviewed native API contract (2026-10-26)
 
 The Admin client and app/webhook configs are pinned to **2026-07**. The
@@ -586,6 +619,7 @@ The evidence log was checked against five more, and each made it fail:
 - The new native refund readback query and reconciliation, in an actual store.
 - The `expiring: "1"` token-exchange parameter and `expires_in` handling,
   against Shopify's current access-token docs.
+
 
 
 

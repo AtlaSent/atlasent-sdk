@@ -8,6 +8,17 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Added: trusted-host actor identity for the private Shopify refund guard
+
+Shopify library/server hosts may resolve a fresh signed actor assertion at
+both evaluate and verify through the existing SDK wire fields. Approval resume
+uses the original permit actor, never the staff member who clicks Resume.
+A configured identity source that fails or returns no JSON assertion blocks
+execution; browser/model identity fields cannot populate it. Assertions are
+not persisted in pending approvals or decision evidence. No resolver retains
+the legacy wire omission. This supplies transport only: runtime identity and
+authority verification, native merchant acceptance and API #4656 remain required.
+
 ### Added: explicit internal Shopify preview → Action Inbox observation
 
 The private Shopify integration has a separate `serve:inbox` command, backed by
