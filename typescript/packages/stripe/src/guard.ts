@@ -29,14 +29,15 @@ import { centsToMoney, deriveStripeRefundFacts, SUPPORTED_CURRENCY, type Deliver
 import { isUnresolvedSubmission, type LedgerEntry, type PendingApproval, type PermitLedger, type RefundReservation } from "./ledger.js";
 import { CLAIMABLE_APPROVAL_STATUSES, type ApprovalsApi } from "./approvals.js";
 import { outcomeOf, REFUND_DECISION_SCHEMA, type RefundDecisionRecord } from "./decision-record.js";
+import type { RefundBudgetSubject, RefundReservationsApi } from "./reservations.js";
 
 /** ACT-0024 canonical action: releasing a payment, refund or payout. The default, and what every existing approval is bound to. */
 export const FINANCE_PAYMENT_AUTHORIZE = "finance.payment.authorize" as const;
 
 /**
  * The Action Catalog's refund action and the runtime slug orgs on the
- * us-forprofit-baseline product already run (USFP-ACT-008). In the Canon it is
- * a PROPOSED candidate (PAC-0045), not a minted CAR. Opt in only when the org's
+ * us-forprofit-baseline product already run (USFP-ACT-008), minted as
+ * CANON-000058. Opt in only when the org's
  * installed action class is this slug; the adapter never maps one onto the other.
  */
 export const CUSTOMER_REFUND_ISSUE = "customer.refund.issue" as const;
@@ -99,6 +100,8 @@ export interface StripeRefundGuardOptions {
    * action is only ever resumed under that same action.
    */
   actionType?: RefundActionType;
+  /** Required for customer.refund.issue. Durable shared exposure, not refund authority. */
+  runtimeReservations?: RefundReservationsApi;
 }
 
 export interface StripeRefundSnapshot {
@@ -112,6 +115,13 @@ export interface StripeRefundSnapshot {
   action_type?: string;
   /** Present only when the caller gave one (then the digest is v2). */
   business_request_id?: string;
+}
+
+function boundOptions(options: StripeRefundGuardOptions): StripeRefundGuardOptions {
+  const api = options.runtimeReservations;
+  return Object.freeze({ ...options, ...(api ? { runtimeReservations: Object.freeze({
+    reserve: api.reserve.bind(api), recheck: api.recheck.bind(api),
+  }) } : {}) });
 }
 
 export type StripeRefundBlockReason =
@@ -251,7 +261,13 @@ async function submitRefund(
   snapshot: StripeRefundSnapshot,
   metadata: Record<string, string>,
   now: () => Date,
+  options: StripeRefundGuardOptions,
 ): Promise<SubmissionOutcome> {
+  try {
+    await checkRuntimeBudget(stripe, snapshot, options, true);
+  } catch {
+    return { kind: "not_sent", reason: "shared refund budget refused or unavailable; nothing was submitted" };
+  }
   try {
     await ledger.recordSubmission(gateRef, { state: "submitting", at: now().toISOString(), metadata });
   } catch (err) {
@@ -319,6 +335,37 @@ export function policyContext(facts: StripeRefundFacts, amountCents: number): Re
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** Re-derive customer identity from Stripe, never caller metadata or options.
+ * Reserve is idempotent, including across restarts and approval resumption.
+ * No local outcome releases this server-side liability (RF4 remains open). */
+async function checkRuntimeBudget(
+  stripe: StripeApi, snapshot: StripeRefundSnapshot, options: StripeRefundGuardOptions, recheck: boolean,
+): Promise<void> {
+  const required = snapshot.action_type === CUSTOMER_REFUND_ISSUE;
+  const api = options.runtimeReservations;
+  if (!api) { if (required) throw new Error("runtime refund reservations required"); return; }
+  if (!snapshot.business_request_id || !BUSINESS_REQUEST_ID.test(snapshot.business_request_id)) {
+    throw new Error("durable business request required for shared refund budget");
+  }
+  const pi = await stripe.getPaymentIntent(snapshot.payment_intent);
+  if (!pi || pi.id !== snapshot.payment_intent || pi.currency.toUpperCase() !== snapshot.currency
+    || pi.latest_charge?.id !== snapshot.charge) throw new Error("budget payment changed");
+  const customer = pi.customer == null ? null : typeof pi.customer === "string" ? pi.customer : pi.customer.id;
+  if (customer !== null && (typeof customer !== "string" || !/^cus_[A-Za-z0-9]+$/.test(customer))) {
+    throw new Error("budget customer identity unavailable");
+  }
+  const subject: RefundBudgetSubject = {
+    environment: options.environment, provider_account: snapshot.account,
+    business_request_id: snapshot.business_request_id, payment_ref: snapshot.payment_intent,
+    customer_ref: customer, amount_minor: String(snapshot.amount_cents), currency: snapshot.currency.toLowerCase(),
+  };
+  const { reservationId } = await api.reserve(subject);
+  if (typeof reservationId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reservationId)) {
+    throw new Error("invalid runtime reservation identity");
+  }
+  if (recheck) await api.recheck(subject, reservationId);
+}
+
 function bookkeepingProblem(f: StripeRefundFacts, amountCents: number): string | undefined {
   if (!f.payment_succeeded || f.charge === null) return "the payment has not succeeded, so there is nothing to refund";
   if (f.disputed) return "the charge is disputed; resolve the dispute instead of refunding";
@@ -383,6 +430,8 @@ export async function guardedStripeRefund(
   request: StripeRefundRequest,
   options: StripeRefundGuardOptions,
 ): Promise<StripeRefundResult> {
+  options = boundOptions(options);
+  request = Object.freeze({ ...request });
   const result = await decideStripeRefund(stripe, atlasent, request, options);
   // A repeat of an existing operation is not a new decision, so it is not logged as one.
   if (!result.refunded && (result.decision === "duplicate_request" || result.decision === "in_progress")) return result;
@@ -504,6 +553,10 @@ async function decideStripeRefund(
     return invalid("businessRequestId must be 8-128 characters of A-Z a-z 0-9 . _ : -");
   }
   if (!REFUND_ACTION_TYPES.has(actionType)) return invalid(`unsupported refund action type ${String(actionType)}`);
+  if ((actionType === CUSTOMER_REFUND_ISSUE || options.runtimeReservations) &&
+    (!options.runtimeReservations || businessRequestId === undefined)) {
+    return invalid("canonical/shared-budget refunds require runtimeReservations and a durable businessRequestId");
+  }
   let piId: string;
   try {
     piId = assertPaymentIntentId(request.paymentIntentId);
@@ -589,6 +642,9 @@ async function runReservedRefund(
     ...bindingExtras(actionType, request.businessRequestId),
   });
   const digest = computeStripeRefundDigest(snapshot);
+
+  try { await checkRuntimeBudget(stripe, snapshot, options, false); }
+  catch { return { refunded: false, decision: "hold", reason: "shared refund budget refused or unavailable", gateRef, digest, facts }; }
 
   let ev: EvaluateResponse;
   try {
@@ -709,7 +765,7 @@ async function runReservedRefund(
   if (request.businessRequestId !== undefined) metadata.atlasent_business_request = request.businessRequestId;
 
   // ONLY reachable after allow + verified + consumed + recorded + re-read.
-  const sent = await submitRefund(stripe, options.ledger, gateRef, snapshot, metadata, now);
+  const sent = await submitRefund(stripe, options.ledger, gateRef, snapshot, metadata, now, options);
   if (sent.kind === "unconfirmed") {
     // Not aborted: if Stripe did create it, it is this authorized refund, and the alarm must say so.
     return { refunded: false, decision: "unconfirmed", reason: sent.reason, ...evidence };
@@ -766,6 +822,7 @@ export async function resumeApprovedStripeRefund(
   request: StripeResumeRequest,
   options: StripeRefundGuardOptions,
 ): Promise<StripeRefundResult> {
+  options = boundOptions(options);
   const now = options.now ?? (() => new Date());
   const id = request.approvalRequestId;
   let pending: PendingApproval | undefined;
@@ -939,7 +996,7 @@ export async function resumeApprovedStripeRefund(
   if (p.reason) metadata.atlasent_reason = p.reason.slice(0, 500);
   if (typeof snap.business_request_id === "string") metadata.atlasent_business_request = snap.business_request_id;
 
-  const sent = await submitRefund(stripe, options.ledger, gateRef, snap, metadata, now);
+  const sent = await submitRefund(stripe, options.ledger, gateRef, snap, metadata, now, options);
   if (sent.kind === "unconfirmed") {
     await close("unconfirmed", sent.reason);
     return finish(
@@ -1013,6 +1070,7 @@ export async function reconcileStripeRefund(
   options: StripeRefundGuardOptions,
   opts: { resubmit?: boolean } = {},
 ): Promise<StripeReconcileResult> {
+  options = boundOptions(options);
   const now = options.now ?? (() => new Date());
   const ledger = options.ledger;
   const out = (state: StripeReconcileState, reason: string, extra: Partial<StripeReconcileResult> = {}): StripeReconcileResult => ({
@@ -1104,7 +1162,7 @@ export async function reconcileStripeRefund(
   if (!stillSupports(current, snapshot, e.order_status) || computeStripeRefundDigest(snapshot) !== e.digest || snapshot.account !== options.account) {
     return out("unconfirmed", "the payment or order no longer carries exactly the authorized refund, so it was not resent; an operator must reconcile it");
   }
-  const sent = await submitRefund(stripe, ledger, gateRef, snapshot, meta, now);
+  const sent = await submitRefund(stripe, ledger, gateRef, snapshot, meta, now, options);
   if (sent.kind === "accepted") return { ...(await settle(sent.refund, "submission")), resubmitted: true };
   if (sent.kind === "unconfirmed") return out("unconfirmed", sent.reason, { resubmitted: true });
   if (sent.kind === "not_sent") return out("unconfirmed", sent.reason);
