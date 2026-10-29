@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryLedger, type LedgerEntry } from "../src/ledger.js";
 import type { StripeRefund } from "../src/stripe.js";
@@ -165,6 +165,20 @@ describe("POST /webhooks/stripe", () => {
     expect(await (await s.deliver({ id: "evt_u", type: "refund.updated", data: { object: { ...dash, status: "succeeded" } } })).json()).toEqual({ recorded: true });
     await s.deliver({ id: "evt_f", type: "refund.failed", data: { object: { ...dash, status: "failed" } } });
     expect(s.alerts).toHaveLength(1);
+  });
+
+  it("answers a malformed request target with 400 and keeps serving", async () => {
+    await start();
+    const port = (server!.address() as AddressInfo).port;
+    const statusLine = await new Promise<string>((resolve) => {
+      const s = connect(port, "127.0.0.1", () => s.write("GET // HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"));
+      let buf = "";
+      s.on("data", (d) => (buf += d));
+      s.on("close", () => resolve(buf.split("\r\n")[0] ?? ""));
+      s.on("error", () => resolve(buf.split("\r\n")[0] ?? ""));
+    });
+    expect(statusLine).toBe("HTTP/1.1 400 Bad Request");
+    expect((await fetch(`http://127.0.0.1:${port}/healthz`)).status).toBe(200);
   });
 
   it("ignores other event types", async () => {
