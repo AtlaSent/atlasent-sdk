@@ -117,6 +117,29 @@ function defaultLog(line: Record<string, unknown>): void {
   console.log(JSON.stringify(line));
 }
 
+/** Stop reading at the byte limit rather than buffering an unbounded body. */
+async function readIngestResponse(res: Response): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return text + decoder.decode();
+      size += value.byteLength;
+      if (size > MAX_RESPONSE) {
+        await reader.cancel().catch(() => {});
+        throw new Error("AtlaSent response too large");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /**
  * Handles one Stripe delivery and returns what to answer Stripe. Never
  * throws: every failure is a response, and a non-2xx one unless AtlaSent
@@ -182,7 +205,7 @@ export async function relayStripeEvent(
 
   let text: string;
   try {
-    text = await res.text();
+    text = await readIngestResponse(res);
   } catch {
     log({ ...base, outcome: "atlasent_response_unreadable", upstream_status: res.status });
     return { status: 502, body: { error: "atlasent_response_unreadable", retry: true } };
@@ -196,7 +219,6 @@ export async function relayStripeEvent(
 
   let json: unknown;
   try {
-    if (text.length > MAX_RESPONSE) throw new Error("too large");
     json = JSON.parse(text);
   } catch {
     log({ ...base, outcome: "atlasent_response_unreadable", upstream_status: res.status });
@@ -305,3 +327,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const port = Number(process.env.PORT ?? 3002);
   createServer(handler).listen(port, () => console.log(`AtlaSent Stripe settlement relay listening on :${port}${SETTLEMENT_RELAY_PATH}`));
 }
+

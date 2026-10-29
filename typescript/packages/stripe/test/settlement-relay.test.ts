@@ -84,6 +84,25 @@ describe("settlementIngestUrl", () => {
 });
 
 describe("relayStripeEvent: what reaches AtlaSent", () => {
+  it("cancels an oversized streaming response before draining it and asks Stripe to retry", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls++;
+        controller.enqueue(new Uint8Array(10 * 1024));
+        if (pulls === 20) controller.close();
+      },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    const body = refundEvent();
+    const { out } = await relay(body, sign(body), () => new Response(stream));
+    expect(out.status).toBe(502);
+    expect(out.body.retry).toBe(true);
+    expect(cancelled).toBe(true);
+    expect(pulls).toBe(7);
+  });
+
   it("forwards the exact bytes and Stripe-Signature with the key, refusing redirects", async () => {
     const body = refundEvent();
     const sig = sign(body);
@@ -290,3 +309,4 @@ describe("createSettlementRelayHandler over real sockets", () => {
     expect(() => createSettlementRelayHandler(config({ baseUrl: "http://api.atlasent.io" }))).toThrow(SettlementRelayConfigError);
   });
 });
+
