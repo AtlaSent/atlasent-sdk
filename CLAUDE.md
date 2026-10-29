@@ -15,6 +15,7 @@ Cross-repo invariants for this repo:
 - The canonical rule engine is `atlasent-api/packages/sdk/src/rules.ts` (its only byte-identical copy is `atlasent-api/supabase/functions/_shared/rules.ts`, kept in sync by the blocking `rules-sync` CI job **in atlasent-api**). This repo holds **no** `rules.ts` of its own — it consumes the engine via the published `@atlasent/sdk` package / re-export and never re-implements policy logic. Do not add a local `rules.ts`. See [ADR CROSS-002](https://github.com/AtlaSent-Systems-Inc/atlasent-docs/blob/main/architecture/adr/CROSS-002-rule-engine-single-source-of-truth.md).
 - SDKs do NOT cache authorization decisions or re-implement policy logic.
 - Publish mechanics: `@atlasent/sdk` and related packages release on `sdk-v*` tags; type-only changes on `types-v*` tags.
+- Only listed people may publish (2026-10-29): every job bound to `npm`, `npm-enforce` or `pypi`, and every job in `publish-go.yml`, first runs `.github/actions/production-dispatcher-check`, which refuses unless the tag pusher or dispatcher (and anyone re-running the attempt) is listed by numeric user id in `.github/production-dispatchers.json`. `production-dispatcher-guard.yml` fails the build if a publish job lacks it. A new publish workflow must use one of those environments or be added to the file's `protected_workflows`. A workflow on a tag pushed by someone else runs that tag's copy, so a tag ruleset is still needed.
 
 ---
 

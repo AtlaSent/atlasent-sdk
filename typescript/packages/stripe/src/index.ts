@@ -91,3 +91,5 @@ export {
   type SettlementRelayConfig,
   type RelayResponse,
 } from "./settlement-relay.js";
+export { createRefundReservationsClient, RefundBudgetError,
+  type RefundBudgetSubject, type RefundReservationsApi } from "./reservations.js";

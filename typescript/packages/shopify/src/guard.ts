@@ -88,7 +88,7 @@ export interface RefundGuardOptions {
 }
 
 export interface RefundActorIdentityBinding {
-  readonly phase: "evaluate" | "verify";
+  readonly phase: "evaluate" | "claim" | "verify";
   readonly actor: string;
   readonly actionType: RefundActionType;
   readonly environment: string;
@@ -693,7 +693,24 @@ export async function resumeApprovedShopifyRefund(
     return stop("order_changed", "the order changed after the refund was escalated; the approval does not cover it", facts);
   }
 
-  const claim = await approvals.claimPermit(id).catch((err: unknown) => ({ claimed: false as const, failure: errorText(err) }));
+  // IMPL-026B approvals are reevaluated at claim time. The original actor
+  // must present fresh identity before the runtime can release a permit.
+  // A local identity-source failure has not sent a claim: keep it resumable.
+  let claimIdentity: Record<string, unknown> | undefined;
+  if (status.status === "approved_awaiting_claim") {
+    try {
+      claimIdentity = await resolveActorIdentity(options, {
+        phase: "claim", actor: p.actor_id, actionType,
+        environment: p.environment, resourceId: p.order_id, executionHash: p.digest,
+      });
+      if (claimIdentity === undefined) throw new Error("a configured identity source is required for this permit claim");
+    } catch (err) {
+      return finish({ refunded: false, decision: "error", reason: errorText(err), gateRef,
+        approvalRequestId: id, digest: p.digest, facts }, "approval_identity_unavailable", "fresh claim identity unavailable; nothing claimed");
+    }
+  }
+  const claim = await approvals.claimPermit(id, claimIdentity !== undefined ? { actorIdentity: claimIdentity } : undefined)
+    .catch((err: unknown) => ({ claimed: false as const, failure: errorText(err) }));
   if (!claim.claimed) return stop("verify_failed", `the approved permit could not be claimed: ${claim.failure}`, facts);
   if (claim.executionHashExpected !== undefined && claim.executionHashExpected.toLowerCase() !== p.digest) {
     return stop("verify_failed", "the approved permit is bound to a different refund", facts);

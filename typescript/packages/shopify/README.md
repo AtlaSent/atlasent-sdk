@@ -12,13 +12,14 @@ gate; its policy and write-capable tools are described below.
 Trusted library hosts and `createGateHandler` may provide
 `resolveActorIdentity(binding)` in their server configuration. It must obtain
 the signed assertion from the existing approved identity-broker integration.
-The adapter calls it separately for evaluation and permit verification; it
-does not mint an assertion, infer identity from a job title, or grant authority.
+The adapter calls it separately for evaluation, claim-time reevaluation of an
+`approved_awaiting_claim` approval, and permit verification. It does not infer
+identity from a job title or grant authority.
 
-The read-only binding contains `phase` (`evaluate` or `verify`), `actor`,
+The read-only binding contains `phase` (`evaluate`, `claim` or `verify`), `actor`,
 `actionType`, `environment`, `shop`, `resourceId` and `executionHash`. Return
 the broker's JSON assertion. The existing SDK sends it as top-level
-`actor_identity` at both runtime boundaries. The runtime independently checks
+`actor_identity` at these runtime boundaries. The runtime independently checks
 its issuer, signature, subject, tenant, action, environment and currentness
 under the configured authority contract. Do not supply an unsigned claim or
 equate a Shopify session with organizational approval.
@@ -31,14 +32,97 @@ saved in the pending-approval ledger or decision evidence. HTTP/model input
 cannot select the resolver or supply the assertion; browser identity fields
 are ignored. Keep tokens and assertions out of host logs.
 
-Omitting the integration preserves the previous requests without identity
-fields. **This is transport support, not an always-on verified-actor gate.**
+An `approved_awaiting_claim` approval requires fresh identity before the claim
+HTTP call. If the identity source is missing or unavailable, nothing is claimed
+and the pending approval remains resumable. `createApprovalsClient().claimPermit`
+also accepts an optional `{ actorIdentity }`, sent only as `actor_identity`;
+legacy `approved` claims preserve their empty request body. A successful claim
+still requires separate fresh verification and consumption of the exact permit.
+
+For an enrolled, key-bound **agent** using the existing runtime broker, a trusted
+host can configure the supplied helper:
+
+```ts
+import { createAgentActorIdentityResolver, guardedShopifyRefund } from "@atlasent/shopify";
+
+const resolveActorIdentity = createAgentActorIdentityResolver({
+  apiKey: hostConfig.atlasentAgentKey,
+  actor: hostConfig.enrolledAgentActor, // agent:<UUID>, never a staff/session actor
+  tenantId: hostConfig.tenantId,
+  baseUrl: hostConfig.runtimeBaseUrl,
+});
+const result = await guardedShopifyRefund(shopify, atlasent, request, {
+  ...guardOptions,
+  actor: hostConfig.enrolledAgentActor,
+  resolveActorIdentity,
+});
+```
+
+The helper calls `v1-agent-actor-identity` anew at each boundary, using the agent's
+existing key and only the documented `action_type` and `environment` fields.
+It refuses other actors, binding mismatches, expired/malformed assertions,
+redirects and unavailable responses. It uses an HTTPS endpoint, a bounded
+timeout and response size, and does not cache or retry assertions. Local shape
+checks do not verify signatures: the runtime remains the authority verifier.
+This helper cannot attest a human approver or turn a Shopify staff session into
+an agent. Its broker call does not grant refund or approval authority.
+`executionHash` is the refund commitment, not an identity-request commitment;
+the helper deliberately omits optional broker `request_hash` because claim
+consumers do not supply that expected commitment.
+
+Existing contracts:
+[agent identity broker](https://github.com/AtlaSent/atlasent-api/blob/main/docs/runbooks/AGENT_ACTOR_IDENTITY_MINT.md),
+[claim-time runtime handler](https://github.com/AtlaSent/atlasent-api/blob/main/supabase/functions/v1-approvals/handler.ts).
+
+Omitting the integration preserves evaluation/verification requests without
+identity fields and legacy `approved` claims. **This is transport support, not
+an always-on verified-actor gate.**
 The runtime's action/authority configuration must require and validate the
 appropriate identity and approvals. No broker is configured automatically by
 the CLI or server entrypoint, and this source change adds no secret or grant.
 Live broker, merchant authority, source facts, distributed reservations and
 budgets, native Shopify outcomes and the fourteen-control acceptance remain
 open under [API #4656](https://github.com/AtlaSent/atlasent-api/issues/4656).
+
+### Explicit agent-key identity in terminal commands
+
+The existing `refund`, `resume` and support-agent commands can use the helper
+when their **trusted process configuration** explicitly sets:
+
+| Variable | Required value in this mode |
+|---|---|
+| `ATLASENT_ACTOR_IDENTITY` | `agent-key` |
+| `ATLASENT_ACTOR` | `agent:<UUID>` of the enrolled agent bound to the existing key |
+| `ATLASENT_TENANT_ID` | Expected tenant UUID from the host's configuration |
+| `ATLASENT_API_KEY` | Existing key for that same enrolled agent |
+| `ATLASENT_BASE_URL` | Target runtime; use the selected staging runtime for acceptance |
+| `ATLASENT_ENVIRONMENT` | Environment covered by the current policy and issuer trust |
+
+Use the existing secret delivery mechanism for the key. The other values are
+configuration, not new credentials. Never paste assertions into a command or
+accept these settings from a model, browser or support-tool arguments. The
+agent's `CUSTOMER_EMAIL` and stable `SUPPORT_CASE_ID` remain host-owned.
+The CLI's `--request-id` requirement is unchanged.
+
+This opt-in makes fresh broker calls during initial evaluation/verification
+and approval claim/verification, using the same configured key and runtime as
+the authorization client. The original saved actor must still match the
+configured agent on resume; a different operator or agent cannot replace it.
+Incomplete, unknown or malformed identity configuration refuses the write
+command before any source/runtime request. Broker failure cannot fall back to
+an unsigned request. A failure before claim leaves the saved approval resumable.
+
+Without this mode, the refund CLI retains its configured/default legacy actor
+and the support-agent demo retains `agent:pinecone-support`, with no identity
+assertion. A tenant setting without the mode is rejected to avoid a silent
+partial configuration. `facts` and read-only `reconcile` do not use the broker
+or require an AtlaSent key. The default preview and Shopify staff HTTP identity
+path are unchanged; the agent-key helper cannot attest a human staff member.
+
+These commands do not enroll an agent, provision a broker, grant human approval
+or enable a refund policy. Tests use scripted broker/runtime responses and fake
+Shopify only. Configure and verify the legitimate agent/key/tenant/environment,
+merchant consent, current authority and trusted facts before native acceptance.
 
 ## Reviewed native API contract (2026-10-26)
 
@@ -363,14 +447,15 @@ single-shot, so check again while the decision is pending:
 | Approval status | What happens |
 |---|---|
 | `pending` | `hold`; nothing changes |
-| `approved` | the steps below |
+| `approved` / `approved_awaiting_claim` | the steps below; awaiting-claim also requires fresh actor identity and runtime reevaluation |
 | declined, expired, revoked, ... | `deny` with `APPROVAL_<STATUS>`; closed, nothing refunded |
 
 On approval, every step must pass, or nothing is refunded:
 
 1. re-read the order and recompute the digest; it must equal the frozen one,
    with enough left to refund;
-2. claim the one permit the runtime minted for the approval
+2. claim the one permit for the approval (with fresh original-actor identity
+   and current-policy reevaluation for `approved_awaiting_claim`)
    (`POST /v1-approvals/{id}/claim-permit`), and check it is bound to that
    digest;
 3. verify it, as the staff member who asked for the refund, and require

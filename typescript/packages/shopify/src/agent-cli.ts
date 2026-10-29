@@ -8,6 +8,7 @@
  */
 
 import { createInterface } from "node:readline/promises";
+import { pathToFileURL } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import { AtlaSentClient } from "@atlasent/sdk";
 import { createAdminClient, normalizeShopDomain } from "./admin.js";
@@ -16,9 +17,10 @@ import { guardedShopifyRefund, resolveRefundActionType } from "./guard.js";
 import { appendEvidence } from "./evidence-log.js";
 import type { RefundDecisionRecord } from "./decision-record.js";
 import { JsonFileLedger } from "./ledger.js";
+import { refundCliIdentity, type CliEnvironment } from "./cli-identity.js";
 
-function env(name: string): string {
-  const v = process.env[name];
+function env(config: CliEnvironment, name: string): string {
+  const v = config[name];
   if (!v) {
     console.error(`${name} is required`);
     process.exit(2);
@@ -26,51 +28,64 @@ function env(name: string): string {
   return v;
 }
 
-const shop = normalizeShopDomain(env("SHOPIFY_SHOP"));
-const shopify = createAdminClient({ shop, accessToken: env("SHOPIFY_ADMIN_TOKEN") });
-const atlasent = new AtlaSentClient({
-  apiKey: env("ATLASENT_API_KEY"),
-  ...(process.env.ATLASENT_BASE_URL ? { baseUrl: process.env.ATLASENT_BASE_URL } : {}),
-});
-const environment = env("ATLASENT_ENVIRONMENT");
-const actionSetting = process.env.ATLASENT_REFUND_ACTION_TYPE !== undefined
-  ? { actionType: resolveRefundActionType(process.env.ATLASENT_REFUND_ACTION_TYPE) } : {};
-const ledger = new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json");
-const customerEmail = env("CUSTOMER_EMAIL");
-const businessRequestId = env("SUPPORT_CASE_ID");
-const evidenceLog = process.env.EVIDENCE_LOG;
+export async function runSupportAgentCli(config: CliEnvironment = { ...process.env }): Promise<void> {
+  const shop = normalizeShopDomain(env(config, "SHOPIFY_SHOP"));
+  const shopify = createAdminClient({ shop, accessToken: env(config, "SHOPIFY_ADMIN_TOKEN") });
+  const apiKey = env(config, "ATLASENT_API_KEY");
+  const identity = refundCliIdentity(config, apiKey, "agent:pinecone-support");
+  const atlasent = new AtlaSentClient({
+    apiKey,
+    ...(config.ATLASENT_BASE_URL ? { baseUrl: config.ATLASENT_BASE_URL } : {}),
+  });
+  const environment = env(config, "ATLASENT_ENVIRONMENT");
+  const actionSetting = config.ATLASENT_REFUND_ACTION_TYPE !== undefined
+    ? { actionType: resolveRefundActionType(config.ATLASENT_REFUND_ACTION_TYPE) } : {};
+  const ledger = new JsonFileLedger(config.LEDGER_PATH ?? "./refund-ledger.json");
+  const customerEmail = env(config, "CUSTOMER_EMAIL");
+  const businessRequestId = env(config, "SUPPORT_CASE_ID");
+  const evidenceLog = config.EVIDENCE_LOG;
 
-const rl = createInterface({ input: process.stdin, output: process.stdout });
-let history: Anthropic.Beta.BetaMessageParam[] = [];
-console.log(`Pinecone Pet Supply support (signed in as ${customerEmail}). Ctrl+C to quit.\n`);
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  let history: Anthropic.Beta.BetaMessageParam[] = [];
+  console.log(`Pinecone Pet Supply support (signed in as ${customerEmail}). Ctrl+C to quit.\n`);
 
-for (;;) {
-  const line = (await rl.question("you> ")).trim();
-  if (!line) continue;
-  history.push({ role: "user", content: line });
-  const turn = await runSupportAgent(
-    {
-      anthropic: new Anthropic(),
-      customerEmail,
-      businessRequestId,
-      lookupOrder: (id) => shopify.getOrder(id, { includeEmail: true }),
-      refund: (req) =>
-        guardedShopifyRefund(shopify, atlasent, req, {
-          actor: "agent:pinecone-support",
-          environment,
-          ledger,
-          shop,
-          ...actionSetting,
-          ...(evidenceLog ? { onDecision: (r: RefundDecisionRecord) => appendEvidence(evidenceLog, r) } : {}),
-        }),
-    },
-    history,
-  );
-  history = turn.messages;
-  for (const r of turn.refunds) {
-    console.log(`  [gate] ${r.refunded ? `refunded ${r.refund.id}` : `${r.decision}${r.denyCode ? ` ${r.denyCode}` : ""}`}`);
+  try {
+    for (;;) {
+      const line = (await rl.question("you> ")).trim();
+      if (!line) continue;
+      history.push({ role: "user", content: line });
+      const turn = await runSupportAgent(
+        {
+          anthropic: new Anthropic(),
+          customerEmail,
+          businessRequestId,
+          lookupOrder: (id) => shopify.getOrder(id, { includeEmail: true }),
+          refund: (req) =>
+            guardedShopifyRefund(shopify, atlasent, req, {
+              ...identity,
+              environment,
+              ledger,
+              shop,
+              ...actionSetting,
+              ...(evidenceLog ? { onDecision: (r: RefundDecisionRecord) => appendEvidence(evidenceLog, r) } : {}),
+            }),
+        },
+        history,
+      );
+      history = turn.messages;
+      for (const r of turn.refunds) {
+        console.log(`  [gate] ${r.refunded ? `refunded ${r.refund.id}` : `${r.decision}${r.denyCode ? ` ${r.denyCode}` : ""}`}`);
+      }
+      console.log(`agent> ${turn.reply}\n`);
+    }
+  } finally {
+    rl.close();
   }
-  console.log(`agent> ${turn.reply}\n`);
 }
 
-
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runSupportAgentCli().catch(err => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+  });
+}

@@ -530,3 +530,53 @@ Those tests are not a test-mode run.
 - Accounting and tax adjustments, and correlation to them.
 - Any run against a Stripe test-mode account or an AtlaSent org.
 
+# Shared runtime budgets (private 0.2)
+
+`customer.refund.issue` now requires a durable business request and the runtime
+reservation client. It reserves before evaluation and checks the same liability
+again before Stripe submission, approval resumption and unconfirmed resubmission.
+The dependency is [atlasent-api#4764](https://github.com/AtlaSent/atlasent-api/pull/4764);
+deploy and verify that migration/function before adopting this path. Missing,
+expired, exhausted, malformed or unreadable budgets hold execution.
+
+```ts
+import { createRefundReservationsClient, CUSTOMER_REFUND_ISSUE, guardedStripeRefund } from "@atlasent/stripe";
+
+const runtimeReservations = createRefundReservationsClient({
+  apiKey: process.env.ATLASENT_API_KEY!, // server-side, consequential_operations:write
+  ...(process.env.ATLASENT_BASE_URL ? { baseUrl: process.env.ATLASENT_BASE_URL } : {}),
+});
+const result = await guardedStripeRefund(stripe, atlasent, {
+  paymentIntentId,
+  amountCents,
+  businessRequestId: ticketAndLineId, // stable across workers, restarts and retries
+}, { ...gateOptions, actionType: CUSTOMER_REFUND_ISSUE, runtimeReservations });
+```
+
+Keep runtime and Stripe credentials on the trusted host. Use a restricted Stripe
+key and a separate Stripe sandbox for new acceptance work. Budget constraints are
+configured explicitly by a current, stepped-up runtime owner/admin; the SDK never
+chooses a cap. Runtime organization/actor come from its authenticated key/session.
+Customer identity is reread from Stripe, never request metadata. The account cap
+remains shared across actors/keys. A missing customer identity cannot skip a
+configured customer refinement. The configured account label must correspond to
+the actual Stripe credential/account; these source tests do not prove that
+native credential binding or block alternate direct access to Stripe.
+
+Budget evidence has `authority_effect: none`. Evaluate and exact Permit
+verification/consumption, current native facts, stable provider idempotency and
+provider outcome reconciliation are still required. Legacy
+`finance.payment.authorize` remains compatible and can opt in with the same
+client plus business request; existing digest versions/approvals are unchanged.
+An opted-in client is captured before async authorization so a caller cannot
+remove it in flight.
+
+The runtime does not yet accept verified provider settlement for releasing or
+consuming these liabilities (RF4). Local accepted/failed/webhook/readback outcomes
+therefore never free server capacity. This is conservative admission, **not a
+complete production refund flow**. The shipped refund policy remains review-only;
+fake-provider tests do not mark any control or native journey verified.
+
+See [the additive contract proposal](../../../contract/proposals/refund-shared-budgets.md)
+and API `docs/REFUND_SHARED_BUDGETS.md` for exact request/receipt fields and limits.
+

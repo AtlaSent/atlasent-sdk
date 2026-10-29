@@ -8,6 +8,44 @@ follows [semver](https://semver.org/): breaking changes bump the major
 
 ## Unreleased
 
+### Private Stripe 0.2: shared runtime budget admission
+
+Canonical `customer.refund.issue` requires runtime reservations and a durable
+business request. The guard reserves before evaluation and rechecks the exact
+liability before initial, approved and repeated submission. The typed HTTP client
+validates exact receipts, refuses redirects and sanitizes transport failures.
+Legacy action/digest/approval compatibility remains; it can explicitly opt in.
+Requires atlasent-api#4764 and staging/native verification. RF4 verified server
+settlement remains open; no caller outcome releases cumulative exposure.
+
+### Added: explicit Shopify terminal agent-key identity mode
+
+The private refund/resume CLI and support-agent terminal can opt into the
+existing broker with `ATLASENT_ACTOR_IDENTITY=agent-key`, an enrolled agent
+actor and expected tenant. They use fresh assertions through the existing
+guard and claim path, with the same key/runtime as authorization. Malformed
+or partial configuration stops before source/runtime calls; broker failure
+does not fall back. Model/tool arguments cannot choose the identity source.
+Legacy actors and read-only facts/reconciliation remain compatible. No
+credential, broker provisioning, human approval, policy activation, deployment
+or native acceptance is added; API #4656 remains open.
+
+### Added: Shopify claim-time identity and existing agent broker integration
+
+The private Shopify guard now obtains fresh identity for the original actor
+before claiming an `approved_awaiting_claim` approval. Missing/unavailable
+identity stops before HTTP and leaves that pending approval resumable. The
+approval client sends only the optional `actor_identity` claim field; legacy
+`approved` claim requests remain empty. Separate permit verification and
+consumption are still required before submission.
+
+`createAgentActorIdentityResolver` connects trusted hosts to the existing
+key-bound agent broker, with fresh requests per boundary, HTTPS/no redirects,
+bounded timeout/response size and binding/currentness checks. It does not mint
+human approval, grant authority, cache assertions or replace runtime signature
+verification. No CLI broker configuration, credential, policy, deployment or
+native merchant acceptance is added; API #4656 remains open.
+
 ### Added: trusted-host actor identity for the private Shopify refund guard
 
 Shopify library/server hosts may resolve a fresh signed actor assertion at
@@ -1399,3 +1437,4 @@ Also exports the supporting wire types: `ReplayDecisionResponse`,
 ---
 
 ## @atlasent/sdk 2.6.0 (2026-05-22)
+
