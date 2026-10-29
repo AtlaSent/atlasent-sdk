@@ -53,6 +53,7 @@ customer's policy to make the acceptance workflow green.
 | Gate | read payment and order → evaluate → verify → re-read → `POST /v1/refunds` | `src/guard.ts`, CLI `src/cli.ts` |
 | Approval | resume an escalated refund once a manager decides it | `resumeApprovedStripeRefund` in `src/guard.ts`, `src/approvals.ts` |
 | Alarm | every `refund.created` event is matched to a permit, or flagged | `src/webhook.ts`, `src/webhook-server.ts` |
+| Settlement relay | carries Stripe refund events to AtlaSent so a pinned source can settle a runtime refund reservation | `src/settlement-relay.ts` |
 | Stripe client | `GET /v1/payment_intents/:id`, `POST /v1/refunds`; no SDK dependency | `src/stripe.ts` |
 
 ## Where the facts come from
@@ -162,6 +163,64 @@ Prevention is about who holds refund rights:
 - **Dashboard:** give team members roles that cannot issue refunds, so the
   gate is the only path. Stripe's role names and permissions change; confirm
   with a test teammate that a restricted role really cannot refund.
+
+## Settlement relay: Stripe outcomes to AtlaSent (RF4)
+
+A runtime refund reservation stays `reserved`, counting against any shared
+budget, until AtlaSent records a verified Stripe outcome for it
+(AtlaSent/atlasent-api#4779). Stripe cannot attach an AtlaSent API key, so
+`src/settlement-relay.ts` receives Stripe's refund events and forwards them
+to `POST {ATLASENT_BASE_URL}/v1-assertion-ingest/stripe?connector_id=<id>`.
+
+| | |
+|---|---|
+| Stripe endpoint | `POST /webhooks/stripe/settlement`, subscribed to `refund.created`, `refund.updated`, `refund.failed` and `charge.refund.updated` |
+| Signing secret | the endpoint's own secret, enrolled on the AtlaSent Stripe connector that an owner or admin pinned as the settlement source |
+| AtlaSent key | `assertions:write` only, for the connector's environment; not the gate's key |
+
+What it does with each delivery:
+
+1. Verifies `Stripe-Signature` with the endpoint's secret (5-minute window).
+   A delivery that fails is answered `400` and never reaches AtlaSent.
+2. Acknowledges any other event type without forwarding it.
+3. Forwards the exact bytes and the `Stripe-Signature` header. Redirects are
+   refused, and the base URL must be `https` (plain `http` only on
+   localhost). AtlaSent verifies the signature again under the pinned
+   credential and decides everything itself.
+4. Answers Stripe `200` only when AtlaSent recorded an outcome:
+   `consumed`, `released`, `not_terminal`, `duplicate_event`,
+   `already_settled`, or a final `refused` (logged with its reason). Anything
+   else is non-2xx, so Stripe delivers the event again and its dashboard
+   shows the endpoint failing:
+
+| AtlaSent answered | Stripe gets |
+|---|---|
+| unreachable or slower than 8 s | `503` |
+| `503 refund_settlement_unavailable` | `503` |
+| any other non-2xx (wrong key or scope, rate limit, ...) | `502` |
+| `2xx` with no settlement outcome | `502 not_verified_by_connector`: wrong connector id, a secret that differs from the enrolled one, or a key for the other environment. Nothing settled |
+
+One event settles at most once, so a redelivery is safe. Each delivery logs
+one JSON line with the event id and type and the outcome, never the body,
+signature or key.
+
+```sh
+STRIPE_SETTLEMENT_WEBHOOK_SECRET=whsec_... ATLASENT_INGEST_API_KEY=ask_test_... \
+ATLASENT_SETTLEMENT_CONNECTOR_ID=<connector uuid> \
+ATLASENT_BASE_URL=https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1 \
+npm run settlement-relay       # :3002/webhooks/stripe/settlement (PORT to change)
+```
+
+Keep it a separate Stripe endpoint from the alarm, so a redelivery here never
+re-runs the alarm, and keep its secret off the agent that requests refunds.
+The relay cannot settle anything without AtlaSent: until an owner or admin
+pins the connector (console `/refund-budgets`), every refund event is a final
+`refused: source_not_bound` and nothing moves.
+
+Not verified: no live Stripe account and no deployed AtlaSent runtime has run
+it. Tests use fake fetches and two local servers, and one local run drove it
+against atlasent-api's real `v1-assertion-ingest` handler with a stubbed
+database.
 
 ## Running it (test mode)
 
