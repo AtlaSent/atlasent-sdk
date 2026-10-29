@@ -9,8 +9,8 @@
  * This code cannot approve anything. It reads the decision a person made and,
  * on approval, claims the single permit the runtime minted for it.
  *
- * The @atlasent/stripe package carries the same file; the two install
- * independently.
+ * Shopify additionally supports the existing IMPL-026B actor_identity
+ * claim body. Stripe installs independently and keeps its own transport.
  */
 
 /** Built-in base: the hosted runtime's functions root (same as @atlasent/sdk). */
@@ -53,7 +53,7 @@ export type ApprovalClaim =
 
 export interface ApprovalsApi {
   getStatus(approvalRequestId: string): Promise<ApprovalStatus>;
-  claimPermit(approvalRequestId: string): Promise<ApprovalClaim>;
+  claimPermit(approvalRequestId: string, options?: { actorIdentity?: Record<string, unknown> }): Promise<ApprovalClaim>;
 }
 
 export class ApprovalsApiError extends Error {
@@ -71,13 +71,17 @@ export function createApprovalsClient(opts: { apiKey: string; baseUrl?: string; 
   const timeoutMs = opts.timeoutMs ?? 10_000;
   const headers = { authorization: `Bearer ${opts.apiKey}`, "content-type": "application/json" };
 
-  async function call(method: "GET" | "POST", path: string): Promise<{ status: number; json: Record<string, unknown> | null }> {
-    const res = await doFetch(`${base}${path}`, {
-      method,
-      headers,
-      ...(method === "POST" ? { body: "{}" } : {}),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+  async function call(method: "GET" | "POST", path: string, body = "{}"): Promise<{ status: number; json: Record<string, unknown> | null }> {
+    let res: Response;
+    try {
+      res = await doFetch(`${base}${path}`, {
+        method,
+        headers,
+        ...(method === "POST" ? { body } : {}),
+        signal: AbortSignal.timeout(timeoutMs),
+        redirect: "error",
+      });
+    } catch { throw new ApprovalsApiError("approval transport unavailable"); }
     const json = (await res.json().catch(() => null)) as unknown;
     return { status: res.status, json: json && typeof json === "object" ? (json as Record<string, unknown>) : null };
   }
@@ -101,10 +105,18 @@ export function createApprovalsClient(opts: { apiKey: string; baseUrl?: string; 
       const re = json.re_evaluation_decision;
       return { found: true, status: json.status, ...(typeof re === "string" ? { reEvaluationDecision: re } : {}) };
     },
-    async claimPermit(id) {
-      const { status, json } = await call("POST", `/v1-approvals/${encodeURIComponent(assertApprovalRequestId(id))}/claim-permit`);
+    async claimPermit(id, options) {
+      let body = "{}";
+      if (options?.actorIdentity !== undefined) {
+        try {
+          const a: unknown = JSON.parse(JSON.stringify(options.actorIdentity));
+          if (!a || typeof a !== "object" || Array.isArray(a) || Object.keys(a).length === 0) throw new Error();
+          body = JSON.stringify({ actor_identity: a });
+        } catch { throw new ApprovalsApiError("claim actor identity must be a nonempty JSON object"); }
+      }
+      const { status, json } = await call("POST", `/v1-approvals/${encodeURIComponent(assertApprovalRequestId(id))}/claim-permit`, body);
       if (status === 403) return { claimed: false, failure: httpFailure(status, json) };
-      if (status !== 200) return { claimed: false, failure: typeof json?.error === "string" ? json.error : `HTTP ${status}` };
+      if (status !== 200) return { claimed: false, failure: typeof json?.error === "string" && /^[A-Za-z][A-Za-z0-9_]{0,127}$/.test(json.error) ? json.error : `HTTP ${status}` };
       const token = json?.permit_token;
       if (json?.claimed !== true || typeof token !== "string" || token.length === 0) return { claimed: false, failure: "not_claimed" };
       const hash = json.execution_hash_expected;
@@ -112,3 +124,4 @@ export function createApprovalsClient(opts: { apiKey: string; baseUrl?: string; 
     },
   };
 }
+
