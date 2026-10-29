@@ -52,6 +52,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Before anything else: refuse unless the dispatcher (and anyone
+      # re-running this attempt) is on .github/production-dispatchers.json.
+      - name: Production dispatcher must be on the allowlist
+        uses: ./.github/actions/production-dispatcher-check
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:

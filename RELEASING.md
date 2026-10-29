@@ -4,6 +4,18 @@ Publish procedure for the Python (`atlasent` on PyPI) and TypeScript
 (`@atlasent/sdk` on npm) SDKs. The two packages version independently;
 each has its own git-tag prefix and its own publish workflow.
 
+## Who may release
+
+Only the people listed by numeric user id in
+[`.github/production-dispatchers.json`](.github/production-dispatchers.json).
+Every job bound to the `npm`, `npm-enforce` or `pypi` environment, and every
+job in `publish-go.yml`, first runs `.github/actions/production-dispatcher-check`.
+It refuses unless the tag pusher or dispatcher, and anyone re-running the
+attempt, is on that list, so a tag pushed by anyone else publishes nothing.
+`production-dispatcher-guard.yml` fails the build if a publish job lacks the
+check. Adding a person is a reviewed change to that file plus a
+DECISION_LEDGER entry in `atlasent-internal`.
+
 ## Tag convention
 
 ### v1 stable packages

@@ -28,6 +28,10 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+      # Before anything else: refuse unless the dispatcher (and anyone
+      # re-running this attempt) is on .github/production-dispatchers.json.
+      - name: Production dispatcher must be on the allowlist
+        uses: ./.github/actions/production-dispatcher-check
       - uses: actions/setup-go@v7
         with:
           # Read from go.mod (go 1.25.0 + toolchain go1.25.14) instead of a
@@ -49,6 +53,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+
+      # Before anything else: refuse unless the dispatcher (and anyone
+      # re-running this attempt) is on .github/production-dispatchers.json.
+      - name: Production dispatcher must be on the allowlist
+        uses: ./.github/actions/production-dispatcher-check
 
       - uses: actions/setup-go@v7
         with:
