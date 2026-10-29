@@ -81,3 +81,13 @@ export {
 } from "./webhook.js";
 export { createStripeWebhookHandler, type StripeWebhookDeps } from "./webhook-server.js";
 export { REFUND_DECISION_SCHEMA, outcomeOf, type RefundDecisionRecord, type RefundOutcome } from "./decision-record.js";
+export {
+  relayStripeEvent,
+  createSettlementRelayHandler,
+  settlementIngestUrl,
+  SettlementRelayConfigError,
+  SETTLEMENT_EVENT_TYPES,
+  SETTLEMENT_RELAY_PATH,
+  type SettlementRelayConfig,
+  type RelayResponse,
+} from "./settlement-relay.js";

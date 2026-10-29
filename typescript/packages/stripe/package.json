@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "refund": "tsx src/cli.ts",
     "webhook": "tsx src/webhook-server.ts",
+    "settlement-relay": "tsx src/settlement-relay.ts",
     "seed-test-payments": "tsx src/seed.ts",
     "acceptance": "tsx src/acceptance.ts"
   },
