@@ -8,10 +8,13 @@
  * Env: SHOPIFY_SHOP, SHOPIFY_ADMIN_TOKEN, ATLASENT_API_KEY, ATLASENT_ENVIRONMENT,
  * optional ATLASENT_BASE_URL, ATLASENT_ACTOR, LEDGER_PATH, EVIDENCE_LOG (appends each
  * decision to the evidence log; see evidence-log.ts).
+ * Explicit agent-key identity: ATLASENT_ACTOR_IDENTITY=agent-key plus the
+ * enrolled ATLASENT_ACTOR and expected ATLASENT_TENANT_ID (see README).
  * `facts` reads Shopify only and never calls AtlaSent.
  */
 
 import { parseArgs } from "node:util";
+import { pathToFileURL } from "node:url";
 import { AtlaSentClient } from "@atlasent/sdk";
 import { createAdminClient, normalizeShopDomain } from "./admin.js";
 import { centsToMoney, deriveRefundFacts, moneyToCents } from "./facts.js";
@@ -21,9 +24,10 @@ import { JsonFileLedger } from "./ledger.js";
 import { reconcileShopifyRefund } from "./reconcile.js";
 import { appendEvidence } from "./evidence-log.js";
 import type { RefundDecisionRecord } from "./decision-record.js";
+import { refundCliIdentity, type CliEnvironment } from "./cli-identity.js";
 
-function env(name: string): string {
-  const v = process.env[name];
+function env(config: CliEnvironment, name: string): string {
+  const v = config[name];
   if (!v) {
     console.error(`${name} is required`);
     process.exit(2);
@@ -31,8 +35,9 @@ function env(name: string): string {
   return v;
 }
 
-async function main(): Promise<number> {
+export async function runRefundCli(args = process.argv.slice(2), config: CliEnvironment = { ...process.env }): Promise<number> {
   const { positionals, values } = parseArgs({
+    args,
     allowPositionals: true,
     options: { order: { type: "string" }, amount: { type: "string" }, reason: { type: "string" }, approval: { type: "string" }, "request-id": { type: "string" }, "gate-ref": { type: "string" }, "refund-id": { type: "string" } },
   });
@@ -42,16 +47,16 @@ async function main(): Promise<number> {
     console.error(usage);
     return 2;
   }
-  const shop = normalizeShopDomain(env("SHOPIFY_SHOP"));
-  const shopify = createAdminClient({ shop, accessToken: env("SHOPIFY_ADMIN_TOKEN") });
-  const evidenceLog = process.env.EVIDENCE_LOG;
+  const shop = normalizeShopDomain(env(config, "SHOPIFY_SHOP"));
+  const shopify = createAdminClient({ shop, accessToken: env(config, "SHOPIFY_ADMIN_TOKEN") });
+  const evidenceLog = config.EVIDENCE_LOG;
   const logDecisions = evidenceLog ? { onDecision: (r: RefundDecisionRecord) => appendEvidence(evidenceLog, r) } : {};
-  const actionSetting = process.env.ATLASENT_REFUND_ACTION_TYPE !== undefined
-    ? { actionType: resolveRefundActionType(process.env.ATLASENT_REFUND_ACTION_TYPE) } : {};
+  const actionSetting = config.ATLASENT_REFUND_ACTION_TYPE !== undefined
+    ? { actionType: resolveRefundActionType(config.ATLASENT_REFUND_ACTION_TYPE) } : {};
 
   if (command === "reconcile") {
-    const result = await reconcileShopifyRefund(shopify, new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"), {
-      gateRef: values["gate-ref"]!, shop, environment: env("ATLASENT_ENVIRONMENT"),
+    const result = await reconcileShopifyRefund(shopify, new JsonFileLedger(config.LEDGER_PATH ?? "./refund-ledger.json"), {
+      gateRef: values["gate-ref"]!, shop, environment: env(config, "ATLASENT_ENVIRONMENT"),
       ...(values["refund-id"] ? { candidateRefundId: values["refund-id"] } : {}),
     });
     console.log(JSON.stringify(result, null, 2));
@@ -59,17 +64,18 @@ async function main(): Promise<number> {
   }
 
   if (command === "resume") {
-    const apiKey = env("ATLASENT_API_KEY");
-    const baseUrl = process.env.ATLASENT_BASE_URL;
+    const apiKey = env(config, "ATLASENT_API_KEY");
+    const baseUrl = config.ATLASENT_BASE_URL;
+    const identity = refundCliIdentity(config, apiKey, config.ATLASENT_ACTOR ?? `shopify-cli:${config.USER ?? "operator"}`);
     const result = await resumeApprovedShopifyRefund(
       shopify,
       new AtlaSentClient({ apiKey, ...(baseUrl ? { baseUrl } : {}) }),
       createApprovalsClient({ apiKey, ...(baseUrl ? { baseUrl } : {}) }),
-      { approvalRequestId: values.approval as string, resumedBy: `shopify-cli:${process.env.USER ?? "operator"}` },
+      { approvalRequestId: values.approval as string, resumedBy: `shopify-cli:${config.USER ?? "operator"}` },
       {
-        actor: process.env.ATLASENT_ACTOR ?? `shopify-cli:${process.env.USER ?? "operator"}`,
-        environment: env("ATLASENT_ENVIRONMENT"),
-        ledger: new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"),
+        ...identity,
+        environment: env(config, "ATLASENT_ENVIRONMENT"),
+        ledger: new JsonFileLedger(config.LEDGER_PATH ?? "./refund-ledger.json"),
         shop,
         ...logDecisions,
         ...actionSetting,
@@ -95,18 +101,20 @@ async function main(): Promise<number> {
     console.error("--amount and --request-id are required for refund; reuse the original request ID on retries");
     return 2;
   }
+  const apiKey = env(config, "ATLASENT_API_KEY");
+  const identity = refundCliIdentity(config, apiKey, config.ATLASENT_ACTOR ?? `shopify-cli:${config.USER ?? "operator"}`);
   const atlasent = new AtlaSentClient({
-    apiKey: env("ATLASENT_API_KEY"),
-    ...(process.env.ATLASENT_BASE_URL ? { baseUrl: process.env.ATLASENT_BASE_URL } : {}),
+    apiKey,
+    ...(config.ATLASENT_BASE_URL ? { baseUrl: config.ATLASENT_BASE_URL } : {}),
   });
   const result = await guardedShopifyRefund(
     shopify,
     atlasent,
     { orderId, amountCents: moneyToCents(values.amount), businessRequestId: values["request-id"], ...(values.reason ? { reason: values.reason } : {}) },
     {
-      actor: process.env.ATLASENT_ACTOR ?? `shopify-cli:${process.env.USER ?? "operator"}`,
-      environment: env("ATLASENT_ENVIRONMENT"),
-      ledger: new JsonFileLedger(process.env.LEDGER_PATH ?? "./refund-ledger.json"),
+      ...identity,
+      environment: env(config, "ATLASENT_ENVIRONMENT"),
+      ledger: new JsonFileLedger(config.LEDGER_PATH ?? "./refund-ledger.json"),
       shop,
       ...logDecisions,
       ...actionSetting,
@@ -116,12 +124,13 @@ async function main(): Promise<number> {
   return result.refunded ? 0 : 1;
 }
 
-main().then(
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) runRefundCli().then(
   (code) => process.exit(code),
   (err) => {
     console.error(err instanceof Error ? err.message : err);
     process.exit(1);
   },
 );
+
 
 

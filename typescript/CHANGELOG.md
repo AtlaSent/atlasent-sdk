@@ -18,6 +18,45 @@ Legacy action/digest/approval compatibility remains; it can explicitly opt in.
 Requires atlasent-api#4764 and staging/native verification. RF4 verified server
 settlement remains open; no caller outcome releases cumulative exposure.
 
+### Added: explicit Shopify terminal agent-key identity mode
+
+The private refund/resume CLI and support-agent terminal can opt into the
+existing broker with `ATLASENT_ACTOR_IDENTITY=agent-key`, an enrolled agent
+actor and expected tenant. They use fresh assertions through the existing
+guard and claim path, with the same key/runtime as authorization. Malformed
+or partial configuration stops before source/runtime calls; broker failure
+does not fall back. Model/tool arguments cannot choose the identity source.
+Legacy actors and read-only facts/reconciliation remain compatible. No
+credential, broker provisioning, human approval, policy activation, deployment
+or native acceptance is added; API #4656 remains open.
+
+### Added: Shopify claim-time identity and existing agent broker integration
+
+The private Shopify guard now obtains fresh identity for the original actor
+before claiming an `approved_awaiting_claim` approval. Missing/unavailable
+identity stops before HTTP and leaves that pending approval resumable. The
+approval client sends only the optional `actor_identity` claim field; legacy
+`approved` claim requests remain empty. Separate permit verification and
+consumption are still required before submission.
+
+`createAgentActorIdentityResolver` connects trusted hosts to the existing
+key-bound agent broker, with fresh requests per boundary, HTTPS/no redirects,
+bounded timeout/response size and binding/currentness checks. It does not mint
+human approval, grant authority, cache assertions or replace runtime signature
+verification. No CLI broker configuration, credential, policy, deployment or
+native merchant acceptance is added; API #4656 remains open.
+
+### Added: trusted-host actor identity for the private Shopify refund guard
+
+Shopify library/server hosts may resolve a fresh signed actor assertion at
+both evaluate and verify through the existing SDK wire fields. Approval resume
+uses the original permit actor, never the staff member who clicks Resume.
+A configured identity source that fails or returns no JSON assertion blocks
+execution; browser/model identity fields cannot populate it. Assertions are
+not persisted in pending approvals or decision evidence. No resolver retains
+the legacy wire omission. This supplies transport only: runtime identity and
+authority verification, native merchant acceptance and API #4656 remain required.
+
 ### Added: explicit internal Shopify preview → Action Inbox observation
 
 The private Shopify integration has a separate `serve:inbox` command, backed by
@@ -1398,3 +1437,4 @@ Also exports the supporting wire types: `ReplayDecisionResponse`,
 ---
 
 ## @atlasent/sdk 2.6.0 (2026-05-22)
+

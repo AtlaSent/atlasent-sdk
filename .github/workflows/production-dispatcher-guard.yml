@@ -1,0 +1,54 @@
+name: Production dispatcher guard
+
+# Every job that can publish a package (a job bound to npm, npm-enforce or
+# pypi, or any job in publish-go.yml) must run
+# .github/actions/production-dispatcher-check before anything else. This
+# workflow fails if one does not, and proves the check rejects the defects it
+# targets. It runs only when a workflow, the allowlist, the action or the
+# script changes.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/production-dispatchers.json"
+      - ".github/actions/production-dispatcher-check/**"
+      - "scripts/check-production-dispatcher.mjs"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - ".github/production-dispatchers.json"
+      - ".github/actions/production-dispatcher-check/**"
+      - "scripts/check-production-dispatcher.mjs"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-dispatcher-guard-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  guard:
+    name: Publish jobs check their dispatcher first
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      # js-yaml is installed, pinned, outside the workspace: this repo has no
+      # root package.json.
+      - name: Install js-yaml 4.3.2
+        run: npm install --prefix "$RUNNER_TEMP/dispatcher-guard-yaml" js-yaml@4.3.2 --no-audit --no-fund --no-save
+      - name: Prove the guard rejects the defects it targets
+        env:
+          JS_YAML_MODULE: ${{ runner.temp }}/dispatcher-guard-yaml/node_modules/js-yaml/dist/js-yaml.mjs
+        run: node scripts/check-production-dispatcher.mjs --self-test
+      - name: Check every publish job runs the dispatcher check first
+        env:
+          JS_YAML_MODULE: ${{ runner.temp }}/dispatcher-guard-yaml/node_modules/js-yaml/dist/js-yaml.mjs
+        run: node scripts/check-production-dispatcher.mjs --verify-workflows

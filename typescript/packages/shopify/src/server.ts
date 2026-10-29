@@ -19,7 +19,7 @@ import { tokenExchangeAdmin } from "./token-exchange-admin.js";
 export { tokenExchangeAdmin } from "./token-exchange-admin.js";
 import { describeResult } from "./describe.js";
 import { moneyToCents } from "./facts.js";
-import { guardedShopifyRefund, resumeApprovedShopifyRefund, resolveRefundActionType, type RefundActionType } from "./guard.js";
+import { guardedShopifyRefund, resumeApprovedShopifyRefund, resolveRefundActionType, type RefundActionType, type RefundActorIdentityResolver } from "./guard.js";
 import { reconcileShopifyRefund } from "./reconcile.js";
 import { createApprovalsClient, type ApprovalsApi } from "./approvals.js";
 import type { RefundDecisionRecord } from "./decision-record.js";
@@ -30,6 +30,8 @@ import { alarmRecord, appendEvidence } from "./evidence-log.js";
 export interface GateServerDeps {
   /** Trusted host setting; an HTTP body cannot choose its authorization action. */
   actionType?: RefundActionType;
+  /** Server-owned broker integration; HTTP bodies never supply actor identity. */
+  resolveActorIdentity?: RefundActorIdentityResolver;
   clientId: string;
   clientSecret: string;
   environment: string;
@@ -63,6 +65,7 @@ export function createGateHandler(deps: GateServerDeps): RequestListener {
     ledger: deps.ledger,
     shop,
     ...(deps.actionType !== undefined ? { actionType: deps.actionType } : {}),
+    ...(deps.resolveActorIdentity !== undefined ? { resolveActorIdentity: deps.resolveActorIdentity } : {}),
     ...(deps.now ? { now: deps.now } : {}),
     ...(deps.onDecision ? { onDecision: deps.onDecision } : {}),
   });
@@ -284,6 +287,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }),
   ).listen(port, () => console.log(`AtlaSent refund gate listening on :${port} for ${shop}`));
 }
+
 
 
 

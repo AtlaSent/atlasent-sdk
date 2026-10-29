@@ -8,7 +8,7 @@ import type { ShopifyAdmin } from "../src/admin.js";
 import { signSessionToken } from "../src/session-token.js";
 import type { RefundAuditVerdict, RefundWebhookPayload } from "../src/webhook.js";
 import type { RefundDecisionRecord } from "../src/decision-record.js";
-import { CUSTOMER_REFUND_ISSUE, FINANCE_PAYMENT_AUTHORIZE, type RefundActionType } from "../src/guard.js";
+import { CUSTOMER_REFUND_ISSUE, FINANCE_PAYMENT_AUTHORIZE, type RefundActionType, type RefundActorIdentityResolver } from "../src/guard.js";
 import { demoOrders, FakeShopify, fakeRuntime, makeOrder, NOW } from "./fakes.js";
 
 const CLIENT_ID = "client-123";
@@ -22,6 +22,7 @@ afterEach(() => new Promise<void>((r) => (server ? server.close(() => r()) : r()
 async function start(
   extra: {
     actionType?: RefundActionType;
+    resolveActorIdentity?: RefundActorIdentityResolver;
     onVerdict?: (v: RefundAuditVerdict, p: RefundWebhookPayload, shop: string) => void;
     onDecision?: (r: RefundDecisionRecord) => void;
     adminFor?: (shop: string, token: string) => Promise<ShopifyAdmin>;
@@ -64,6 +65,24 @@ const postRefund = (base: string, body: unknown, auth = `Bearer ${token()}`) =>
   fetch(`${base}/api/refunds`, { method: "POST", headers: { authorization: auth, "content-type": "application/json" }, body: JSON.stringify(body && typeof body === "object" ? { businessRequestId: "test-case", ...body } : body) });
 
 describe("POST /api/refunds (the admin button)", () => {
+  it("uses the server identity source and ignores browser assertions and actor overrides", async () => {
+    const resolveActorIdentity = vi.fn(async ({ phase }) => ({ test_identity: `host-${phase}` }));
+    const s = await start({ actionType: CUSTOMER_REFUND_ISSUE, resolveActorIdentity });
+    const response = await postRefund(s.base, { orderId: "1001", amount: "18.99",
+      actor_id: "forged", actor_identity: { test_identity: "browser" }, actorIdentity: { test_identity: "browser" } });
+    expect((await response.json()).refunded).toBe(true);
+    expect(resolveActorIdentity).toHaveBeenCalledTimes(2);
+    expect(s.runtime.evaluateBodies[0]).toMatchObject({ actor_id: `shopify-staff:${SHOP}/42`, actor_identity: { test_identity: "host-evaluate" } });
+    expect(s.runtime.verifyBodies[0]).toMatchObject({ actor_id: `shopify-staff:${SHOP}/42`, actor_identity: { test_identity: "host-verify" } });
+  });
+
+  it("does not accept browser identity when the server has no identity source", async () => {
+    const s = await start();
+    await postRefund(s.base, { orderId: "1001", amount: "18.99", actor_identity: { test_identity: "browser" } });
+    expect(s.runtime.evaluateBodies[0]).not.toHaveProperty("actor_identity");
+    expect(s.runtime.verifyBodies[0]).not.toHaveProperty("actor_identity");
+  });
+
   it("uses only the host-configured canonical action, ignoring a caller action override", async () => {
     const s = await start({ actionType: CUSTOMER_REFUND_ISSUE });
     const response = await postRefund(s.base, { orderId: "1001", amount: "18.99", actionType: FINANCE_PAYMENT_AUTHORIZE });
@@ -317,5 +336,6 @@ describe("POST /api/operations/refund-preview (read-only first value)", () => {
     expect(res.headers.get("access-control-allow-methods")).toContain("POST");
   });
 });
+
 
 

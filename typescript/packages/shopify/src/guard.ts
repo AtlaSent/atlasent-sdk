@@ -74,9 +74,51 @@ export interface RefundGuardOptions {
   ledger: PermitLedger;
   /** Shop domain, folded into the digest so a permit cannot cross stores. */
   shop: string;
+  /**
+   * Trusted host integration with the existing identity broker. Called afresh
+   * at each runtime boundary, never populated from browser/model arguments.
+   * The runtime verifies the assertion; this adapter never mints authority.
+   * A configured resolver that fails or returns no assertion stops the refund.
+   * Assertions are not persisted with pending approvals or execution evidence.
+   */
+  resolveActorIdentity?: RefundActorIdentityResolver;
   now?: () => Date;
   /** Called once per decision, refunded or not, e.g. to append to the evidence log. Its failure never changes the result. */
   onDecision?: (record: RefundDecisionRecord) => void | Promise<void>;
+}
+
+export interface RefundActorIdentityBinding {
+  readonly phase: "evaluate" | "claim" | "verify";
+  readonly actor: string;
+  readonly actionType: RefundActionType;
+  readonly environment: string;
+  readonly shop: string;
+  readonly resourceId: string;
+  readonly executionHash: string;
+}
+
+export type RefundActorIdentityResolver = (
+  binding: Readonly<RefundActorIdentityBinding>,
+) => Promise<Record<string, unknown>>;
+
+async function resolveActorIdentity(
+  options: RefundGuardOptions,
+  binding: Omit<RefundActorIdentityBinding, "shop">,
+): Promise<Record<string, unknown> | undefined> {
+  if (options.resolveActorIdentity === undefined) return undefined;
+  try {
+    const assertion: unknown = await options.resolveActorIdentity(Object.freeze({ ...binding, shop: options.shop }));
+    if (assertion === null || typeof assertion !== "object" || Array.isArray(assertion) ||
+        Object.keys(assertion).length === 0) throw new Error("missing assertion");
+    // Detach the JSON wire value from mutable broker-owned objects before the
+    // next await. Never include this value (or a broker error) in a denial.
+    const copy: unknown = JSON.parse(JSON.stringify(assertion));
+    if (copy === null || typeof copy !== "object" || Array.isArray(copy) ||
+        Object.keys(copy).length === 0) throw new Error("missing assertion");
+    return copy as Record<string, unknown>;
+  } catch {
+    throw new Error("could not obtain actor identity from the configured identity source");
+  }
 }
 
 /** The exact refund that will be sent, frozen before evaluate. */
@@ -355,12 +397,17 @@ async function decideShopifyRefund(
 
   let ev: EvaluateResponse;
   try {
+    const actorIdentity = await resolveActorIdentity(options, {
+      phase: "evaluate", actor: options.actor, actionType,
+      environment: options.environment, resourceId: orderGid, executionHash: digest,
+    });
     ev = await atlasent.evaluate({
       actor_id: options.actor,
       action_type: actionType,
       environment: options.environment,
       resource_id: orderGid,
       execution_payload_hash: digest,
+      ...(actorIdentity !== undefined ? { actor_identity: actorIdentity } : {}),
       context: { ...policyContext(facts, amountCents), environment: options.environment },
     });
   } catch (err) {
@@ -411,12 +458,17 @@ async function decideShopifyRefund(
 
   let verified: VerifyPermitResponse;
   try {
+    const actorIdentity = await resolveActorIdentity(options, {
+      phase: "verify", actor: options.actor, actionType,
+      environment: options.environment, resourceId: orderGid, executionHash: digest,
+    });
     verified = await atlasent.verifyPermit({
       permitId: ev.permitId,
       agent: options.actor,
       action: actionType,
       environment: options.environment,
       execution_hash: digest,
+      ...(actorIdentity !== undefined ? { actorIdentity } : {}),
     });
   } catch (err) {
     return { refunded: false, decision: "error", reason: `verifyPermit failed: ${errorText(err)}`, ...evidence };
@@ -641,7 +693,24 @@ export async function resumeApprovedShopifyRefund(
     return stop("order_changed", "the order changed after the refund was escalated; the approval does not cover it", facts);
   }
 
-  const claim = await approvals.claimPermit(id).catch((err: unknown) => ({ claimed: false as const, failure: errorText(err) }));
+  // IMPL-026B approvals are reevaluated at claim time. The original actor
+  // must present fresh identity before the runtime can release a permit.
+  // A local identity-source failure has not sent a claim: keep it resumable.
+  let claimIdentity: Record<string, unknown> | undefined;
+  if (status.status === "approved_awaiting_claim") {
+    try {
+      claimIdentity = await resolveActorIdentity(options, {
+        phase: "claim", actor: p.actor_id, actionType,
+        environment: p.environment, resourceId: p.order_id, executionHash: p.digest,
+      });
+      if (claimIdentity === undefined) throw new Error("a configured identity source is required for this permit claim");
+    } catch (err) {
+      return finish({ refunded: false, decision: "error", reason: errorText(err), gateRef,
+        approvalRequestId: id, digest: p.digest, facts }, "approval_identity_unavailable", "fresh claim identity unavailable; nothing claimed");
+    }
+  }
+  const claim = await approvals.claimPermit(id, claimIdentity !== undefined ? { actorIdentity: claimIdentity } : undefined)
+    .catch((err: unknown) => ({ claimed: false as const, failure: errorText(err) }));
   if (!claim.claimed) return stop("verify_failed", `the approved permit could not be claimed: ${claim.failure}`, facts);
   if (claim.executionHashExpected !== undefined && claim.executionHashExpected.toLowerCase() !== p.digest) {
     return stop("verify_failed", "the approved permit is bound to a different refund", facts);
@@ -649,12 +718,20 @@ export async function resumeApprovedShopifyRefund(
 
   let verified: VerifyPermitResponse;
   try {
+    // Resume verifies the actor whose request was approved, not the staff
+    // member who clicked Resume. Obtain fresh identity; never save/reuse the
+    // assertion that accompanied the original evaluation.
+    const actorIdentity = await resolveActorIdentity(options, {
+      phase: "verify", actor: p.actor_id, actionType,
+      environment: p.environment, resourceId: p.order_id, executionHash: p.digest,
+    });
     verified = await atlasent.verifyPermit({
       permitId: claim.permitToken,
       agent: p.actor_id,
       action: actionType,
       environment: p.environment,
       execution_hash: p.digest,
+      ...(actorIdentity !== undefined ? { actorIdentity } : {}),
     });
   } catch (err) {
     return stop("error", `verifyPermit failed: ${errorText(err)}`, facts);
@@ -725,5 +802,6 @@ export async function resumeApprovedShopifyRefund(
     result.refunded ? "approved by a manager" : result.reason,
   );
 }
+
 
 
