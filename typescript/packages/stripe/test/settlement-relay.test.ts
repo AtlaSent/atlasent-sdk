@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { createServer, type IncomingMessage, type RequestListener, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createSettlementRelayHandler,
@@ -303,6 +303,20 @@ describe("createSettlementRelayHandler over real sockets", () => {
     expect((await fetch(`${relayUrl}${SETTLEMENT_RELAY_PATH}`)).status).toBe(404);
     expect((await fetch(`${relayUrl}/healthz`)).status).toBe(200);
     expect(called).toBe(0);
+  });
+
+  it("answers a malformed request target with 400 and keeps serving", async () => {
+    const relayUrl = await listen(createSettlementRelayHandler(config({ log: () => {} })));
+    const { port } = new URL(relayUrl);
+    const statusLine = await new Promise<string>((resolve) => {
+      const s = connect(Number(port), "127.0.0.1", () => s.write("GET // HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"));
+      let buf = "";
+      s.on("data", (d) => (buf += d));
+      s.on("close", () => resolve(buf.split("\r\n")[0] ?? ""));
+      s.on("error", () => resolve(buf.split("\r\n")[0] ?? ""));
+    });
+    expect(statusLine).toBe("HTTP/1.1 400 Bad Request");
+    expect((await fetch(`${relayUrl}/healthz`)).status).toBe(200);
   });
 
   it("refuses to start with a plaintext non-loopback base URL", () => {

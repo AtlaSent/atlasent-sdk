@@ -290,7 +290,14 @@ export function createSettlementRelayHandler(config: SettlementRelayConfig): Req
   }
 
   return (req, res) => {
-    const path = new URL(req.url ?? "/", "http://localhost").pathname;
+    // A request target that is not a valid path (e.g. `GET //`) makes URL throw
+    // synchronously, outside work.catch: answer it rather than crash the process.
+    let path: string;
+    try {
+      path = new URL(req.url ?? "/", "http://localhost").pathname;
+    } catch {
+      return send(res, 400, { error: "bad request" });
+    }
     let work: Promise<void>;
     if (req.method === "POST" && path === SETTLEMENT_RELAY_PATH) work = handle(req, res);
     else if (req.method === "GET" && path === "/healthz") work = Promise.resolve(send(res, 200, { ok: true }));
