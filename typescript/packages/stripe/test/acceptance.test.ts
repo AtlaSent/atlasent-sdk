@@ -133,3 +133,29 @@ describe("canonical runtime key preflight", () => {
     await expect(checkCanonicalAcceptanceKey(input, async () => {throw new Error("synthetic-secret");})).rejects.toThrow("scope could not be verified");
   });
 });
+
+it("exercises all six canonical cases with explicit synthetic reservation admission and exact action binding", async () => {
+  const {d,stripe,runtime} = deps();
+  d.options.actionType = "customer.refund.issue";
+  const reserved = new Map<string, string>();
+  let rechecks = 0;
+  d.options.runtimeReservations = {
+    reserve: async subject => {
+      const key = JSON.stringify(subject);
+      const id = reserved.get(key) ?? ("83900000-0000-4000-8000-" + String(reserved.size + 1).padStart(12,"0"));
+      reserved.set(key,id);
+      return {reservationId:id};
+    },
+    recheck: async (subject,id) => {
+      expect(reserved.get(JSON.stringify(subject))).toBe(id);
+      rechecks++;
+    },
+  };
+  const cases = await runAcceptance(d);
+  expect(summarize(cases)).toEqual({pass:6,fail:0,blocked:0,total:6});
+  expect(stripe.refunds).toHaveLength(4);
+  expect(rechecks).toBeGreaterThan(0);
+  expect(runtime.evaluateBodies.length).toBeGreaterThan(0);
+  expect(runtime.verifyBodies.length).toBeGreaterThan(0);
+  expect([...runtime.evaluateBodies,...runtime.verifyBodies].every(body=>body.action_type==="customer.refund.issue")).toBe(true);
+});
