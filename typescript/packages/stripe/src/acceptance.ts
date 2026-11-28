@@ -39,11 +39,15 @@ import { staticDeliveryFacts } from "./facts.js";
 import {
   guardedStripeRefund,
   reconcileStripeRefund,
+  CUSTOMER_REFUND_ISSUE,
+  FINANCE_PAYMENT_AUTHORIZE,
+  type RefundActionType,
   type StripeRefundGuardOptions,
   type StripeRefundResult,
 } from "./guard.js";
 import { JsonFileLedger, type PermitLedger } from "./ledger.js";
 import { assertStagingBaseUrl, assertTestSetupKey, paymentIntentForm } from "./seed.js";
+import { createRefundReservationsClient } from "./reservations.js";
 import { buildRefundControlCoverage } from "./control-coverage.js";
 import { createStripeClient, StripeApiError, type StripeApi, type StripeRefund } from "./stripe.js";
 
@@ -124,7 +128,8 @@ export async function runAcceptance(deps: AcceptanceDeps): Promise<AcceptanceCas
     }
   } else {
     const rb = r1.refunded ? await reconcileStripeRefund(deps.stripe, r1.gateRef, opts) : null;
-    const okA1 = r1.refunded && rb !== null && ACCEPTED.has(rb.state) && rb.refundId === r1.refund.id;
+    const allA1 = await deps.stripe.listRefunds(pi1);
+    const okA1 = r1.refunded && rb !== null && ACCEPTED.has(rb.state) && rb.refundId === r1.refund.id && allA1.length === 1 && allA1[0]?.id === r1.refund.id;
     add({
       id: "A1",
       title: "allowed refund, read back",
@@ -135,12 +140,12 @@ export async function runAcceptance(deps: AcceptanceDeps): Promise<AcceptanceCas
 
     const r2 = await guard(deps.stripe, pi1, REFUND, brid("a1"));
     const t2 = await tagged(deps.stripe, pi1, r1.gateRef);
-    const okA2 = !r2.refunded && r2.decision === "duplicate_request" && t2.length === 1;
+    const okA2 = !r2.refunded && r2.decision === "duplicate_request" && t2.length === 1 && (await deps.stripe.listRefunds(pi1)).length === 1;
     add({ id: "A2", title: "retry is answered from the ledger", verdict: okA2 ? "pass" : "fail", detail: `decision ${r2.refunded ? "refunded" : r2.decision}; ${t2.length} refund(s) carry the gate reference`, evidence: { result: brief(r2), tagged_refunds: t2.map((r) => r.id) } });
 
     const r3 = await guard(deps.stripe, pi1, REFUND - 100, brid("a1"));
     const t3 = await tagged(deps.stripe, pi1, r1.gateRef);
-    const okA3 = !r3.refunded && r3.decision === "invalid_request" && t3.length === 1;
+    const okA3 = !r3.refunded && r3.decision === "invalid_request" && t3.length === 1 && (await deps.stripe.listRefunds(pi1)).length === 1;
     add({ id: "A3", title: "business id reused with another amount", verdict: okA3 ? "pass" : "fail", detail: `decision ${r3.refunded ? "refunded" : r3.decision}`, evidence: { result: brief(r3) } });
   }
 
@@ -173,7 +178,7 @@ export async function runAcceptance(deps: AcceptanceDeps): Promise<AcceptanceCas
       !other.refunded && other.decision === "in_progress" &&
       ACCEPTED.has(rb5.state) &&
       !again.refunded && again.decision === "duplicate_request" &&
-      t5.length === 1;
+      t5.length === 1 && (await deps.stripe.listRefunds(pi5)).length === 1;
     add({
       id: "A5",
       title: "lost response stays unconfirmed, then reconciles",
@@ -196,7 +201,7 @@ export async function runAcceptance(deps: AcceptanceDeps): Promise<AcceptanceCas
       !r6.refunded && r6.decision === "unconfirmed" &&
       plain.state === "unconfirmed" &&
       resent.resubmitted === true && ACCEPTED.has(resent.state) &&
-      t6.length === 1;
+      t6.length === 1 && (await deps.stripe.listRefunds(pi6)).length === 1;
     add({
       id: "A6",
       title: "unsent request resubmits under the same key",
@@ -229,6 +234,19 @@ async function createTestPayment(setupKey: string, runId: string, caseId: string
   return body.id;
 }
 
+/** Explicit acceptance-only mode; legacy runs remain separately labelled. */
+export function acceptanceAction(raw: string | undefined): RefundActionType {
+  if (raw === undefined || raw === FINANCE_PAYMENT_AUTHORIZE) return FINANCE_PAYMENT_AUTHORIZE;
+  if (raw === CUSTOMER_REFUND_ISSUE) return CUSTOMER_REFUND_ISSUE;
+  throw new Error("Unsupported acceptance action");
+}
+export function validateAcceptanceScope(baseUrl: string | undefined, environment: string): void {
+  assertStagingBaseUrl(baseUrl);
+  if (!/^https:\/\/lwnqpmnxpeyhpxvastku\.supabase\.co\/functions\/v1\/?$/.test(baseUrl ?? "") || environment !== "test") {
+    throw new Error("Acceptance requires the exact staging functions URL and test environment");
+  }
+}
+
 async function main(): Promise<number> {
   const { values } = parseArgs({ options: { out: { type: "string" } } });
   const need = (k: string) => {
@@ -243,8 +261,12 @@ async function main(): Promise<number> {
   if (process.env.STRIPE_ACCEPTANCE_CONFIRM !== "test-mode") throw new Error("Refusing to run without STRIPE_ACCEPTANCE_CONFIRM=test-mode");
   const apiKey = need("ATLASENT_API_KEY");
   const baseUrl = process.env.ATLASENT_BASE_URL;
-  assertStagingBaseUrl(baseUrl);
   const environment = need("ATLASENT_ENVIRONMENT");
+  validateAcceptanceScope(baseUrl, environment);
+  const actionType = acceptanceAction(process.env.ATLASENT_ACCEPTANCE_ACTION);
+  const account = actionType === CUSTOMER_REFUND_ISSUE ? need("STRIPE_ACCOUNT_LABEL") : process.env.STRIPE_ACCOUNT_LABEL ?? "test-account";
+  if (account.trim() !== account || !account || account.length > 128) throw new Error("Invalid acceptance account label");
+  const runtimeReservations = actionType === CUSTOMER_REFUND_ISSUE ? createRefundReservationsClient({ apiKey, baseUrl: baseUrl as string }) : undefined;
 
   const startedAt = new Date();
   const runId = process.env.ACCEPTANCE_RUN_ID ?? startedAt.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
@@ -264,7 +286,9 @@ async function main(): Promise<number> {
     options: {
       actor: process.env.ATLASENT_ACTOR ?? "acceptance:refund-execution",
       environment,
-      account: process.env.STRIPE_ACCOUNT_LABEL ?? "test-account",
+      account,
+      actionType,
+      ...(runtimeReservations ? { runtimeReservations } : {}),
       delivery: staticDeliveryFacts(delivered),
     },
   };
@@ -282,7 +306,7 @@ async function main(): Promise<number> {
     adapter_revision: process.env.GITHUB_SHA ?? process.env.ADAPTER_REVISION ?? "unrecorded",
     summary: summarize(cases),
     cases,
-    not_covered: "order/customer ownership, return evidence, allocation, cumulative budgets, accounting, webhook delivery, production",
+    not_covered: "order/customer ownership, return evidence, allocation, cumulative budget exhaustion across payments, independent approval, accounting, webhook delivery, production",
   };
   writeFileSync(join(outDir, "report.json"), JSON.stringify(report, null, 2));
   // A passing six-case execution run is not fourteen accepted business controls.
