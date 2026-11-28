@@ -247,6 +247,48 @@ export function validateAcceptanceScope(baseUrl: string | undefined, environment
   }
 }
 
+/** Canonical acceptance must prove the selected key belongs to the explicitly
+ * approved test org and has the required scopes before creating Stripe objects.
+ * No raw response, identity or key is logged. The endpoint is a read only check,
+ * not a proof that a particular actor or policy is authorized. */
+export async function checkCanonicalAcceptanceKey(input: {
+  baseUrl: string; apiKey: string; expectedOrgId: string;
+}, doFetch: typeof fetch = fetch): Promise<void> {
+  validateAcceptanceScope(input.baseUrl, "test");
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuid.test(input.expectedOrgId) || !input.apiKey.trim()) throw new Error("Canonical test org and key must be configured");
+  let ok = false;
+  try {
+    const res = await doFetch(input.baseUrl.replace(/\/$/, "") + "/v1-api-keys/check", {
+      method: "GET", headers: { authorization: "Bearer " + input.apiKey }, redirect: "error", signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok && res.body) {
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > 16384) { await reader.cancel(); throw new Error("oversize"); }
+          chunks.push(value);
+        }
+      } finally { reader.releaseLock(); }
+      const raw = Buffer.concat(chunks);
+      const body = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+      const scopes = body?.scopes;
+      ok = body?.valid === true && typeof body.org_id === "string" &&
+        body.org_id.toLowerCase() === input.expectedOrgId.toLowerCase() &&
+        typeof body.key_id === "string" && body.key_id.length > 0 &&
+        body.environment === "test" && Array.isArray(scopes) &&
+        scopes.every(x => typeof x === "string") &&
+        ["evaluate:write", "verify:execute", "consequential_operations:write"].every(scope => scopes.includes(scope));
+    }
+  } catch { /* no transport response or credential details */ }
+  if (!ok) throw new Error("Canonical test key scope could not be verified");
+}
+
 async function main(): Promise<number> {
   const { values } = parseArgs({ options: { out: { type: "string" } } });
   const need = (k: string) => {
@@ -266,6 +308,9 @@ async function main(): Promise<number> {
   const actionType = acceptanceAction(process.env.ATLASENT_ACCEPTANCE_ACTION);
   const account = actionType === CUSTOMER_REFUND_ISSUE ? need("STRIPE_ACCOUNT_LABEL") : process.env.STRIPE_ACCOUNT_LABEL ?? "test-account";
   if (account.trim() !== account || !account || account.length > 128) throw new Error("Invalid acceptance account label");
+  if (actionType === CUSTOMER_REFUND_ISSUE) {
+    await checkCanonicalAcceptanceKey({ baseUrl: baseUrl as string, apiKey, expectedOrgId: need("ATLASENT_CANONICAL_TEST_ORG_ID") });
+  }
   const runtimeReservations = actionType === CUSTOMER_REFUND_ISSUE ? createRefundReservationsClient({ apiKey, baseUrl: baseUrl as string }) : undefined;
 
   const startedAt = new Date();
