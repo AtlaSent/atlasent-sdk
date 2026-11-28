@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runAcceptance, summarize, type AcceptanceDeps } from "../src/acceptance.js";
+import { acceptanceAction, checkCanonicalAcceptanceKey, validateAcceptanceScope, runAcceptance, summarize, type AcceptanceDeps } from "../src/acceptance.js";
 import { staticDeliveryFacts, type DeliveryFacts } from "../src/facts.js";
 import { InMemoryLedger } from "../src/ledger.js";
 import { delivered, FakeStripe, fakeRuntime, makePaymentIntent, NOW, type RuntimeOptions } from "./fakes.js";
@@ -77,4 +77,85 @@ describe("refund execution acceptance runner", () => {
     expect(cases.find((c) => c.id === "A4")?.verdict).toBe("fail");
     expect(stripe.refunds).toHaveLength(0);
   });
+});
+
+describe("native acceptance scope", () => {
+  it("preserves legacy compatibility and accepts only explicit canonical refund action", () => {
+    expect(acceptanceAction(undefined)).toBe("finance.payment.authorize");
+    expect(acceptanceAction("customer.refund.issue")).toBe("customer.refund.issue");
+    expect(() => acceptanceAction("unknown")).toThrow();
+  });
+  it("refuses production and unexpected paths or query strings before creating payments", () => {
+    const base = "https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1";
+    expect(() => validateAcceptanceScope(base, "test")).not.toThrow();
+    for (const url of [undefined, "https://api.atlasent.io", base + "/other", base + "?x=1", base + "#x"]) {
+      expect(() => validateAcceptanceScope(url, "test")).toThrow();
+    }
+    expect(() => validateAcceptanceScope(base, "production")).toThrow();
+  });
+  it("canonical mode cannot exercise a refund without shared budget admission", async () => {
+    const { d, stripe } = deps();
+    d.options.actionType = "customer.refund.issue";
+    const cases = await runAcceptance(d);
+    expect(stripe.refunds).toHaveLength(0);
+    expect(summarize(cases).pass).toBe(0);
+  });
+  it("does not pass A1 when an extra untagged refund appears on the same payment", async () => {
+    const { d, stripe } = deps();
+    const original = stripe.listRefunds.bind(stripe);
+    stripe.listRefunds = async (id) => {
+      const rows = await original(id);
+      return rows.length && id === "pi_acc1" ? [...rows, { ...rows[0]!, id: "re_unexpected", metadata: {} }] : rows;
+    };
+    const cases = await runAcceptance(d);
+    expect(cases.find(c => c.id === "A1")?.verdict).toBe("fail");
+  });
+});
+
+describe("canonical runtime key preflight", () => {
+  const baseUrl = "https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1";
+  const expectedOrgId = "11111111-1111-4111-8111-111111111111";
+  const input = {baseUrl, expectedOrgId, apiKey:"synthetic-test-key"};
+  const valid = {valid:true,org_id:expectedOrgId,key_id:"test-key-id",environment:"test",scopes:["evaluate:write","verify:execute","consequential_operations:write"]};
+  it("reads the exact staging key check without redirects or writes", async () => {
+    await checkCanonicalAcceptanceKey(input, async (url, init) => {
+      expect(String(url)).toBe(baseUrl+"/v1-api-keys/check");
+      expect(init?.method).toBe("GET");
+      expect(init?.redirect).toBe("error");
+      return new Response(JSON.stringify(valid));
+    });
+  });
+  it("refuses the wrong org, production key, missing scope, malformed or unavailable response", async () => {
+    for (const body of [{...valid,org_id:"22222222-2222-4222-8222-222222222222"},{...valid,environment:"live"},{...valid,scopes:["evaluate:write","verify:execute"]},{...valid,valid:false},null]) {
+      await expect(checkCanonicalAcceptanceKey(input, async () => new Response(JSON.stringify(body)))).rejects.toThrow("scope could not be verified");
+    }
+    await expect(checkCanonicalAcceptanceKey(input, async () => new Response("unavailable",{status:503}))).rejects.toThrow("scope could not be verified");
+    await expect(checkCanonicalAcceptanceKey(input, async () => {throw new Error("synthetic-secret");})).rejects.toThrow("scope could not be verified");
+  });
+});
+
+it("exercises all six canonical cases with explicit synthetic reservation admission and exact action binding", async () => {
+  const {d,stripe,runtime} = deps();
+  d.options.actionType = "customer.refund.issue";
+  const reserved = new Map<string, string>();
+  let rechecks = 0;
+  d.options.runtimeReservations = {
+    reserve: async subject => {
+      const key = JSON.stringify(subject);
+      const id = reserved.get(key) ?? ("83900000-0000-4000-8000-" + String(reserved.size + 1).padStart(12,"0"));
+      reserved.set(key,id);
+      return {reservationId:id};
+    },
+    recheck: async (subject,id) => {
+      expect(reserved.get(JSON.stringify(subject))).toBe(id);
+      rechecks++;
+    },
+  };
+  const cases = await runAcceptance(d);
+  expect(summarize(cases)).toEqual({pass:6,fail:0,blocked:0,total:6});
+  expect(stripe.refunds).toHaveLength(4);
+  expect(rechecks).toBeGreaterThan(0);
+  expect(runtime.evaluateBodies.length).toBeGreaterThan(0);
+  expect(runtime.verifyBodies.length).toBeGreaterThan(0);
+  expect([...runtime.evaluateBodies,...runtime.verifyBodies].every(body=>body.action_type==="customer.refund.issue")).toBe(true);
 });

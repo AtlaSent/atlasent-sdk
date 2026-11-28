@@ -580,3 +580,30 @@ fake-provider tests do not mark any control or native journey verified.
 See [the additive contract proposal](../../../contract/proposals/refund-shared-budgets.md)
 and API `docs/REFUND_SHARED_BUDGETS.md` for exact request/receipt fields and limits.
 
+
+## Canonical refund execution acceptance (candidate)
+
+The existing six-case native test runner now accepts explicit
+`ATLASENT_ACCEPTANCE_ACTION=customer.refund.issue`. This uses the same staged
+runtime reservation client as the guard, including the runtime's required
+consequential_operations:write scope. Set `STRIPE_ACCOUNT_LABEL` to the exact
+owner/admin-approved sandbox budget account label; do not auto-create a budget,
+loosen the review-only policy, or substitute another action to obtain a pass.
+The runner refuses any environment other than `test` and any URL other than
+the exact staging functions base. Legacy execution remains the default and is
+labelled separately. The existing manual GitHub workflow now offers an explicit
+canonical action selection. Configure a distinct canonical staging key,
+`ATLASENT_CANONICAL_REFUND_ACCEPTANCE_API_KEY`, the owner-approved
+`ATLASENT_CANONICAL_REFUND_TEST_ACCOUNT` label and
+`ATLASENT_CANONICAL_TEST_ORG_ID` UUID. The runner first verifies the key's
+actual test organization and required scopes through the existing read-only
+key-check endpoint. No fallback to the legacy key; no automatic workflow run.
+
+API #4764 and #4779 and SDK #628 have merged; deployment, configured identity,
+native provider settlement, and independent acceptance are separate. A blocked
+budget or approval is not a pass. A1/A2/A3/A5/A6 additionally check the whole
+payment's refund list, not just the tagged refund. Even a passing canonical
+six-case run does not establish all 14 controls: the legacy coverage projector
+deliberately grants no coverage to the new action until reviewed separately.
+No native calls, real payment, customer onboarding or release is established
+by this candidate's source tests.

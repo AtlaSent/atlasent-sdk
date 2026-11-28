@@ -12,7 +12,11 @@ name: Stripe refund acceptance (test mode)
 #                                             payment intents read
 #   ATLASENT_REFUND_ACCEPTANCE_API_KEY secret runtime STAGING key (evaluate:write +
 #                                             verify:execute) of an authorized staging org whose
-#                                             finance.payment.authorize policy is the one under test
+#                                             selected action policy is the one under test
+#   ATLASENT_CANONICAL_REFUND_ACCEPTANCE_API_KEY secret separate canonical test org key,
+#                                             also consequential_operations:write
+#   ATLASENT_CANONICAL_REFUND_TEST_ACCOUNT var  exact owner-approved sandbox budget account label
+#   ATLASENT_CANONICAL_TEST_ORG_ID var          explicitly authorized runtime test org UUID
 #   ATLASENT_REFUND_ACCEPTANCE_BASE_URL var   https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1
 #
 # Guards before anything runs: both Stripe keys must be test-mode (the runner
@@ -27,6 +31,13 @@ on:
         description: "Type test-mode to create labelled Stripe TEST payments and refunds"
         type: string
         default: ""
+      action:
+        description: "Explicit installed action to exercise (never changes its policy)"
+        type: choice
+        options:
+          - finance.payment.authorize
+          - customer.refund.issue
+        default: finance.payment.authorize
 
 permissions:
   contents: read
@@ -50,13 +61,24 @@ jobs:
       - name: Guard keys and target
         env:
           CONFIRM: ${{ inputs.confirm }}
+          ACCEPTANCE_ACTION: ${{ inputs.action }}
+          CANONICAL_ACCOUNT: ${{ vars.ATLASENT_CANONICAL_REFUND_TEST_ACCOUNT }}
+          CANONICAL_ORG: ${{ vars.ATLASENT_CANONICAL_TEST_ORG_ID }}
           SETUP_KEY: ${{ secrets.STRIPE_ACCEPTANCE_SETUP_KEY }}
           REFUND_KEY: ${{ secrets.STRIPE_ACCEPTANCE_REFUND_KEY }}
           ATLASENT_KEY: ${{ secrets.ATLASENT_REFUND_ACCEPTANCE_API_KEY }}
+          CANONICAL_KEY: ${{ secrets.ATLASENT_CANONICAL_REFUND_ACCEPTANCE_API_KEY }}
           BASE_URL: ${{ vars.ATLASENT_REFUND_ACCEPTANCE_BASE_URL }}
         run: |
           set -euo pipefail
           [ "$CONFIRM" = "test-mode" ] || { echo "::error::type test-mode in the confirm input"; exit 2; }
+          case "$ACCEPTANCE_ACTION" in finance.payment.authorize|customer.refund.issue) ;; *) echo "::error::invalid acceptance action"; exit 2 ;; esac
+          if [ "$ACCEPTANCE_ACTION" = customer.refund.issue ]; then
+            [ -n "$CANONICAL_ORG" ] || { echo "::error::canonical acceptance requires the approved test org UUID"; exit 2; }
+            [ -n "$CANONICAL_ACCOUNT" ] || { echo "::error::canonical acceptance needs the owner-approved test budget account label"; exit 2; }
+            [ -n "$CANONICAL_KEY" ] && [ "$CANONICAL_KEY" != "$ATLASENT_KEY" ] || { echo "::error::canonical acceptance needs a separate authorized runtime test key"; exit 2; }
+            ATLASENT_KEY="$CANONICAL_KEY"
+          fi
           missing=""
           [ -n "$SETUP_KEY" ] || missing="$missing STRIPE_ACCEPTANCE_SETUP_KEY"
           [ -n "$REFUND_KEY" ] || missing="$missing STRIPE_ACCEPTANCE_REFUND_KEY"
@@ -70,6 +92,7 @@ jobs:
             echo "::error::ATLASENT_REFUND_ACCEPTANCE_BASE_URL must be the staging runtime (lwnqpmnxpeyhpxvastku), got host $host"
             exit 2
           fi
+          [ "$BASE_URL" = "https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1" ] || [ "$BASE_URL" = "https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1/" ] || { echo "::error::invalid exact staging base"; exit 2; }
           echo "Stripe TEST mode; AtlaSent staging runtime."
 
       - name: Build the core SDK the package links to
@@ -88,14 +111,22 @@ jobs:
           STRIPE_SETUP_KEY: ${{ secrets.STRIPE_ACCEPTANCE_SETUP_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_ACCEPTANCE_REFUND_KEY }}
           ATLASENT_API_KEY: ${{ secrets.ATLASENT_REFUND_ACCEPTANCE_API_KEY }}
+          CANONICAL_KEY: ${{ secrets.ATLASENT_CANONICAL_REFUND_ACCEPTANCE_API_KEY }}
           ATLASENT_BASE_URL: ${{ vars.ATLASENT_REFUND_ACCEPTANCE_BASE_URL }}
           ATLASENT_ENVIRONMENT: test
           STRIPE_ACCEPTANCE_CONFIRM: test-mode
-          STRIPE_ACCOUNT_LABEL: stripe-refund-acceptance
+          ATLASENT_ACCEPTANCE_ACTION: ${{ inputs.action }}
+          ATLASENT_CANONICAL_TEST_ORG_ID: ${{ vars.ATLASENT_CANONICAL_TEST_ORG_ID }}
+          STRIPE_ACCOUNT_LABEL: ${{ inputs.action == 'customer.refund.issue' && vars.ATLASENT_CANONICAL_REFUND_TEST_ACCOUNT || 'stripe-refund-acceptance' }}
           ADAPTER_REVISION: ${{ github.sha }}
           ACCEPTANCE_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          if [ "$ATLASENT_ACCEPTANCE_ACTION" = customer.refund.issue ]; then
+            [ -n "$CANONICAL_KEY" ] && [ "$CANONICAL_KEY" != "$ATLASENT_API_KEY" ] || exit 2
+            export ATLASENT_API_KEY="$CANONICAL_KEY"
+          fi
+          unset CANONICAL_KEY
           set +e
           npm run acceptance -- --out acceptance-out
           code=$?
