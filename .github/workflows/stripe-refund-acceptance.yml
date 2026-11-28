@@ -16,6 +16,7 @@ name: Stripe refund acceptance (test mode)
 #   ATLASENT_CANONICAL_REFUND_ACCEPTANCE_API_KEY secret separate canonical test org key,
 #                                             also consequential_operations:write
 #   ATLASENT_CANONICAL_REFUND_TEST_ACCOUNT var  exact owner-approved sandbox budget account label
+#   ATLASENT_CANONICAL_TEST_ORG_ID var          explicitly authorized runtime test org UUID
 #   ATLASENT_REFUND_ACCEPTANCE_BASE_URL var   https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1
 #
 # Guards before anything runs: both Stripe keys must be test-mode (the runner
@@ -62,6 +63,7 @@ jobs:
           CONFIRM: ${{ inputs.confirm }}
           ACCEPTANCE_ACTION: ${{ inputs.action }}
           CANONICAL_ACCOUNT: ${{ vars.ATLASENT_CANONICAL_REFUND_TEST_ACCOUNT }}
+          CANONICAL_ORG: ${{ vars.ATLASENT_CANONICAL_TEST_ORG_ID }}
           SETUP_KEY: ${{ secrets.STRIPE_ACCEPTANCE_SETUP_KEY }}
           REFUND_KEY: ${{ secrets.STRIPE_ACCEPTANCE_REFUND_KEY }}
           ATLASENT_KEY: ${{ secrets.ATLASENT_REFUND_ACCEPTANCE_API_KEY }}
@@ -72,6 +74,7 @@ jobs:
           [ "$CONFIRM" = "test-mode" ] || { echo "::error::type test-mode in the confirm input"; exit 2; }
           case "$ACCEPTANCE_ACTION" in finance.payment.authorize|customer.refund.issue) ;; *) echo "::error::invalid acceptance action"; exit 2 ;; esac
           if [ "$ACCEPTANCE_ACTION" = customer.refund.issue ]; then
+            [ -n "$CANONICAL_ORG" ] || { echo "::error::canonical acceptance requires the approved test org UUID"; exit 2; }
             [ -n "$CANONICAL_ACCOUNT" ] || { echo "::error::canonical acceptance needs the owner-approved test budget account label"; exit 2; }
             [ -n "$CANONICAL_KEY" ] && [ "$CANONICAL_KEY" != "$ATLASENT_KEY" ] || { echo "::error::canonical acceptance needs a separate authorized runtime test key"; exit 2; }
             ATLASENT_KEY="$CANONICAL_KEY"
@@ -113,6 +116,7 @@ jobs:
           ATLASENT_ENVIRONMENT: test
           STRIPE_ACCEPTANCE_CONFIRM: test-mode
           ATLASENT_ACCEPTANCE_ACTION: ${{ inputs.action }}
+          ATLASENT_CANONICAL_TEST_ORG_ID: ${{ vars.ATLASENT_CANONICAL_TEST_ORG_ID }}
           STRIPE_ACCOUNT_LABEL: ${{ inputs.action == 'customer.refund.issue' && vars.ATLASENT_CANONICAL_REFUND_TEST_ACCOUNT || 'stripe-refund-acceptance' }}
           ADAPTER_REVISION: ${{ github.sha }}
           ACCEPTANCE_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
