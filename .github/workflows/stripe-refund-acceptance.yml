@@ -12,7 +12,9 @@ name: Stripe refund acceptance (test mode)
 #                                             payment intents read
 #   ATLASENT_REFUND_ACCEPTANCE_API_KEY secret runtime STAGING key (evaluate:write +
 #                                             verify:execute) of an authorized staging org whose
-#                                             finance.payment.authorize policy is the one under test
+#                                             selected action policy is the one under test
+#                                             canonical mode also needs consequential_operations:write
+#   ATLASENT_CANONICAL_REFUND_TEST_ACCOUNT var  exact owner-approved sandbox budget account label
 #   ATLASENT_REFUND_ACCEPTANCE_BASE_URL var   https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1
 #
 # Guards before anything runs: both Stripe keys must be test-mode (the runner
@@ -27,6 +29,13 @@ on:
         description: "Type test-mode to create labelled Stripe TEST payments and refunds"
         type: string
         default: ""
+      action:
+        description: "Explicit installed action to exercise (never changes its policy)"
+        type: choice
+        options:
+          - finance.payment.authorize
+          - customer.refund.issue
+        default: finance.payment.authorize
 
 permissions:
   contents: read
@@ -50,6 +59,8 @@ jobs:
       - name: Guard keys and target
         env:
           CONFIRM: ${{ inputs.confirm }}
+          ACCEPTANCE_ACTION: ${{ inputs.action }}
+          CANONICAL_ACCOUNT: ${{ vars.ATLASENT_CANONICAL_REFUND_TEST_ACCOUNT }}
           SETUP_KEY: ${{ secrets.STRIPE_ACCEPTANCE_SETUP_KEY }}
           REFUND_KEY: ${{ secrets.STRIPE_ACCEPTANCE_REFUND_KEY }}
           ATLASENT_KEY: ${{ secrets.ATLASENT_REFUND_ACCEPTANCE_API_KEY }}
@@ -57,6 +68,8 @@ jobs:
         run: |
           set -euo pipefail
           [ "$CONFIRM" = "test-mode" ] || { echo "::error::type test-mode in the confirm input"; exit 2; }
+          case "$ACCEPTANCE_ACTION" in finance.payment.authorize|customer.refund.issue) ;; *) echo "::error::invalid acceptance action"; exit 2 ;; esac
+          if [ "$ACCEPTANCE_ACTION" = customer.refund.issue ] && [ -z "$CANONICAL_ACCOUNT" ]; then echo "::error::canonical acceptance needs the owner-approved test budget account label"; exit 2; fi
           missing=""
           [ -n "$SETUP_KEY" ] || missing="$missing STRIPE_ACCEPTANCE_SETUP_KEY"
           [ -n "$REFUND_KEY" ] || missing="$missing STRIPE_ACCEPTANCE_REFUND_KEY"
@@ -70,6 +83,7 @@ jobs:
             echo "::error::ATLASENT_REFUND_ACCEPTANCE_BASE_URL must be the staging runtime (lwnqpmnxpeyhpxvastku), got host $host"
             exit 2
           fi
+          [ "$BASE_URL" = "https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1" ] || [ "$BASE_URL" = "https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1/" ] || { echo "::error::invalid exact staging base"; exit 2; }
           echo "Stripe TEST mode; AtlaSent staging runtime."
 
       - name: Build the core SDK the package links to
@@ -91,7 +105,8 @@ jobs:
           ATLASENT_BASE_URL: ${{ vars.ATLASENT_REFUND_ACCEPTANCE_BASE_URL }}
           ATLASENT_ENVIRONMENT: test
           STRIPE_ACCEPTANCE_CONFIRM: test-mode
-          STRIPE_ACCOUNT_LABEL: stripe-refund-acceptance
+          ATLASENT_ACCEPTANCE_ACTION: ${{ inputs.action }}
+          STRIPE_ACCOUNT_LABEL: ${{ inputs.action == 'customer.refund.issue' && vars.ATLASENT_CANONICAL_REFUND_TEST_ACCOUNT || 'stripe-refund-acceptance' }}
           ADAPTER_REVISION: ${{ github.sha }}
           ACCEPTANCE_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
