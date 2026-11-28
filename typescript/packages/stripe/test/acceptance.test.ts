@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptanceAction, validateAcceptanceScope, runAcceptance, summarize, type AcceptanceDeps } from "../src/acceptance.js";
+import { acceptanceAction, checkCanonicalAcceptanceKey, validateAcceptanceScope, runAcceptance, summarize, type AcceptanceDeps } from "../src/acceptance.js";
 import { staticDeliveryFacts, type DeliveryFacts } from "../src/facts.js";
 import { InMemoryLedger } from "../src/ledger.js";
 import { delivered, FakeStripe, fakeRuntime, makePaymentIntent, NOW, type RuntimeOptions } from "./fakes.js";
@@ -109,5 +109,27 @@ describe("native acceptance scope", () => {
     };
     const cases = await runAcceptance(d);
     expect(cases.find(c => c.id === "A1")?.verdict).toBe("fail");
+  });
+});
+
+describe("canonical runtime key preflight", () => {
+  const baseUrl = "https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1";
+  const expectedOrgId = "11111111-1111-4111-8111-111111111111";
+  const input = {baseUrl, expectedOrgId, apiKey:"synthetic-test-key"};
+  const valid = {valid:true,org_id:expectedOrgId,key_id:"test-key-id",environment:"test",scopes:["evaluate:write","verify:execute","consequential_operations:write"]};
+  it("reads the exact staging key check without redirects or writes", async () => {
+    await checkCanonicalAcceptanceKey(input, async (url, init) => {
+      expect(String(url)).toBe(baseUrl+"/v1-api-keys/check");
+      expect(init?.method).toBe("GET");
+      expect(init?.redirect).toBe("error");
+      return new Response(JSON.stringify(valid));
+    });
+  });
+  it("refuses the wrong org, production key, missing scope, malformed or unavailable response", async () => {
+    for (const body of [{...valid,org_id:"22222222-2222-4222-8222-222222222222"},{...valid,environment:"live"},{...valid,scopes:["evaluate:write","verify:execute"]},{...valid,valid:false},null]) {
+      await expect(checkCanonicalAcceptanceKey(input, async () => new Response(JSON.stringify(body)))).rejects.toThrow("scope could not be verified");
+    }
+    await expect(checkCanonicalAcceptanceKey(input, async () => new Response("unavailable",{status:503}))).rejects.toThrow("scope could not be verified");
+    await expect(checkCanonicalAcceptanceKey(input, async () => {throw new Error("synthetic-secret");})).rejects.toThrow("scope could not be verified");
   });
 });
