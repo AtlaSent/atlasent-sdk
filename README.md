@@ -12,7 +12,15 @@ These SDKs add that check to your own code in Python or TypeScript, right before
 
 1. **Wrap the risky call** (a deploy, a migration, a payment, an agent's tool call) with `protect()`.
 2. **It waits for approval** if your policy says a person must sign off. If not approved, it doesn't run.
-3. **Every run gets a signed receipt** your auditor can check, without trusting us.
+3. **Inspect decision and permit evidence** from the runtime; execution and native-effect evidence are separate and depend on the configured integration.
+
+## Start with the free tools
+
+- [AI Permission Check](https://www.atlasent.io/ai-permission-check?utm_source=sdk&utm_medium=readme) — review the stated capabilities of an MCP tool manifest in your browser.
+- [Approval Tester](https://www.atlasent.io/approval-tester?utm_source=sdk&utm_medium=readme) — test an example approval rule before integrating it.
+- [Free tools](https://www.atlasent.io/free-tools?utm_source=sdk&utm_medium=readme) — choose the check that matches your work.
+
+Start with a test environment and follow the [public quickstart](https://docs.atlasent.io/quickstart/overview). These checks do not issue production authorization or prove enforcement. A signed decision or verified permit is not proof that a native effect occurred.
 
 ### For engineers
 
