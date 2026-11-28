@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runAcceptance, summarize, type AcceptanceDeps } from "../src/acceptance.js";
+import { acceptanceAction, validateAcceptanceScope, runAcceptance, summarize, type AcceptanceDeps } from "../src/acceptance.js";
 import { staticDeliveryFacts, type DeliveryFacts } from "../src/facts.js";
 import { InMemoryLedger } from "../src/ledger.js";
 import { delivered, FakeStripe, fakeRuntime, makePaymentIntent, NOW, type RuntimeOptions } from "./fakes.js";
@@ -76,5 +76,38 @@ describe("refund execution acceptance runner", () => {
     const cases = await runAcceptance(d);
     expect(cases.find((c) => c.id === "A4")?.verdict).toBe("fail");
     expect(stripe.refunds).toHaveLength(0);
+  });
+});
+
+describe("native acceptance scope", () => {
+  it("preserves legacy compatibility and accepts only explicit canonical refund action", () => {
+    expect(acceptanceAction(undefined)).toBe("finance.payment.authorize");
+    expect(acceptanceAction("customer.refund.issue")).toBe("customer.refund.issue");
+    expect(() => acceptanceAction("unknown")).toThrow();
+  });
+  it("refuses production and unexpected paths or query strings before creating payments", () => {
+    const base = "https://lwnqpmnxpeyhpxvastku.supabase.co/functions/v1";
+    expect(() => validateAcceptanceScope(base, "test")).not.toThrow();
+    for (const url of [undefined, "https://api.atlasent.io", base + "/other", base + "?x=1", base + "#x"]) {
+      expect(() => validateAcceptanceScope(url, "test")).toThrow();
+    }
+    expect(() => validateAcceptanceScope(base, "production")).toThrow();
+  });
+  it("canonical mode cannot exercise a refund without shared budget admission", async () => {
+    const { d, stripe } = deps();
+    d.options.actionType = "customer.refund.issue";
+    const cases = await runAcceptance(d);
+    expect(stripe.refunds).toHaveLength(0);
+    expect(summarize(cases).pass).toBe(0);
+  });
+  it("does not pass A1 when an extra untagged refund appears on the same payment", async () => {
+    const { d, stripe } = deps();
+    const original = stripe.listRefunds.bind(stripe);
+    stripe.listRefunds = async (id) => {
+      const rows = await original(id);
+      return rows.length && id === "pi_acc1" ? [...rows, { ...rows[0]!, id: "re_unexpected", metadata: {} }] : rows;
+    };
+    const cases = await runAcceptance(d);
+    expect(cases.find(c => c.id === "A1")?.verdict).toBe("fail");
   });
 });
